@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","cwd":"/tmp","session_id":"uuid-real","tools":["Bash","Edit"],"model":"claude-sonnet-4-6","permissionMode":"default"}
+{"type":"assistant","message":{"model":"claude-sonnet-4-6","id":"m1","type":"message","role":"assistant","content":[{"type":"thinking","thinking":"plan it","signature":"x"}]},"session_id":"uuid-real"}
+{"type":"assistant","message":{"model":"claude-sonnet-4-6","id":"m1","type":"message","role":"assistant","content":[{"type":"text","text":"Let me check."}]},"session_id":"uuid-real"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"},"session_id":"uuid-real"}
+{"type":"assistant","message":{"model":"claude-sonnet-4-6","id":"m1","content":[{"type":"tool_use","id":"toolu_x","name":"Bash","input":{"command":"ls","description":"List files"}}]},"session_id":"uuid-real"}
+{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_x","type":"tool_result","content":"a.txt","is_error":false}]},"session_id":"uuid-real"}
+{"type":"system","subtype":"hook_started","hook_id":"h1","hook_name":"Stop","session_id":"uuid-real"}
+{"type":"system","subtype":"hook_response","hook_id":"h1","exit_code":0,"session_id":"uuid-real"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":5891,"total_cost_usd":0.065,"session_id":"uuid-real","num_turns":1,"result":"done","permission_denials":[]}

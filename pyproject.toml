@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-harness"
+version = "0.1.0"
+description = "Self-hosted mobile harness for Claude Code on macOS"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+    "apscheduler>=3.10",
+    "pywebpush>=2.0",
+    "cryptography>=42",
+    "python-multipart>=0.0.9",
+    "anyio>=4.2",
+    "tomli>=2.0; python_version < '3.11'",
+    "tomli-w>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+agent-harness = "agent_harness.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "server"}
+
+[tool.setuptools.packages.find]
+where = ["server"]
+include = ["agent_harness*"]
+
+[tool.pytest.ini_options]
+testpaths = ["server/tests"]
+asyncio_mode = "auto"
+pythonpath = ["server"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

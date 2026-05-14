@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"sess_blk","model":"claude","cwd":"/tmp","tools":["Bash"]}
+{"type":"assistant","session_id":"sess_blk","message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"pytest"}}]}}
+{"type":"user","session_id":"sess_blk","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"This action requires permission. Bash(pytest) is not in the allowlist.","is_error":true}]}}
+{"type":"result","subtype":"error","is_error":true,"duration_ms":300,"total_cost_usd":0.001,"session_id":"sess_blk","num_turns":1,"result":"blocked"}
