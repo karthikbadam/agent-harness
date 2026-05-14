@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
@@ -53,11 +54,13 @@ class JobManager:
         max_concurrent: int = 2,
         claude_path: str | None = None,
         default_extra_args: list[str] | None = None,
+        default_idle_timeout_seconds: int = 600,
     ) -> None:
         self.broadcasters = broadcasters
         self.sem = asyncio.Semaphore(max_concurrent)
         self.claude_path = claude_path
         self.default_extra_args = list(default_extra_args or [])
+        self.default_idle_timeout_seconds = default_idle_timeout_seconds
         self._locks: dict[str, asyncio.Lock] = {}
         self._runners: dict[str, ClaudeRunner] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -169,6 +172,11 @@ class JobManager:
             resume_session_id = job.session_id  # set after first turn
             project_id = project.id
             project_extra = list(project.extra_claude_args or [])
+            idle_timeout = (
+                project.idle_timeout_seconds
+                if project.idle_timeout_seconds is not None
+                else self.default_idle_timeout_seconds
+            )
 
         allowed = _gather_allowlist(project_id)
         broadcaster.start_turn(turn_idx)
@@ -189,20 +197,51 @@ class JobManager:
         self._runners[job_id] = runner
         start_ts = utcnow()
         self._mark_turn_running(job_id, turn_idx, pid=None, started_at=start_ts)
-        # Stream → broadcaster
+        # Stream → broadcaster (with idle watchdog)
         last_event: Optional[StreamEvent] = None
+        last_event_at = time.monotonic()
+        timed_out = False
+
+        async def watchdog() -> None:
+            nonlocal timed_out
+            if idle_timeout <= 0:
+                return
+            check_every = min(5.0, max(0.1, idle_timeout / 4))
+            while True:
+                await asyncio.sleep(check_every)
+                if runner.returncode is not None:
+                    return
+                idle = time.monotonic() - last_event_at
+                if idle >= idle_timeout:
+                    log.warning(
+                        "idle watchdog: %ds since last event for %s/turn-%d; stopping",
+                        int(idle),
+                        job_id,
+                        turn_idx,
+                    )
+                    timed_out = True
+                    await runner.stop()
+                    return
+
+        watch_task = asyncio.create_task(watchdog(), name=f"watchdog-{job_id}-{turn_idx}")
         try:
             async for ev in runner.run():
                 if runner.pid and last_event is None:
                     self._mark_turn_running(job_id, turn_idx, pid=runner.pid, started_at=start_ts)
                 await broadcaster.publish(ev)
                 last_event = ev
+                last_event_at = time.monotonic()
         except Exception as e:  # noqa: BLE001
             log.exception("runner failed for %s/turn-%d: %s", job_id, turn_idx, e)
         finally:
+            watch_task.cancel()
+            try:
+                await watch_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
             self._runners.pop(job_id, None)
 
-        await self._finalize_turn(job_id, turn_idx, runner, last_event)
+        await self._finalize_turn(job_id, turn_idx, runner, last_event, timed_out=timed_out)
 
     def _mark_turn_running(
         self, job_id: str, turn_idx: int, pid: int | None, started_at: datetime
@@ -228,6 +267,7 @@ class JobManager:
         turn_idx: int,
         runner: ClaudeRunner,
         last_event: StreamEvent | None,
+        timed_out: bool = False,
     ) -> None:
         broadcaster = self.broadcasters.get(job_id)
         exit_code = runner.returncode if runner.returncode is not None else 1
@@ -238,7 +278,7 @@ class JobManager:
             cost = last_event.cost_usd
             duration = last_event.duration_ms
 
-        if runner.stop_requested:
+        if timed_out or runner.stop_requested:
             status = "stopped"
         elif exit_code == 0:
             status = "done"

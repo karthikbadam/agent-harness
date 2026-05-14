@@ -41,6 +41,7 @@ class Project(Base):
     permission_mode: Mapped[str] = mapped_column(String(32), default="acceptEdits")
     dangerously_skip: Mapped[bool] = mapped_column(default=False)
     extra_claude_args: Mapped[list[str]] = mapped_column(JSON, default=list)
+    idle_timeout_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="project", cascade="all, delete-orphan")

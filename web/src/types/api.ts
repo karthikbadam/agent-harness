@@ -477,6 +477,8 @@ export interface components {
             dangerously_skip: boolean;
             /** Extra Claude Args */
             extra_claude_args?: string[];
+            /** Idle Timeout Seconds */
+            idle_timeout_seconds?: number | null;
         };
         /** ProjectOut */
         ProjectOut: {
@@ -492,6 +494,8 @@ export interface components {
             dangerously_skip: boolean;
             /** Extra Claude Args */
             extra_claude_args?: string[];
+            /** Idle Timeout Seconds */
+            idle_timeout_seconds?: number | null;
             /**
              * Created At
              * Format: date-time
@@ -510,6 +514,8 @@ export interface components {
             dangerously_skip?: boolean | null;
             /** Extra Claude Args */
             extra_claude_args?: string[] | null;
+            /** Idle Timeout Seconds */
+            idle_timeout_seconds?: number | null;
         };
         /** PushKeys */
         PushKeys: {

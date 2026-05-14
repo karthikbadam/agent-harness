@@ -43,6 +43,7 @@ class Settings:
     claude_path: str | None = None
     default_claude_args: list[str] = field(default_factory=list)
     max_concurrent_jobs: int = 2
+    idle_timeout_seconds: int = 600
     log_retention_days: int = 30
     web_dist: Path | None = None
 
@@ -107,6 +108,8 @@ def get_settings() -> Settings:
         default_claude_args=list(toml.get("default_claude_args") or []),
         max_concurrent_jobs=_int_env("max_concurrent_jobs")
         or int(toml.get("max_concurrent_jobs", 2)),
+        idle_timeout_seconds=_int_env("idle_timeout_seconds")
+        or int(toml.get("idle_timeout_seconds", 600)),
         log_retention_days=_int_env("log_retention_days")
         or int(toml.get("log_retention_days", 30)),
     )
