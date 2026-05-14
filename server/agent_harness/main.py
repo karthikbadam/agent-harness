@@ -84,6 +84,7 @@ def create_app() -> FastAPI:
     app.include_router(allowlist_routes.router)
     app.include_router(push_routes.router)
     app.include_router(stream_routes.router)
+    app.include_router(stream_routes.schema_router)
 
     dist = _web_dist_dir()
     if dist is not None:

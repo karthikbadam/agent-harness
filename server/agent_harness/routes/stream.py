@@ -24,10 +24,22 @@ from .. import models
 from ..auth import require_auth
 from ..broadcaster import BroadcasterRegistry
 from ..db import session_scope
+from ..schemas import StreamEvent
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["stream"])
+
+# Codegen-only: a real endpoint returning StreamEvent so the discriminated
+# union lands in components.schemas (the SSE endpoint uses text/event-stream
+# and would otherwise leave the event types out of the OpenAPI). The endpoint
+# is callable but only useful as a runtime example.
+schema_router = APIRouter(prefix="/api/_codegen", tags=["codegen"], include_in_schema=True)
+
+
+@schema_router.get("/stream-event", response_model=StreamEvent)
+def stream_event_schema() -> StreamEvent:  # pragma: no cover - codegen-only
+    raise HTTPException(404, "codegen-only endpoint")
 
 HEARTBEAT_SECONDS = 15
 
