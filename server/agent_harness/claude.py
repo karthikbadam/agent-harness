@@ -289,9 +289,14 @@ class ClaudeRunner:
 
     _proc: asyncio.subprocess.Process | None = None
     _parser: StreamJsonParser | None = None
+    _stop_requested: bool = False
 
     def __post_init__(self) -> None:
         self._parser = StreamJsonParser(job_id=self.job_id, turn=self.turn)
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop_requested
 
     @property
     def session_id(self) -> str | None:
@@ -364,6 +369,7 @@ class ClaudeRunner:
         return self._proc.returncode if self._proc else None
 
     async def stop(self) -> None:
+        self._stop_requested = True
         proc = self._proc
         if proc is None or proc.returncode is not None:
             return
