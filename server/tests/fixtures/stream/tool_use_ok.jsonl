@@ -1,5 +1,0 @@
-{"type":"system","subtype":"init","session_id":"sess_xyz","model":"claude","cwd":"/tmp","tools":["Bash"]}
-{"type":"assistant","session_id":"sess_xyz","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Running ls."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls -la"}}]}}
-{"type":"user","session_id":"sess_xyz","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"total 0\n","is_error":false}]}}
-{"type":"assistant","session_id":"sess_xyz","message":{"id":"msg_2","role":"assistant","content":[{"type":"text","text":"Directory is empty."}]}}
-{"type":"result","subtype":"success","is_error":false,"duration_ms":2222,"total_cost_usd":0.0099,"session_id":"sess_xyz","num_turns":1,"result":"ok"}
