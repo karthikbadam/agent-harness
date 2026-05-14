@@ -5,6 +5,7 @@ import { Center, Spinner } from "@chakra-ui/react";
 import { useAuth } from "./hooks/useAuth";
 import { AuthGate } from "./pages/AuthGate";
 import { JobsPage } from "./pages/Jobs";
+import { JobDetailPage } from "./pages/JobDetail";
 import { SchedulesPage } from "./pages/Schedules";
 import { SettingsPage } from "./pages/Settings";
 
@@ -39,7 +40,7 @@ export function App() {
         path="/jobs/:jobId"
         element={
           <RequireAuth>
-            <JobsPage />
+            <JobDetailPage />
           </RequireAuth>
         }
       />
