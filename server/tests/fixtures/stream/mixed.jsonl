@@ -1,6 +1,0 @@
-{"type":"system","subtype":"init","session_id":"sess_mix","model":"claude","cwd":"/tmp","tools":["Bash","Edit"]}
-{"type":"assistant","session_id":"sess_mix","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"Plan:"},{"type":"text","text":"1) read 2) edit"}]}}
-{"type":"assistant","session_id":"sess_mix","message":{"id":"m2","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/tmp/a.py","old_string":"x","new_string":"y"}}]}}
-{"type":"user","session_id":"sess_mix","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"edit applied"}],"is_error":false}]}}
-{"type":"unknown_future_event","payload":"ignored gracefully"}
-{"type":"result","subtype":"success","is_error":false,"duration_ms":4242,"total_cost_usd":0.05,"session_id":"sess_mix","num_turns":1,"result":"ok"}
