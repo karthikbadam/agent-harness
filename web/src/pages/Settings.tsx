@@ -17,7 +17,6 @@ import { LuTrash2 } from "react-icons/lu";
 import { Shell } from "../components/Shell";
 import { useAllowlist, useCreateRule, useDeleteRule } from "../hooks/useAllowlist";
 import { useProjects, useUpdateProject } from "../hooks/useProjects";
-import { usePush } from "../hooks/usePushSubscription";
 import { useUI } from "../stores/ui";
 import type { ProjectOut } from "../types";
 
@@ -46,13 +45,6 @@ export function SettingsPage() {
               <Text color="fg.muted">Create a project from the Jobs page.</Text>
             )}
           </Stack>
-        </section>
-
-        <section>
-          <Heading size="sm" mb={2}>
-            Notifications
-          </Heading>
-          <NotificationsSection />
         </section>
 
         <section>
@@ -144,53 +136,6 @@ function AllowlistSection({ projects }: { projects: ProjectOut[] }) {
           Add
         </Button>
       </Flex>
-    </Stack>
-  );
-}
-
-function NotificationsSection() {
-  const { eligibility, subscribed, busy, error, subscribe, unsubscribe } = usePush();
-  if (!eligibility.ok) {
-    const reasons: Record<string, string> = {
-      "no-sw": "Service workers not supported by this browser.",
-      "no-push": "Push API not supported by this browser.",
-      "not-standalone":
-        "Add this app to your home screen (Share → Add to Home Screen) and reopen from there. iOS requires standalone mode for notifications.",
-      denied:
-        "Notification permission is denied. Enable it in iOS Settings → Notifications → harness.",
-    };
-    return (
-      <Box borderWidth="1px" borderRadius="md" px={3} py={2}>
-        <Text fontSize="sm" color="fg.muted">
-          {reasons[eligibility.reason]}
-        </Text>
-      </Box>
-    );
-  }
-  return (
-    <Stack gap={2}>
-      <Flex justify="space-between" align="center">
-        <Box>
-          <Text fontSize="sm">Push notifications</Text>
-          <Text fontSize="xs" color="fg.muted">
-            Job done, tool blocked, schedule fired.
-          </Text>
-        </Box>
-        <Button
-          size="sm"
-          colorPalette={subscribed ? "red" : "blue"}
-          variant={subscribed ? "outline" : "solid"}
-          loading={busy}
-          onClick={() => (subscribed ? unsubscribe() : subscribe())}
-        >
-          {subscribed ? "Disable" : "Enable"}
-        </Button>
-      </Flex>
-      {error && (
-        <Text color="red.fg" fontSize="sm">
-          {error}
-        </Text>
-      )}
     </Stack>
   );
 }

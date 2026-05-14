@@ -2,15 +2,15 @@
 
 A self-hosted mobile harness for [Claude Code](https://docs.claude.com/) on
 macOS. Submit / monitor / manage jobs from your iPhone over your home WiFi,
-with live event streaming and push notifications when a job finishes.
+with live event streaming.
 
 Single user, LAN-only, runs as a launchd service. Wraps
-`claude -p --output-format stream-json` and exposes a mobile-PWA frontend
-over HTTPS.
+`claude -p --output-format stream-json` and exposes a mobile-friendly web UI
+over plain HTTP.
 
 ```
-iPhone (Safari → home-screen PWA)
-       │  HTTPS over LAN
+iPhone (Safari)
+       │  HTTP over LAN
        ▼
 Mac:  ~/Library/LaunchAgents/com.you.agent-harness.plist
        │
@@ -26,49 +26,34 @@ Mac:  ~/Library/LaunchAgents/com.you.agent-harness.plist
 ```bash
 git clone <repo> agent-harness
 cd agent-harness
-brew install mkcert nss      # one-time; install script will check
+brew install uv              # one-time; install script will check
 ./scripts/install.sh
 ```
 
-The installer is idempotent — re-running it preserves your token, VAPID keys,
-and certs. It prints a URL of the form
-`https://<lan-ip>:8765/auth?token=<x>` — that's how the iPhone receives the
-auth token.
+The installer is idempotent — re-running it preserves your token. It prints a
+URL of the form `http://<lan-ip>:8765/auth?token=<x>` — open that on your
+iPhone (same WiFi) and you're in. That's the whole iPhone setup.
 
-## iPhone setup (one-time)
+> Plain HTTP on the LAN. No HTTPS, no cert profile to install, no push
+> notifications. If you want push, you'll need a real cert (e.g. via
+> Tailscale serve or a reverse proxy with Let's Encrypt) — out of scope
+> for the default install.
 
-1. **Trust the mkcert CA.** Email yourself `mkcert -CAROOT`/`rootCA.pem`.
-   Open the attachment on your iPhone, install the profile.
-   Settings → General → VPN & Device Management → install.
-   Then Settings → General → About → Certificate Trust Settings → enable
-   "mkcert development CA".
-2. **Open the URL** the installer printed in Safari. You should see the
-   harness UI (a token chip flashes and you're in).
-3. **Add to Home Screen.** Tap Share → Add to Home Screen.
-4. **Open from the home-screen icon.** iOS requires PWA-launched-from-home
-   for service workers + push to work. Don't tap the URL in Safari again —
-   always use the icon.
-5. **Enable notifications.** Settings → Notifications → Enable. (This pops a
-   permission dialog the first time.)
-
-## The 11-step walkthrough
+## Walkthrough
 
 1. Run `./scripts/install.sh` once.
-2. Open the printed URL on your iPhone (same WiFi), trust the cert, add to
-   home screen.
-3. From the home-screen app: create a project pointing at your repo
-   (Jobs page → "+" → New project).
+2. Open the printed URL on your iPhone (same WiFi).
+3. Create a project pointing at your repo (Jobs page → "+" → New project).
 4. Submit a job: "build chapter 0 of the QFT book".
 5. Watch live `tool_use` / `tool_result` / `assistant_text` events stream into
    the transcript.
-6. Get a push notification when it finishes.
-7. Submit a followup turn ("now use Susskind notation"); it continues the
+6. Submit a followup turn ("now use Susskind notation"); it continues the
    same session via `claude --resume <session_id>`.
-8. Hit Stop on a long-running job → SIGTERM → SIGKILL after 5s.
-9. Schedules page → create a cron schedule that fires a job daily at 9am.
-10. Hit a permissions block → tap "Allow Bash(pytest:*) and retry"
-    → claude reruns the same prompt with the rule in the allowlist.
-11. Reboot the Mac → launchd brings the service back → any
+7. Hit Stop on a long-running job → SIGTERM → SIGKILL after 5s.
+8. Schedules page → create a cron schedule that fires a job daily at 9am.
+9. Hit a permissions block → tap "Allow Bash(pytest:*) and retry"
+   → claude reruns the same prompt with the rule in the allowlist.
+10. Reboot the Mac → launchd brings the service back → any
     `running` job in the DB is reconciled to `stopped`.
 
 ## How it works
@@ -111,9 +96,6 @@ replay shows the terminal state.
 
 ```toml
 auth_token = "..."                # set by `agent-harness gen-token`
-vapid_public_key = "..."          # set by `agent-harness gen-vapid`
-vapid_private_key = "..."
-vapid_subject = "mailto:you@localhost"
 
 claude_path = "/usr/local/bin/claude"   # optional; default is `which claude`
 default_claude_args = ["--model", "claude-opus-4-7"]  # appended to every job
@@ -144,8 +126,7 @@ Environment overrides (`AH_*` prefix): `AH_HOME`, `AH_AUTH_TOKEN`,
 Run tests:
 
 ```bash
-. .venv/bin/activate     # or whatever venv you set up
-pytest -q                # 88 tests
+uv run pytest -q                              # 88 tests
 cd web && npm run typecheck && npm run build
 ```
 
@@ -156,24 +137,17 @@ Regenerate TypeScript types after editing Pydantic schemas:
 cd web && npm run gen:types
 
 # Option B: dump spec offline
-agent-harness gen-openapi web/openapi.json
+uv run agent-harness gen-openapi web/openapi.json
 cd web && npm run gen:types:offline
 ```
 
 ## Troubleshooting
 
-**"Your connection is not private" on iPhone.**
-The mkcert root CA isn't trusted. Email yourself `mkcert -CAROOT`/`rootCA.pem`,
-install the profile, then enable it under Settings → General → About →
-Certificate Trust Settings.
-
-**Push notifications never arrive.**
-Three things to check:
-1. You opened the app from the **home-screen icon**, not Safari. iOS
-   requires standalone display mode.
-2. Settings → Notifications → harness → Enable.
-3. Server's VAPID keys are configured (`agent-harness gen-vapid`).
-4. Settings page shows "Push notifications: Enable" — tap it once.
+**iPhone says "Safari can't connect to the server".**
+Make sure the iPhone is on the same WiFi as the Mac, and that the LAN IP the
+installer printed still matches `ipconfig getifaddr en0` (it changes if you
+switch networks). Also confirm the launchd service is running:
+`launchctl list | grep agent-harness`.
 
 **Job stuck running, Stop button doesn't help.**
 The harness sent SIGTERM and waited 5s before SIGKILL. If the claude
@@ -224,14 +198,12 @@ agent-harness/
 │   │   ├── jobs.py            # JobManager (semaphore, locks, watchdog)
 │   │   ├── broadcaster.py     # replay-then-live SSE pub/sub
 │   │   ├── reconcile.py       # orphan-job recovery on startup
-│   │   ├── notify.py          # pywebpush sender (auto-prunes dead subs)
 │   │   ├── schedule_service.py# APScheduler integration
 │   │   └── routes/            # FastAPI routers
 │   └── tests/                 # pytest (88 tests)
 ├── web/
 │   ├── src/
 │   │   ├── hooks/useJobStream.ts   # EventSource + Last-Event-ID reconnect
-│   │   ├── sw.ts                   # push + notificationclick
 │   │   ├── components/TurnTranscript.tsx
 │   │   └── pages/{Jobs,JobDetail,Schedules,Settings,AuthGate}.tsx
 │   └── types/api.ts          # generated from /api/openapi.json

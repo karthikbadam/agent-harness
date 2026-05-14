@@ -1,46 +1,33 @@
 #!/usr/bin/env bash
-# Dev mode: runs uvicorn --reload (HTTP, no TLS) on :8765 and vite dev on :5173
-# in parallel. Ctrl+C kills both.
-#
-# Open http://localhost:5173 for the UI; vite proxies /api to :8765.
+# Dev mode: uvicorn --reload on :8765 + vite on :5173, parallel. Ctrl+C kills both.
+# Open http://localhost:5173 — vite proxies /api to :8765.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
-AH_HOME="${AH_HOME:-$HOME/.agent-harness}"
-export AH_HOME
+export AH_HOME="${AH_HOME:-$HOME/.agent-harness}"
+mkdir -p "$AH_HOME"
 
-if [[ ! -d "$AH_HOME" ]]; then
-  mkdir -p "$AH_HOME"
-fi
+command -v uv >/dev/null 2>&1 || { echo "ERROR: install uv first (brew install uv)" >&2; exit 1; }
+(cd "$REPO" && uv sync --quiet)
+VENV_BIN="$REPO/.venv/bin"
 
-# Ensure token exists for dev.
-if [[ -z "${AH_AUTH_TOKEN:-}" ]] && ! python3 -c "import sys; sys.path.insert(0, '$REPO/server'); from agent_harness import config; sys.exit(0 if config.load_toml().get('auth_token') else 1)" 2>/dev/null; then
-  echo "==> No auth token; generating one for dev"
-  python3 -c "import sys; sys.path.insert(0, '$REPO/server'); from agent_harness.cli import main; main(['init'])"
-  python3 -c "import sys; sys.path.insert(0, '$REPO/server'); from agent_harness.cli import main; main(['gen-token'])"
+# Bootstrap a token if missing.
+if ! "$VENV_BIN/python" -c "from agent_harness import config; import sys; sys.exit(0 if config.load_toml().get('auth_token') else 1)" 2>/dev/null; then
+  echo "==> Generating dev token"
+  "$VENV_BIN/agent-harness" init
+  "$VENV_BIN/agent-harness" gen-token
 fi
 
 pids=()
-cleanup() {
-  for p in "${pids[@]:-}"; do
-    kill "$p" 2>/dev/null || true
-  done
-  wait 2>/dev/null || true
-}
+cleanup() { for p in "${pids[@]:-}"; do kill "$p" 2>/dev/null || true; done; wait 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
-echo "==> Starting backend on :8765"
-(
-  cd "$REPO"
-  python3 -m uvicorn agent_harness.main:app --reload --port 8765 --app-dir server
-) &
+echo "==> Backend on :8765"
+(cd "$REPO" && "$VENV_BIN/python" -m uvicorn agent_harness.main:app --reload --port 8765 --app-dir server) &
 pids+=("$!")
 
-echo "==> Starting vite on :5173"
-(
-  cd "$REPO/web"
-  npm run dev -- --host
-) &
+echo "==> Vite on :5173"
+(cd "$REPO/web" && npm run dev -- --host) &
 pids+=("$!")
 
 wait
