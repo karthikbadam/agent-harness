@@ -5,6 +5,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 
 import { App } from "./App";
+import { registerSW } from "virtual:pwa-register";
+
+registerSW({ immediate: true });
 
 const queryClient = new QueryClient({
   defaultOptions: {

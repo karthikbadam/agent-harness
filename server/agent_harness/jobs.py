@@ -27,7 +27,8 @@ from .claude import ClaudeRunner
 from .config import get_settings
 from .db import session_scope
 from . import models
-from .schemas import StreamEvent, TurnDoneEvent
+from .notify import PushPayload, get_notifier
+from .schemas import StreamEvent, ToolBlockedEvent, TurnDoneEvent
 
 log = logging.getLogger(__name__)
 
@@ -231,6 +232,8 @@ class JobManager:
                 await broadcaster.publish(ev)
                 last_event = ev
                 last_event_at = time.monotonic()
+                if isinstance(ev, ToolBlockedEvent):
+                    self._notify_blocked(job_id, ev)
         except Exception as e:  # noqa: BLE001
             log.exception("runner failed for %s/turn-%d: %s", job_id, turn_idx, e)
         finally:
@@ -308,4 +311,48 @@ class JobManager:
         # Emit final job_status if not already implied by a turn_done.
         # We still emit because the UI listens for job_status to invalidate lists.
         await broadcaster.publish(make_status_event(job_id, turn_idx, status))
+        self._notify_terminal(job_id, turn_idx, status, cost)
         _ = duration  # currently surfaced via turn_done.duration_ms only
+
+    def _notify_blocked(self, job_id: str, ev: ToolBlockedEvent) -> None:
+        try:
+            with session_scope() as s:
+                job = s.get(models.Job, job_id)
+                title = job.title if job else job_id
+            body = f"Tool {ev.tool} blocked"
+            if ev.suggested_rule:
+                body += f" — suggest {ev.suggested_rule}"
+            get_notifier().send_to_all(
+                PushPayload(
+                    title=f"Blocked: {title}",
+                    body=body,
+                    job_id=job_id,
+                    url=f"/jobs/{job_id}",
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("notify (blocked) failed: %s", e)
+
+    def _notify_terminal(
+        self, job_id: str, turn_idx: int, status: str, cost: float | None
+    ) -> None:
+        if status not in {"done", "failed", "stopped"}:
+            return
+        try:
+            with session_scope() as s:
+                job = s.get(models.Job, job_id)
+                title = job.title if job else job_id
+            label = {"done": "done", "failed": "failed", "stopped": "stopped"}[status]
+            body = f"Turn {turn_idx} {label}"
+            if cost is not None:
+                body += f" · ${cost:.4f}"
+            get_notifier().send_to_all(
+                PushPayload(
+                    title=f"{label.capitalize()}: {title}",
+                    body=body,
+                    job_id=job_id,
+                    url=f"/jobs/{job_id}",
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("notify (terminal) failed: %s", e)
