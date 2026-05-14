@@ -25,6 +25,7 @@ from .config import get_settings
 from .db import init_db
 from .jobs import JobManager
 from .reconcile import reconcile_jobs
+from .schedule_service import ScheduleService
 from .routes import allowlist as allowlist_routes
 from .routes import jobs as jobs_routes
 from .routes import projects as projects_routes
@@ -60,7 +61,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.broadcasters = registry
     app.state.job_manager = manager
     await reconcile_jobs(registry)
-    yield
+    schedules = ScheduleService(manager)
+    schedules.start()
+    app.state.schedules = schedules
+    try:
+        yield
+    finally:
+        schedules.shutdown()
 
 
 def create_app() -> FastAPI:
