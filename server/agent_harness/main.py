@@ -54,6 +54,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         broadcasters=registry,
         max_concurrent=settings.max_concurrent_jobs,
         claude_path=settings.claude_path,
+        default_extra_args=settings.default_claude_args,
     )
     app.state.broadcasters = registry
     app.state.job_manager = manager

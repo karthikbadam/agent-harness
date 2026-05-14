@@ -85,6 +85,7 @@ class ProjectCreate(BaseModel):
     path: str
     permission_mode: Literal["acceptEdits", "plan", "default"] = "acceptEdits"
     dangerously_skip: bool = False
+    extra_claude_args: list[str] = Field(default_factory=list)
 
 
 class ProjectUpdate(BaseModel):
@@ -92,6 +93,7 @@ class ProjectUpdate(BaseModel):
     path: str | None = None
     permission_mode: Literal["acceptEdits", "plan", "default"] | None = None
     dangerously_skip: bool | None = None
+    extra_claude_args: list[str] | None = None
 
 
 class ProjectOut(BaseModel):
@@ -100,6 +102,7 @@ class ProjectOut(BaseModel):
     path: str
     permission_mode: str
     dangerously_skip: bool
+    extra_claude_args: list[str] = Field(default_factory=list)
     created_at: datetime
 
 

@@ -18,6 +18,7 @@ def _to_out(p: models.Project) -> ProjectOut:
         path=p.path,
         permission_mode=p.permission_mode,
         dangerously_skip=p.dangerously_skip,
+        extra_claude_args=list(p.extra_claude_args or []),
         created_at=p.created_at,
     )
 
@@ -34,6 +35,7 @@ def create_project(body: ProjectCreate, s: Session = Depends(get_session)) -> Pr
         path=body.path,
         permission_mode=body.permission_mode,
         dangerously_skip=body.dangerously_skip,
+        extra_claude_args=list(body.extra_claude_args),
     )
     s.add(p)
     s.commit()
@@ -56,7 +58,7 @@ def update_project(
     p = s.get(models.Project, project_id)
     if p is None:
         raise HTTPException(404, "not found")
-    for field in ("name", "path", "permission_mode", "dangerously_skip"):
+    for field in ("name", "path", "permission_mode", "dangerously_skip", "extra_claude_args"):
         v = getattr(body, field)
         if v is not None:
             setattr(p, field, v)

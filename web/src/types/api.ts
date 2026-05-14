@@ -475,6 +475,8 @@ export interface components {
              * @default false
              */
             dangerously_skip: boolean;
+            /** Extra Claude Args */
+            extra_claude_args?: string[];
         };
         /** ProjectOut */
         ProjectOut: {
@@ -488,6 +490,8 @@ export interface components {
             permission_mode: string;
             /** Dangerously Skip */
             dangerously_skip: boolean;
+            /** Extra Claude Args */
+            extra_claude_args?: string[];
             /**
              * Created At
              * Format: date-time
@@ -504,6 +508,8 @@ export interface components {
             permission_mode?: ("acceptEdits" | "plan" | "default") | null;
             /** Dangerously Skip */
             dangerously_skip?: boolean | null;
+            /** Extra Claude Args */
+            extra_claude_args?: string[] | null;
         };
         /** PushKeys */
         PushKeys: {

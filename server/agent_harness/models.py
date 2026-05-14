@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -40,6 +40,7 @@ class Project(Base):
     path: Mapped[str] = mapped_column(Text, nullable=False)
     permission_mode: Mapped[str] = mapped_column(String(32), default="acceptEdits")
     dangerously_skip: Mapped[bool] = mapped_column(default=False)
+    extra_claude_args: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="project", cascade="all, delete-orphan")

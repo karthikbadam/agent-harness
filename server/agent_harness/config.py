@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,7 @@ class Settings:
     vapid_public_key: str | None = None
     vapid_subject: str = "mailto:user@localhost"
     claude_path: str | None = None
+    default_claude_args: list[str] = field(default_factory=list)
     max_concurrent_jobs: int = 2
     log_retention_days: int = 30
     web_dist: Path | None = None
@@ -103,6 +104,7 @@ def get_settings() -> Settings:
         vapid_public_key=toml.get("vapid_public_key"),
         vapid_subject=toml.get("vapid_subject", "mailto:user@localhost"),
         claude_path=_env("claude_path") or toml.get("claude_path"),
+        default_claude_args=list(toml.get("default_claude_args") or []),
         max_concurrent_jobs=_int_env("max_concurrent_jobs")
         or int(toml.get("max_concurrent_jobs", 2)),
         log_retention_days=_int_env("log_retention_days")

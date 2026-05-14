@@ -276,6 +276,14 @@ def resolve_claude_path(override: str | None = None) -> str:
 
 @dataclass
 class ClaudeRunner:
+    """Async wrapper around `claude -p ... --output-format stream-json`.
+
+    `extra_args` is appended after the fixed flags. Use it to pass things like
+    `--model`, `--add-dir`, `--mcp-config`, `--system-prompt`, etc. Don't
+    override the fixed flags (`-p`, `--output-format`, `--verbose`, `--resume`)
+    or you'll break the parser.
+    """
+
     job_id: str
     turn: int
     prompt: str
@@ -284,6 +292,7 @@ class ClaudeRunner:
     permission_mode: str | None = "acceptEdits"
     allowed_tools: list[str] = field(default_factory=list)
     dangerously_skip: bool = False
+    extra_args: list[str] = field(default_factory=list)
     claude_path: str | None = None
     env: dict[str, str] | None = None
 
@@ -324,6 +333,8 @@ class ClaudeRunner:
                 argv += ["--permission-mode", self.permission_mode]
             if self.allowed_tools:
                 argv += ["--allowed-tools", ",".join(self.allowed_tools)]
+        if self.extra_args:
+            argv += list(self.extra_args)
         return argv
 
     async def run(self) -> AsyncIterator[StreamEvent]:

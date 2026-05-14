@@ -52,10 +52,12 @@ class JobManager:
         broadcasters: BroadcasterRegistry,
         max_concurrent: int = 2,
         claude_path: str | None = None,
+        default_extra_args: list[str] | None = None,
     ) -> None:
         self.broadcasters = broadcasters
         self.sem = asyncio.Semaphore(max_concurrent)
         self.claude_path = claude_path
+        self.default_extra_args = list(default_extra_args or [])
         self._locks: dict[str, asyncio.Lock] = {}
         self._runners: dict[str, ClaudeRunner] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -166,6 +168,7 @@ class JobManager:
             dangerously_skip = project.dangerously_skip
             resume_session_id = job.session_id  # set after first turn
             project_id = project.id
+            project_extra = list(project.extra_claude_args or [])
 
         allowed = _gather_allowlist(project_id)
         broadcaster.start_turn(turn_idx)
@@ -180,6 +183,7 @@ class JobManager:
             permission_mode=permission_mode if not dangerously_skip else None,
             allowed_tools=allowed if not dangerously_skip else [],
             dangerously_skip=dangerously_skip,
+            extra_args=self.default_extra_args + project_extra,
             claude_path=self.claude_path,
         )
         self._runners[job_id] = runner
