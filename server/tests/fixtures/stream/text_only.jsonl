@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"sess_abc","model":"claude","cwd":"/tmp","tools":["Bash","Edit"]}
+{"type":"assistant","session_id":"sess_abc","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Hello there."}]}}
+{"type":"assistant","session_id":"sess_abc","message":{"id":"msg_2","role":"assistant","content":[{"type":"text","text":"All done."}]}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"total_cost_usd":0.0123,"session_id":"sess_abc","num_turns":1,"result":"All done."}
