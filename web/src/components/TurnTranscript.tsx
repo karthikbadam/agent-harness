@@ -1,14 +1,16 @@
 import { useEffect, useRef } from "react";
 import { Badge, Box, Code, Flex, Stack, Text } from "@chakra-ui/react";
 
-import type { StreamEvent } from "../types";
+import type { JobOut, StreamEvent, ToolBlockedEvent } from "../types";
 import { ToolUseEventCard } from "./ToolUseEvent";
+import { AllowlistRetry } from "./AllowlistRetry";
 
 interface Props {
   events: StreamEvent[];
+  job?: JobOut;
 }
 
-export function TurnTranscript({ events }: Props) {
+export function TurnTranscript({ events, job }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -18,14 +20,14 @@ export function TurnTranscript({ events }: Props) {
   return (
     <Stack gap={3}>
       {events.map((ev) => (
-        <EventCard key={ev.seq ?? `${ev.turn}-${ev.ts}-${ev.type}`} event={ev} />
+        <EventCard key={ev.seq ?? `${ev.turn}-${ev.ts}-${ev.type}`} event={ev} job={job} />
       ))}
       <div ref={bottomRef} />
     </Stack>
   );
 }
 
-function EventCard({ event }: { event: StreamEvent }) {
+function EventCard({ event, job }: { event: StreamEvent; job?: JobOut }) {
   switch (event.type) {
     case "tool_use":
       return <ToolUseEventCard event={event} />;
@@ -55,34 +57,7 @@ function EventCard({ event }: { event: StreamEvent }) {
         </Box>
       );
     case "tool_blocked":
-      return (
-        <Box
-          borderWidth="1px"
-          borderRadius="md"
-          p={3}
-          borderColor="red.500"
-          bg="red.subtle"
-        >
-          <Stack gap={2}>
-            <Flex justify="space-between" align="center">
-              <Text fontWeight="medium" color="red.fg">
-                Blocked: {event.tool}
-              </Text>
-              {event.suggested_rule && (
-                <Badge colorPalette="red" variant="subtle">
-                  {event.suggested_rule}
-                </Badge>
-              )}
-            </Flex>
-            <Text fontSize="sm" color="fg.muted">
-              {event.reason}
-            </Text>
-            <Text fontSize="xs" color="fg.muted">
-              The retry button appears in step (j).
-            </Text>
-          </Stack>
-        </Box>
-      );
+      return <ToolBlockedCard event={event} job={job} />;
     case "turn_done":
       return (
         <Box pt={2} fontSize="xs" color="fg.muted">
@@ -98,4 +73,36 @@ function EventCard({ event }: { event: StreamEvent }) {
         </Box>
       );
   }
+}
+
+function ToolBlockedCard({ event, job }: { event: ToolBlockedEvent; job?: JobOut }) {
+  const blockedTurn = job?.turns?.find((t) => t.idx === event.turn);
+  const retryPrompt = blockedTurn?.prompt;
+  return (
+    <Box borderWidth="1px" borderRadius="md" p={3} borderColor="red.500" bg="red.subtle">
+      <Stack gap={2}>
+        <Flex justify="space-between" align="center">
+          <Text fontWeight="medium" color="red.fg">
+            Blocked: {event.tool}
+          </Text>
+          {event.suggested_rule && (
+            <Badge colorPalette="red" variant="subtle">
+              {event.suggested_rule}
+            </Badge>
+          )}
+        </Flex>
+        <Text fontSize="sm" color="fg.muted">
+          {event.reason}
+        </Text>
+        {job && event.suggested_rule && retryPrompt && (
+          <AllowlistRetry
+            jobId={job.id}
+            projectId={job.project_id}
+            rule={event.suggested_rule}
+            retryPrompt={retryPrompt}
+          />
+        )}
+      </Stack>
+    </Box>
+  );
 }

@@ -39,7 +39,7 @@ export function JobDetailPage() {
       )}
       {job.error && <Text color="red.fg">Failed to load job.</Text>}
       <Box pb={20}>
-        <TurnTranscript events={events} />
+        <TurnTranscript events={events} job={job.data} />
       </Box>
       <Box position="fixed" left={0} right={0} bottom={0} bg="bg">
         <Composer
