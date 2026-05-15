@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,7 @@ from sqlalchemy import select
 from .. import models
 from ..auth import require_auth
 from ..bootstrap import ensure_default_project
+from ..config import get_settings
 from ..db import get_session
 from ..jobs import JobManager
 from ..schemas import FollowupCreate, JobCreate, JobOut, TurnOut
@@ -124,3 +127,17 @@ async def stop_job(
     j = s.get(models.Job, job_id)
     assert j is not None
     return _to_out(j)
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_job(job_id: str, s: Session = Depends(get_session)) -> None:
+    j = s.get(models.Job, job_id)
+    if j is None:
+        raise HTTPException(404, "not found")
+    if j.status in {"running", "queued"}:
+        raise HTTPException(409, "stop the job first")
+    s.delete(j)
+    s.commit()
+    settings = get_settings()
+    assert settings.logs_dir is not None
+    shutil.rmtree(settings.logs_dir / "jobs" / job_id, ignore_errors=True)
