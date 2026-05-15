@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Box, Button, Flex, Textarea } from "@chakra-ui/react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
+import { Box, Flex, IconButton, Text, Textarea } from "@chakra-ui/react";
+import { LuArrowUp } from "react-icons/lu";
 
 interface Props {
   placeholder?: string;
@@ -7,9 +8,23 @@ interface Props {
   onSend: (prompt: string) => Promise<void> | void;
 }
 
+const MIN_HEIGHT = 44;
+const MAX_HEIGHT = 240;
+const HINT_AT = 200;
+
 export function Composer({ placeholder = "Tell claude...", disabled, onSend }: Props) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.max(MIN_HEIGHT, Math.min(el.scrollHeight, MAX_HEIGHT));
+    el.style.height = `${next}px`;
+  }, [value]);
 
   const submit = async () => {
     const text = value.trim();
@@ -23,43 +38,75 @@ export function Composer({ placeholder = "Tell claude...", disabled, onSend }: P
     }
   };
 
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void submit();
+    }
+  };
+
+  const canSend = !!value.trim() && !disabled && !busy;
+  const showHint = focused && value.length === 0;
+  const showCount = value.length >= HINT_AT;
+
   return (
-    <Box
-      borderTopWidth="1px"
-      px={3}
-      py={2}
-      bg="bg"
-      position="sticky"
-      bottom={0}
-      pb="env(safe-area-inset-bottom)"
-    >
-      <Flex gap={2} align="flex-end">
+    <Box px={3} pt={2} pb="max(env(safe-area-inset-bottom), 8px)" bg="bg">
+      <Flex
+        align="flex-end"
+        gap={2}
+        borderWidth="1px"
+        borderColor={focused ? "border.emphasized" : "border"}
+        borderRadius="2xl"
+        bg="bg.subtle"
+        px={3}
+        py={2}
+        transition="border-color 0.15s ease"
+      >
         <Textarea
+          ref={ref}
           rows={1}
           placeholder={placeholder}
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void submit();
-            }
-          }}
+          onKeyDown={onKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           disabled={disabled || busy}
           resize="none"
-          minH="40px"
-          maxH="160px"
+          variant="outline"
+          border="none"
+          outline="none"
+          bg="transparent"
+          px={0}
+          py={1}
+          minH={`${MIN_HEIGHT}px`}
+          maxH={`${MAX_HEIGHT}px`}
           fontSize="16px"
+          lineHeight="1.4"
+          _focus={{ boxShadow: "none", outline: "none" }}
+          _focusVisible={{ boxShadow: "none", outline: "none" }}
         />
-        <Button
+        <IconButton
+          aria-label="Send"
           onClick={submit}
           loading={busy}
-          disabled={!value.trim() || disabled}
+          disabled={!canSend}
+          size="sm"
+          rounded="full"
           colorPalette="blue"
+          variant={canSend ? "solid" : "subtle"}
+          alignSelf="flex-end"
+          mb={1}
         >
-          Send
-        </Button>
+          <LuArrowUp />
+        </IconButton>
       </Flex>
+      {(showHint || showCount) && (
+        <Flex justify="space-between" px={2} pt={1} fontSize="xs" color="fg.muted">
+          <Text>{showHint ? "↵ to send · ⇧↵ for newline" : ""}</Text>
+          {showCount && <Text>{value.length} chars</Text>}
+        </Flex>
+      )}
     </Box>
   );
 }
