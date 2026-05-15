@@ -58,24 +58,35 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
         <Code
           as="pre"
           display="block"
-          whiteSpace="pre-wrap"
+          whiteSpace="pre"
           fontSize="xs"
           p={3}
           my={2}
           borderRadius="md"
           overflowX="auto"
+          maxW="100%"
         >
           {children}
         </Code>
       );
     }
     return (
-      <Code fontSize="0.9em" px={1} py={0.5} borderRadius="sm">
+      <Code
+        fontSize="0.9em"
+        px={1}
+        py={0.5}
+        borderRadius="sm"
+        wordBreak="break-word"
+      >
         {children}
       </Code>
     );
   },
-  pre: ({ children }) => <Box my={2}>{children}</Box>,
+  pre: ({ children }) => (
+    <Box my={2} maxW="100%" overflowX="auto">
+      {children}
+    </Box>
+  ),
   table: ({ children }) => (
     <Box overflowX="auto" my={3} borderWidth="1px" borderRadius="md">
       <Table.Root size="sm" variant="line">
@@ -110,7 +121,13 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
 
 export function MarkdownText({ source }: { source: string }) {
   return (
-    <Box fontSize="sm">
+    <Box
+      fontSize="sm"
+      maxW="100%"
+      minW={0}
+      overflowWrap="anywhere"
+      wordBreak="break-word"
+    >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {source}
       </ReactMarkdown>

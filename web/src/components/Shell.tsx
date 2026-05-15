@@ -58,8 +58,8 @@ export function Shell({ title, right, back, children }: ShellProps) {
           </HStack>
         </Flex>
       </Box>
-      <Box as="main" flex="1">
-        <Container maxW="container.sm" px={4} py={4}>
+      <Box as="main" flex="1" overflowX="hidden" w="100%">
+        <Container maxW="container.sm" px={4} py={4} w="100%">
           {children}
         </Container>
       </Box>
