@@ -21,6 +21,7 @@ export function JobDetailPage() {
   return (
     <Shell
       title={job.data?.title ?? "Job"}
+      back="/"
       right={
         <Stack direction="row" align="center" gap={2}>
           {job.data && <StatusPill status={job.data.status} />}
