@@ -3,8 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from sqlalchemy import select
+
 from .. import models
 from ..auth import require_auth
+from ..bootstrap import ensure_default_project
 from ..db import get_session
 from ..jobs import JobManager
 from ..schemas import FollowupCreate, JobCreate, JobOut, TurnOut
@@ -64,8 +67,9 @@ async def create_job(
     body: JobCreate, request: Request, s: Session = Depends(get_session)
 ) -> JobOut:
     mgr = _manager(request)
+    project_id = body.project_id or _resolve_default_project_id(s)
     try:
-        jid = mgr.create_job(body.project_id, body.prompt, body.title)
+        jid = mgr.create_job(project_id, body.prompt, body.title or "")
     except ValueError as e:
         raise HTTPException(400, str(e))
     await mgr.start(jid)
@@ -73,6 +77,17 @@ async def create_job(
     j = s.get(models.Job, jid)
     assert j is not None
     return _to_out(j)
+
+
+def _resolve_default_project_id(s: Session) -> str:
+    row = s.execute(
+        select(models.Project.id).where(models.Project.is_default.is_(True))
+    ).first()
+    if row is not None:
+        return row[0]
+    # Lazy bootstrap if startup hook didn't run (e.g. fresh DB created by a
+    # request before lifespan completed in tests).
+    return ensure_default_project()
 
 
 @router.post("/{job_id}/followup", response_model=JobOut)

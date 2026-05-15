@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .auth import require_auth
+from .bootstrap import ensure_default_project
 from .broadcaster import BroadcasterRegistry
 from .config import get_settings
 from .db import init_db
@@ -47,6 +48,7 @@ def _web_dist_dir() -> Path | None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_db()
+    ensure_default_project()
     settings = get_settings()
     assert settings.logs_dir is not None
     registry = BroadcasterRegistry(settings.logs_dir)

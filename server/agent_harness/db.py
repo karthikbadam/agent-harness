@@ -48,6 +48,27 @@ def init_db() -> None:
 
     engine = get_engine()
     models.Base.metadata.create_all(engine)
+    _apply_column_migrations(engine)
+
+
+def _apply_column_migrations(engine: Engine) -> None:
+    """Idempotent ALTER TABLE for columns added after first release.
+
+    SQLAlchemy's `create_all` only creates missing tables — it won't add
+    columns to existing ones. We keep a tiny per-column add list here.
+    """
+    additions: list[tuple[str, str, str]] = [
+        ("projects", "is_default", "BOOLEAN NOT NULL DEFAULT 0"),
+    ]
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        for table, column, ddl in additions:
+            existing = {
+                row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+            }
+            if column not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 def reset_engine() -> None:

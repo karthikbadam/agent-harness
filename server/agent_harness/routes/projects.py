@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -20,7 +21,16 @@ def _to_out(p: models.Project) -> ProjectOut:
         dangerously_skip=p.dangerously_skip,
         extra_claude_args=list(p.extra_claude_args or []),
         idle_timeout_seconds=p.idle_timeout_seconds,
+        is_default=bool(p.is_default),
         created_at=p.created_at,
+    )
+
+
+def _clear_other_defaults(s: Session, keep_id: str) -> None:
+    s.execute(
+        update(models.Project)
+        .where(models.Project.id != keep_id, models.Project.is_default.is_(True))
+        .values(is_default=False)
     )
 
 
@@ -38,8 +48,12 @@ def create_project(body: ProjectCreate, s: Session = Depends(get_session)) -> Pr
         dangerously_skip=body.dangerously_skip,
         extra_claude_args=list(body.extra_claude_args),
         idle_timeout_seconds=body.idle_timeout_seconds,
+        is_default=body.is_default,
     )
     s.add(p)
+    s.flush()
+    if body.is_default:
+        _clear_other_defaults(s, p.id)
     s.commit()
     s.refresh(p)
     return _to_out(p)
@@ -67,10 +81,13 @@ def update_project(
         "dangerously_skip",
         "extra_claude_args",
         "idle_timeout_seconds",
+        "is_default",
     ):
         v = getattr(body, field)
         if v is not None:
             setattr(p, field, v)
+    if body.is_default is True:
+        _clear_other_defaults(s, p.id)
     s.commit()
     s.refresh(p)
     return _to_out(p)
