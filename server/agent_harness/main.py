@@ -17,6 +17,7 @@ from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
 from .auth import require_auth
@@ -97,9 +98,26 @@ def create_app() -> FastAPI:
 
     dist = _web_dist_dir()
     if dist is not None:
-        app.mount("/", StaticFiles(directory=str(dist), html=True), name="frontend")
+        app.mount("/", _SpaStaticFiles(directory=str(dist), html=True), name="frontend")
 
     return app
+
+
+class _SpaStaticFiles(StaticFiles):
+    """Static mount that falls back to index.html for unknown paths.
+
+    Real asset requests (`/assets/foo.js`) still hit their files; client-side
+    routes like `/auth` or `/jobs/:id` get the SPA shell so React Router can
+    render them.
+    """
+
+    async def get_response(self, path, scope):  # type: ignore[override]
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            if e.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
 
 
 app = create_app()
