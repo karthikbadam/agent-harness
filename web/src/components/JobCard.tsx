@@ -32,46 +32,49 @@ export function JobCard({ job }: { job: JobOut }) {
       _hover={{ bg: "bg.subtle" }}
       opacity={del.isPending ? 0.5 : 1}
     >
-      <Stack gap={1}>
-        <Flex justify="space-between" align="center" gap={2}>
+      <Stack gap={2}>
+        <Flex justify="space-between" align="flex-start" gap={2}>
           <Text fontWeight="medium" truncate flex="1">
             {job.title || "(untitled)"}
           </Text>
-          <Flex gap={2} align="center">
-            <StatusPill status={job.status} />
-            {live ? (
-              <Button
-                size="xs"
-                variant="outline"
-                colorPalette="red"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  stop.mutate();
-                }}
-                loading={stop.isPending}
-              >
-                Stop
-              </Button>
-            ) : (
-              <IconButton
-                aria-label="Delete job"
-                size="2xs"
-                variant="ghost"
-                color="fg.muted"
-                _hover={{ color: "red.fg", bg: "red.subtle" }}
-                onClick={onDelete}
-                loading={del.isPending}
-              >
-                <LuTrash2 />
-              </IconButton>
-            )}
-          </Flex>
+          {live ? (
+            <Button
+              size="xs"
+              variant="outline"
+              colorPalette="red"
+              onClick={(e) => {
+                e.stopPropagation();
+                stop.mutate();
+              }}
+              loading={stop.isPending}
+            >
+              Stop
+            </Button>
+          ) : (
+            <IconButton
+              aria-label="Delete job"
+              size="2xs"
+              variant="ghost"
+              color="fg.muted"
+              _hover={{ color: "red.fg", bg: "red.subtle" }}
+              onClick={onDelete}
+              loading={del.isPending}
+            >
+              <LuTrash2 />
+            </IconButton>
+          )}
         </Flex>
-        <Flex justify="space-between" fontSize="xs" color="fg.muted">
-          <Text>
-            {(job.turns ?? []).length} turn{(job.turns ?? []).length === 1 ? "" : "s"}
+        <Flex justify="space-between" align="center" gap={2}>
+          <Flex gap={2} align="center" fontSize="xs" color="fg.muted">
+            <StatusPill status={job.status} />
+            <Text>·</Text>
+            <Text>
+              {(job.turns ?? []).length} turn{(job.turns ?? []).length === 1 ? "" : "s"}
+            </Text>
+          </Flex>
+          <Text fontSize="xs" color="fg.muted">
+            {created.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </Text>
-          <Text>{created.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text>
         </Flex>
       </Stack>
     </Box>
