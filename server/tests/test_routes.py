@@ -168,42 +168,6 @@ async def test_allowlist_global_and_project(app_client) -> None:
     assert rules == ["Bash(npm test:*)", "Edit(**/*.py)"]
 
 
-# ----------------------------- push ------------------------------------- #
-
-
-async def test_vapid_key_public(app_client) -> None:
-    client, _ = app_client
-    # no key configured yet → 503
-    r = await client.get("/api/push/vapid-public-key")
-    assert r.status_code == 503
-
-    config.write_toml({**config.load_toml(), "vapid_public_key": "pubkey"})
-    config.reset_settings_cache()
-    r = await client.get("/api/push/vapid-public-key")
-    assert r.status_code == 200
-    assert r.json()["public_key"] == "pubkey"
-
-
-async def test_push_subscribe_upserts(app_client) -> None:
-    client, _ = app_client
-    auth = {"Authorization": "Bearer test-token"}
-    body = {
-        "endpoint": "https://example.com/p/1",
-        "keys": {"p256dh": "aaa", "auth": "bbb"},
-        "label": "iPhone",
-    }
-    r = await client.post("/api/push/subscribe", json=body, headers=auth)
-    assert r.status_code == 201
-    sid = r.json()["id"]
-    # second call with same endpoint upserts
-    body["keys"]["p256dh"] = "ccc"
-    r = await client.post("/api/push/subscribe", json=body, headers=auth)
-    assert r.status_code == 201
-    assert r.json()["id"] == sid
-    r = await client.delete(f"/api/push/subscribe/{sid}", headers=auth)
-    assert r.status_code == 204
-
-
 # ----------------------------- /api/me ---------------------------------- #
 
 

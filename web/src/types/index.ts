@@ -24,10 +24,6 @@ export type ScheduleUpdate = components["schemas"]["ScheduleUpdate"];
 export type AllowlistRuleOut = components["schemas"]["AllowlistRuleOut"];
 export type AllowlistRuleCreate = components["schemas"]["AllowlistRuleCreate"];
 
-export type PushSubscribeIn = components["schemas"]["PushSubscribeIn"];
-export type PushSubscriptionOut = components["schemas"]["PushSubscriptionOut"];
-export type VapidKey = components["schemas"]["VapidKey"];
-
 export type AuthInfo = components["schemas"]["AuthInfo"];
 
 export type ToolUseEvent = components["schemas"]["ToolUseEvent"];

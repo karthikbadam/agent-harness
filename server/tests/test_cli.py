@@ -24,14 +24,6 @@ def test_gen_token_is_idempotent(ah_home: Path) -> None:
     assert token3 != token1
 
 
-def test_gen_vapid_writes_keys(ah_home: Path) -> None:
-    assert cli.main(["init"]) == 0
-    assert cli.main(["gen-vapid"]) == 0
-    toml = config.load_toml()
-    assert toml["vapid_private_key"].startswith("-----BEGIN PRIVATE KEY-----")
-    assert toml["vapid_public_key"]  # base64url
-
-
 def test_gen_openapi_dumps_spec(ah_home: Path, tmp_path: Path) -> None:
     out = tmp_path / "spec.json"
     assert cli.main(["gen-openapi", str(out)]) == 0

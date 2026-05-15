@@ -29,7 +29,6 @@ from .schedule_service import ScheduleService
 from .routes import allowlist as allowlist_routes
 from .routes import jobs as jobs_routes
 from .routes import projects as projects_routes
-from .routes import push as push_routes
 from .routes import schedules as schedules_routes
 from .routes import stream as stream_routes
 from .schemas import AuthInfo
@@ -91,7 +90,6 @@ def create_app() -> FastAPI:
     app.include_router(jobs_routes.router)
     app.include_router(schedules_routes.router)
     app.include_router(allowlist_routes.router)
-    app.include_router(push_routes.router)
     app.include_router(stream_routes.router)
     app.include_router(stream_routes.schema_router)
 

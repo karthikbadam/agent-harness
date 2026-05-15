@@ -6,7 +6,6 @@ Tables:
 - turns: a single `claude -p` invocation; first turn captures session_id.
 - schedules: cron entries that enqueue a job when fired.
 - allowlist_rules: rule strings like `Bash(npm test:*)`; global or project-scoped.
-- push_subscriptions: browser PushSubscription records (endpoint + keys).
 - settings: small kv store for runtime-mutable settings.
 """
 
@@ -112,17 +111,6 @@ class AllowlistRule(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     project: Mapped[Optional[Project]] = relationship(back_populates="rules")
-
-
-class PushSubscription(Base):
-    __tablename__ = "push_subscriptions"
-
-    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
-    endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    p256dh: Mapped[str] = mapped_column(Text, nullable=False)
-    auth: Mapped[str] = mapped_column(Text, nullable=False)
-    label: Mapped[str] = mapped_column(String(64), default="iPhone")
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class Setting(Base):

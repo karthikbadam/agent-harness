@@ -3,7 +3,6 @@
 Subcommands:
   init          — create data dir + DB.
   gen-token     — generate and persist auth token (no-op if one exists).
-  gen-vapid     — generate VAPID keys (no-op if both exist).
   gen-openapi   — dump the FastAPI OpenAPI spec to a file (no server needed).
   serve         — start the FastAPI app via uvicorn.
 """
@@ -11,7 +10,6 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import secrets
 import sys
@@ -48,40 +46,6 @@ def cmd_gen_token(args: argparse.Namespace) -> int:
     write_toml(toml)
     reset_settings_cache()
     print(token)
-    return 0
-
-
-def cmd_gen_vapid(args: argparse.Namespace) -> int:
-    _ensure_init()
-    toml = load_toml()
-    if toml.get("vapid_private_key") and toml.get("vapid_public_key") and not args.force:
-        print("VAPID keys already set; use --force to overwrite")
-        return 0
-
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import ec
-
-    private = ec.generate_private_key(ec.SECP256R1())
-    public = private.public_key()
-
-    pem_priv = private.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    ).decode()
-
-    raw_pub = public.public_bytes(
-        encoding=serialization.Encoding.X962,
-        format=serialization.PublicFormat.UncompressedPoint,
-    )
-    pub_b64 = base64.urlsafe_b64encode(raw_pub).rstrip(b"=").decode()
-
-    toml["vapid_private_key"] = pem_priv
-    toml["vapid_public_key"] = pub_b64
-    toml.setdefault("vapid_subject", "mailto:user@localhost")
-    write_toml(toml)
-    reset_settings_cache()
-    print(pub_b64)
     return 0
 
 
@@ -125,10 +89,6 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("gen-token")
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_gen_token)
-
-    p = sub.add_parser("gen-vapid")
-    p.add_argument("--force", action="store_true")
-    p.set_defaults(func=cmd_gen_vapid)
 
     p = sub.add_parser("gen-openapi")
     p.add_argument("path")

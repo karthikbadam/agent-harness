@@ -2,7 +2,9 @@ import { ReactElement } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Center, Spinner } from "@chakra-ui/react";
 
+import { AppToaster } from "./components/AppToaster";
 import { useAuth } from "./hooks/useAuth";
+import { useJobNotifications } from "./hooks/useJobNotifications";
 import { AuthGate } from "./pages/AuthGate";
 import { JobsPage } from "./pages/Jobs";
 import { JobDetailPage } from "./pages/JobDetail";
@@ -11,6 +13,7 @@ import { SettingsPage } from "./pages/Settings";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { isAuthed, isLoading, token } = useAuth();
+  useJobNotifications();
   if (!token) return <Navigate to="/auth" replace />;
   if (isLoading) {
     return (
@@ -25,8 +28,10 @@ function RequireAuth({ children }: { children: ReactElement }) {
 
 export function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/jobs" replace />} />
+    <>
+      <AppToaster />
+      <Routes>
+        <Route path="/" element={<Navigate to="/jobs" replace />} />
       <Route path="/auth" element={<AuthGate />} />
       <Route
         path="/jobs"
@@ -60,7 +65,8 @@ export function App() {
           </RequireAuth>
         }
       />
-      <Route path="*" element={<Navigate to="/jobs" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/jobs" replace />} />
+      </Routes>
+    </>
   );
 }

@@ -179,33 +179,10 @@ class AllowlistRuleOut(BaseModel):
     created_at: datetime
 
 
-class PushKeys(BaseModel):
-    p256dh: str
-    auth: str
-
-
-class PushSubscribeIn(BaseModel):
-    endpoint: str
-    keys: PushKeys
-    label: str = "iPhone"
-
-
-class PushSubscriptionOut(BaseModel):
-    id: str
-    endpoint: str
-    label: str
-    created_at: datetime
-
-
-class VapidKey(BaseModel):
-    public_key: str
-
-
 class AuthInfo(BaseModel):
     """Returned to authenticated clients on /api/me."""
 
     ok: bool = True
-    standalone_required: bool = True
 
 
 class ErrorOut(BaseModel):

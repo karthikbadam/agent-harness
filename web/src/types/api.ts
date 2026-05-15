@@ -215,77 +215,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/push/vapid-public-key": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Vapid Public Key
-         * @description Public endpoint by design: the public key is meant to be public.
-         */
-        get: operations["vapid_public_key_api_push_vapid_public_key_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/push/subscribe": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Subscribe */
-        post: operations["subscribe_api_push_subscribe_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/push/subscribe/{sub_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Unsubscribe */
-        delete: operations["unsubscribe_api_push_subscribe__sub_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/push/subscriptions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Subscriptions */
-        get: operations["list_subscriptions_api_push_subscriptions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/jobs/{job_id}/stream": {
         parameters: {
             query?: never;
@@ -379,11 +308,6 @@ export interface components {
              * @default true
              */
             ok: boolean;
-            /**
-             * Standalone Required
-             * @default true
-             */
-            standalone_required: boolean;
         };
         /** FollowupCreate */
         FollowupCreate: {
@@ -516,38 +440,6 @@ export interface components {
             extra_claude_args?: string[] | null;
             /** Idle Timeout Seconds */
             idle_timeout_seconds?: number | null;
-        };
-        /** PushKeys */
-        PushKeys: {
-            /** P256Dh */
-            p256dh: string;
-            /** Auth */
-            auth: string;
-        };
-        /** PushSubscribeIn */
-        PushSubscribeIn: {
-            /** Endpoint */
-            endpoint: string;
-            keys: components["schemas"]["PushKeys"];
-            /**
-             * Label
-             * @default iPhone
-             */
-            label: string;
-        };
-        /** PushSubscriptionOut */
-        PushSubscriptionOut: {
-            /** Id */
-            id: string;
-            /** Endpoint */
-            endpoint: string;
-            /** Label */
-            label: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
         };
         /** ScheduleCreate */
         ScheduleCreate: {
@@ -740,11 +632,6 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
-        };
-        /** VapidKey */
-        VapidKey: {
-            /** Public Key */
-            public_key: string;
         };
     };
     responses: never;
@@ -1400,129 +1287,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    vapid_public_key_api_push_vapid_public_key_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VapidKey"];
-                };
-            };
-        };
-    };
-    subscribe_api_push_subscribe_post: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PushSubscribeIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PushSubscriptionOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    unsubscribe_api_push_subscribe__sub_id__delete: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                sub_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_subscriptions_api_push_subscriptions_get: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PushSubscriptionOut"][];
-                };
             };
             /** @description Validation Error */
             422: {

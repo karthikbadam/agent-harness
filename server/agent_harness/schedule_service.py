@@ -16,7 +16,6 @@ from sqlalchemy import select
 
 from . import models
 from .db import session_scope
-from .notify import PushPayload, get_notifier
 
 if TYPE_CHECKING:
     from .jobs import JobManager
@@ -85,16 +84,5 @@ class ScheduleService:
                 project_id, prompt, title=title, schedule_id=schedule_id
             )
             await self.job_manager.start(jid)
-            try:
-                get_notifier().send_to_all(
-                    PushPayload(
-                        title="Scheduled job started",
-                        body=title,
-                        job_id=jid,
-                        url=f"/jobs/{jid}",
-                    )
-                )
-            except Exception as e:  # noqa: BLE001
-                log.warning("schedule fire push failed: %s", e)
         except Exception as e:  # noqa: BLE001
             log.exception("schedule %s fire failed: %s", schedule_id, e)

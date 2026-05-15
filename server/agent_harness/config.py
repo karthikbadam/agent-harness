@@ -37,9 +37,6 @@ class Settings:
     ssl_certfile: Path | None = None
     ssl_keyfile: Path | None = None
     auth_token: str | None = None
-    vapid_private_key: str | None = None
-    vapid_public_key: str | None = None
-    vapid_subject: str = "mailto:user@localhost"
     claude_path: str | None = None
     default_claude_args: list[str] = field(default_factory=list)
     max_concurrent_jobs: int = 2
@@ -101,9 +98,6 @@ def get_settings() -> Settings:
         host=_env("host") or toml.get("host", "0.0.0.0"),
         port=_int_env("port") or int(toml.get("port", 8765)),
         auth_token=_env("auth_token") or toml.get("auth_token"),
-        vapid_private_key=toml.get("vapid_private_key"),
-        vapid_public_key=toml.get("vapid_public_key"),
-        vapid_subject=toml.get("vapid_subject", "mailto:user@localhost"),
         claude_path=_env("claude_path") or toml.get("claude_path"),
         default_claude_args=list(toml.get("default_claude_args") or []),
         max_concurrent_jobs=_int_env("max_concurrent_jobs")

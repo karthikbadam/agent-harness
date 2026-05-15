@@ -45,7 +45,7 @@ def test_allowlist_rule_global_and_project(initdb: Path) -> None:
         assert {r.rule for r in rules} == {"Bash(npm test:*)", "Edit(**/*.py)"}
 
 
-def test_schedule_and_push_sub(initdb: Path) -> None:
+def test_schedule_inserts(initdb: Path) -> None:
     with session_scope() as s:
         proj = models.Project(name="book", path="/tmp/book")
         s.add(proj)
@@ -54,12 +54,5 @@ def test_schedule_and_push_sub(initdb: Path) -> None:
             project_id=proj.id, name="daily", cron="0 9 * * *", prompt="write"
         )
         s.add(sched)
-        sub = models.PushSubscription(
-            endpoint="https://example.com/p/1",
-            p256dh="aaa",
-            auth="bbb",
-        )
-        s.add(sub)
         s.flush()
         assert sched.enabled is True
-        assert sub.label == "iPhone"
