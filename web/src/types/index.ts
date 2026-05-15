@@ -21,9 +21,6 @@ export type ScheduleOut = components["schemas"]["ScheduleOut"];
 export type ScheduleCreate = components["schemas"]["ScheduleCreate"];
 export type ScheduleUpdate = components["schemas"]["ScheduleUpdate"];
 
-export type AllowlistRuleOut = components["schemas"]["AllowlistRuleOut"];
-export type AllowlistRuleCreate = components["schemas"]["AllowlistRuleCreate"];
-
 export type AuthInfo = components["schemas"]["AuthInfo"];
 
 export type ToolUseEvent = components["schemas"]["ToolUseEvent"];
@@ -31,12 +28,10 @@ export type ToolResultEvent = components["schemas"]["ToolResultEvent"];
 export type AssistantTextEvent = components["schemas"]["AssistantTextEvent"];
 export type TurnDoneEvent = components["schemas"]["TurnDoneEvent"];
 export type JobStatusEvent = components["schemas"]["JobStatusEvent"];
-export type ToolBlockedEvent = components["schemas"]["ToolBlockedEvent"];
 
 export type StreamEvent =
   | ToolUseEvent
   | ToolResultEvent
   | AssistantTextEvent
   | TurnDoneEvent
-  | JobStatusEvent
-  | ToolBlockedEvent;
+  | JobStatusEvent;

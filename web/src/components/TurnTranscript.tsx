@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
-import { Badge, Box, Code, Flex, Stack, Text } from "@chakra-ui/react";
+import { Badge, Box, Code, Stack, Text } from "@chakra-ui/react";
 
-import type { JobOut, StreamEvent, ToolBlockedEvent } from "../types";
+import type { JobOut, StreamEvent } from "../types";
 import { ToolUseEventCard } from "./ToolUseEvent";
-import { AllowlistRetry } from "./AllowlistRetry";
 
 interface Props {
   events: StreamEvent[];
@@ -27,13 +26,13 @@ export function TurnTranscript({ events, job }: Props) {
   );
 }
 
-function EventCard({ event, job }: { event: StreamEvent; job?: JobOut }) {
+function EventCard({ event }: { event: StreamEvent; job?: JobOut }) {
   switch (event.type) {
     case "tool_use":
       return <ToolUseEventCard event={event} />;
     case "tool_result":
       return (
-        <Box borderWidth="1px" borderRadius="md" p={3} borderColor={event.ok ? "border" : "red.500"}>
+        <Box borderWidth="1px" borderRadius="md" p={3} borderColor={event.ok ? "border" : "red.emphasized"}>
           <Badge colorPalette={event.ok ? "green" : "red"} variant="subtle" mr={2}>
             {event.ok ? "ok" : "error"}
           </Badge>
@@ -56,8 +55,6 @@ function EventCard({ event, job }: { event: StreamEvent; job?: JobOut }) {
           <Text whiteSpace="pre-wrap">{event.text}</Text>
         </Box>
       );
-    case "tool_blocked":
-      return <ToolBlockedCard event={event} job={job} />;
     case "turn_done":
       return (
         <Box pt={2} fontSize="xs" color="fg.muted">
@@ -73,36 +70,4 @@ function EventCard({ event, job }: { event: StreamEvent; job?: JobOut }) {
         </Box>
       );
   }
-}
-
-function ToolBlockedCard({ event, job }: { event: ToolBlockedEvent; job?: JobOut }) {
-  const blockedTurn = job?.turns?.find((t) => t.idx === event.turn);
-  const retryPrompt = blockedTurn?.prompt;
-  return (
-    <Box borderWidth="1px" borderRadius="md" p={3} borderColor="red.emphasized" bg="red.subtle">
-      <Stack gap={2}>
-        <Flex justify="space-between" align="center">
-          <Text fontWeight="medium" color="red.fg">
-            Blocked: {event.tool}
-          </Text>
-          {event.suggested_rule && (
-            <Badge colorPalette="red" variant="subtle">
-              {event.suggested_rule}
-            </Badge>
-          )}
-        </Flex>
-        <Text fontSize="sm" color="fg.muted">
-          {event.reason}
-        </Text>
-        {job && event.suggested_rule && retryPrompt && (
-          <AllowlistRetry
-            jobId={job.id}
-            projectId={job.project_id}
-            rule={event.suggested_rule}
-            retryPrompt={retryPrompt}
-          />
-        )}
-      </Stack>
-    </Box>
-  );
 }

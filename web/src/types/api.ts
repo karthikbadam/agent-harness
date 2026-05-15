@@ -497,34 +497,6 @@ export interface components {
             /** Enabled */
             enabled?: boolean | null;
         };
-        /** ToolBlockedEvent */
-        ToolBlockedEvent: {
-            /** Job Id */
-            job_id: string;
-            /** Turn */
-            turn: number;
-            /**
-             * Ts
-             * Format: date-time
-             */
-            ts: string;
-            /**
-             * Seq
-             * @default 0
-             */
-            seq: number;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "tool_blocked";
-            /** Tool */
-            tool: string;
-            /** Reason */
-            reason: string;
-            /** Suggested Rule */
-            suggested_rule?: string | null;
-        };
         /** ToolResultEvent */
         ToolResultEvent: {
             /** Job Id */
@@ -1359,7 +1331,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ToolUseEvent"] | components["schemas"]["ToolResultEvent"] | components["schemas"]["AssistantTextEvent"] | components["schemas"]["TurnDoneEvent"] | components["schemas"]["JobStatusEvent"] | components["schemas"]["ToolBlockedEvent"];
+                    "application/json": components["schemas"]["ToolUseEvent"] | components["schemas"]["ToolResultEvent"] | components["schemas"]["AssistantTextEvent"] | components["schemas"]["TurnDoneEvent"] | components["schemas"]["JobStatusEvent"];
                 };
             };
         };

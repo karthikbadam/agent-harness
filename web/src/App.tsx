@@ -9,7 +9,6 @@ import { AuthGate } from "./pages/AuthGate";
 import { JobsPage } from "./pages/Jobs";
 import { JobDetailPage } from "./pages/JobDetail";
 import { SchedulesPage } from "./pages/Schedules";
-import { AllowlistPage } from "./pages/Allowlist";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { isAuthed, isLoading, token } = useAuth();
@@ -53,14 +52,6 @@ export function App() {
           element={
             <RequireAuth>
               <SchedulesPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/allowlist"
-          element={
-            <RequireAuth>
-              <AllowlistPage />
             </RequireAuth>
           }
         />

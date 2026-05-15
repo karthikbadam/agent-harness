@@ -15,7 +15,7 @@ import {
   Text,
 } from "@chakra-ui/react";
 import { useTheme } from "next-themes";
-import { LuCalendarClock, LuShieldCheck } from "react-icons/lu";
+import { LuCalendarClock } from "react-icons/lu";
 
 import { useProjects, useUpdateProject } from "../hooks/useProjects";
 import { useUI } from "../stores/ui";
@@ -105,16 +105,6 @@ export function SettingsDrawer({ open, onClose }: Props) {
                       }}
                     >
                       <LuCalendarClock /> Schedules
-                    </Button>
-                    <Button
-                      variant="outline"
-                      justifyContent="flex-start"
-                      onClick={() => {
-                        onClose();
-                        navigate("/allowlist");
-                      }}
-                    >
-                      <LuShieldCheck /> Allowlist
                     </Button>
                   </Stack>
                 </section>
