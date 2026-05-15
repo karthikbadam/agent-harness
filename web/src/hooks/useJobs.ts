@@ -54,3 +54,14 @@ export function useStopJob(id: string) {
     },
   });
 }
+
+export function useDeleteJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => jobsApi.remove(id),
+    onSuccess: (_void, id) => {
+      qc.removeQueries({ queryKey: jobKey(id) });
+      qc.invalidateQueries({ queryKey: jobsKey });
+    },
+  });
+}

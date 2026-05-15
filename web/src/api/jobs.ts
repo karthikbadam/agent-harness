@@ -8,4 +8,5 @@ export const jobsApi = {
   followup: (id: string, body: FollowupCreate) =>
     api.post<JobOut>(`/api/jobs/${id}/followup`, body),
   stop: (id: string) => api.post<JobOut>(`/api/jobs/${id}/stop`),
+  remove: (id: string) => api.del(`/api/jobs/${id}`),
 };
