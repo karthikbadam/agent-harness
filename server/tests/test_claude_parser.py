@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from agent_harness import schemas
-from agent_harness.claude import StreamJsonParser, _suggest_rule_for
+from agent_harness.claude import StreamJsonParser
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "stream"
@@ -52,19 +52,6 @@ def test_tool_use_then_result_pair() -> None:
     assert "total 0" in tr.output_preview
 
 
-def test_permission_blocked_emits_tool_blocked() -> None:
-    p = StreamJsonParser(job_id="j", turn=0)
-    events = p.parse_all(_read("tool_blocked.jsonl"))
-    assert "tool_blocked" in _types(events)
-    blocked = next(e for e in events if e.type == "tool_blocked")
-    assert isinstance(blocked, schemas.ToolBlockedEvent)
-    assert blocked.tool == "Bash"
-    assert blocked.suggested_rule == "Bash(pytest:*)"
-    done = next(e for e in events if e.type == "turn_done")
-    assert isinstance(done, schemas.TurnDoneEvent)
-    assert done.exit_code == 1
-
-
 def test_mixed_content_blocks_and_unknown_types_ignored() -> None:
     p = StreamJsonParser(job_id="j", turn=0)
     events = p.parse_all(_read("mixed.jsonl"))
@@ -87,21 +74,6 @@ def test_bad_json_line_skipped() -> None:
     assert p.feed_line("not json") == []
     assert p.feed_line("") == []
     assert p.feed_line("   ") == []
-
-
-@pytest.mark.parametrize(
-    "tool, tool_input, expected",
-    [
-        ("Bash", {"command": "pytest -q"}, "Bash(pytest:*)"),
-        ("Bash", {"command": ""}, "Bash(*)"),
-        ("Edit", {"file_path": "/tmp/a.py"}, "Edit(**/*.py)"),
-        ("Write", {"file_path": "x.tsx"}, "Write(**/*.tsx)"),
-        ("Edit", {"file_path": "no-ext"}, "Edit(*)"),
-        ("WeirdTool", {}, "WeirdTool(*)"),
-    ],
-)
-def test_suggest_rule(tool: str, tool_input: dict, expected: str) -> None:
-    assert _suggest_rule_for(tool, tool_input) == expected
 
 
 def test_seq_default_zero_until_broadcaster_assigns() -> None:

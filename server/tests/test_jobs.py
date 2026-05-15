@@ -112,25 +112,6 @@ async def test_followup_resumes_with_session_id(initdb: Path) -> None:
         assert job.turns[1].status == "done"
 
 
-async def test_blocked_tool_failure_marks_failed(initdb: Path) -> None:
-    pid = _make_project()
-    mgr = _make_manager(initdb, "tool_blocked.jsonl")
-    jid = mgr.create_job(pid, prompt="run pytest")
-    await mgr.start(jid)
-    await mgr.wait(jid)
-
-    with session_scope() as s:
-        job = s.get(models.Job, jid)
-        assert job is not None
-        assert job.status == "failed"
-        assert job.turns[0].exit_code == 1
-
-    log_path = Path(initdb) / "logs" / "jobs" / jid / "turn-0.jsonl"
-    text = log_path.read_text()
-    assert '"type":"tool_blocked"' in text
-    assert '"suggested_rule":"Bash(pytest:*)"' in text
-
-
 async def test_stop_kills_running_turn(initdb: Path) -> None:
     pid = _make_project()
     mgr = _make_manager(initdb, "text_only.jsonl")

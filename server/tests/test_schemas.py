@@ -27,10 +27,6 @@ def test_discriminated_union_routes_by_type() -> None:
     assert isinstance(e, schemas.TurnDoneEvent)
     assert e.cost_usd == 0.01
 
-    e = _StreamAdapter.validate_python(
-        {**_base(), "type": "tool_blocked", "tool": "Bash", "reason": "no perm"}
-    )
-    assert isinstance(e, schemas.ToolBlockedEvent)
 
 
 def test_unknown_event_type_rejected() -> None:

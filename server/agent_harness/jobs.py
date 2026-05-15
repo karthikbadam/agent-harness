@@ -27,7 +27,7 @@ from .claude import ClaudeRunner
 from .config import get_settings
 from .db import session_scope
 from . import models
-from .schemas import StreamEvent, ToolBlockedEvent, TurnDoneEvent
+from .schemas import StreamEvent, TurnDoneEvent
 
 log = logging.getLogger(__name__)
 

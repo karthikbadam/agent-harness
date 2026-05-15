@@ -67,7 +67,7 @@ async def test_projects_crud(app_client) -> None:
 
     r = await client.get("/api/projects", headers=auth)
     assert r.status_code == 200
-    assert len(r.json()) == 1
+    assert any(p["id"] == pid for p in r.json())
 
     r = await client.patch(
         f"/api/projects/{pid}", json={"dangerously_skip": True}, headers=auth

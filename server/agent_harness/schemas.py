@@ -57,13 +57,6 @@ class JobStatusEvent(_EventBase):
     status: Literal["queued", "running", "done", "failed", "stopped"]
 
 
-class ToolBlockedEvent(_EventBase):
-    type: Literal["tool_blocked"] = "tool_blocked"
-    tool: str
-    reason: str
-    suggested_rule: str | None = None
-
-
 StreamEvent = Annotated[
     Union[
         ToolUseEvent,
@@ -71,7 +64,6 @@ StreamEvent = Annotated[
         AssistantTextEvent,
         TurnDoneEvent,
         JobStatusEvent,
-        ToolBlockedEvent,
     ],
     Field(discriminator="type"),
 ]

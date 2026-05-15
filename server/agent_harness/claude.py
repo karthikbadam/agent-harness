@@ -36,9 +36,6 @@ object per line. Known top-level `type` values:
 - `assistant` text block          → AssistantTextEvent
 - `assistant` tool_use block      → ToolUseEvent (tool, input); remember name by tool_use_id
 - `user` tool_result block        → ToolResultEvent (ok = not is_error, preview)
-                                    If is_error AND output matches a permission
-                                    pattern → also emits ToolBlockedEvent with
-                                    a suggested rule inferred from the tool.
 - `result`                        → TurnDoneEvent (exit_code 0 if success else 1,
                                                    cost_usd, duration_ms)
 
@@ -59,7 +56,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import shutil
 import signal
 from dataclasses import dataclass, field
@@ -70,7 +66,6 @@ from .schemas import (
     AssistantTextEvent,
     JobStatusEvent,
     StreamEvent,
-    ToolBlockedEvent,
     ToolResultEvent,
     ToolUseEvent,
     TurnDoneEvent,
@@ -79,12 +74,6 @@ from .schemas import (
 log = logging.getLogger(__name__)
 
 _PREVIEW_MAX = 4000
-_PERMISSION_PATTERNS = (
-    re.compile(r"permission", re.I),
-    re.compile(r"not allowed", re.I),
-    re.compile(r"requires approval", re.I),
-    re.compile(r"blocked by", re.I),
-)
 
 
 def _utcnow() -> datetime:
@@ -97,33 +86,11 @@ def _preview(s: object) -> str:
     return s if len(s) <= _PREVIEW_MAX else s[:_PREVIEW_MAX] + "…"
 
 
-def _looks_like_permission_error(text: str) -> bool:
-    return any(p.search(text) for p in _PERMISSION_PATTERNS)
-
-
-def _suggest_rule_for(tool: str, tool_input: dict[str, object]) -> str:
-    """Best-effort rule suggestion. We deliberately keep this dumb."""
-    if tool == "Bash":
-        cmd = str(tool_input.get("command", "")).strip()
-        head = cmd.split()[0] if cmd else ""
-        return f"Bash({head}:*)" if head else "Bash(*)"
-    if tool in ("Edit", "Write", "MultiEdit"):
-        path = str(tool_input.get("file_path", ""))
-        if path:
-            ext = os.path.splitext(path)[1]
-            if ext:
-                return f"{tool}(**/*{ext})"
-        return f"{tool}(*)"
-    return f"{tool}(*)"
-
-
 @dataclass
 class StreamJsonParser:
     job_id: str
     turn: int
     session_id: str | None = None
-    _tool_names: dict[str, str] = field(default_factory=dict)
-    _tool_inputs: dict[str, dict[str, object]] = field(default_factory=dict)
 
     def feed(self, obj: dict[str, object]) -> list[StreamEvent]:
         """Map one upstream event to zero-or-more of our StreamEvents."""
@@ -183,12 +150,8 @@ class StreamJsonParser:
                     )
             elif btype == "tool_use":
                 tname = str(block.get("name") or "")
-                tid = str(block.get("id") or "")
                 tinput_raw = block.get("input")
                 tinput: dict[str, object] = tinput_raw if isinstance(tinput_raw, dict) else {}
-                if tid and tname:
-                    self._tool_names[tid] = tname
-                    self._tool_inputs[tid] = tinput
                 yield ToolUseEvent(
                     job_id=self.job_id,
                     turn=self.turn,
@@ -209,7 +172,6 @@ class StreamJsonParser:
                 continue
             if block.get("type") != "tool_result":
                 continue
-            tid = str(block.get("tool_use_id") or "")
             is_error = bool(block.get("is_error", False))
             raw = block.get("content", "")
             if isinstance(raw, list):  # claude can send rich content
@@ -229,17 +191,6 @@ class StreamJsonParser:
                 ok=not is_error,
                 output_preview=_preview(text),
             )
-            if is_error and _looks_like_permission_error(text):
-                tname = self._tool_names.get(tid, "?")
-                tinput = self._tool_inputs.get(tid, {})
-                yield ToolBlockedEvent(
-                    job_id=self.job_id,
-                    turn=self.turn,
-                    ts=_utcnow(),
-                    tool=tname,
-                    reason=_preview(text),
-                    suggested_rule=_suggest_rule_for(tname, tinput) if tname != "?" else None,
-                )
 
     def _handle_result(self, obj: dict[str, object]) -> StreamEvent:
         sid = obj.get("session_id")
@@ -404,7 +355,6 @@ __all__ = [
     "JobStatusEvent",
     "StreamEvent",
     "StreamJsonParser",
-    "ToolBlockedEvent",
     "ToolResultEvent",
     "ToolUseEvent",
     "TurnDoneEvent",
