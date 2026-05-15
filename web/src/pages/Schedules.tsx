@@ -33,7 +33,7 @@ export function SchedulesPage() {
   const { data, isLoading, error } = useSchedules();
   const [open, setOpen] = useState(false);
   return (
-    <Shell title="Schedules">
+    <Shell title="Schedules" back="/">
       <Stack gap={3}>
         {isLoading && (
           <Center py={8}>

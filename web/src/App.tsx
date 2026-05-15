@@ -9,7 +9,7 @@ import { AuthGate } from "./pages/AuthGate";
 import { JobsPage } from "./pages/Jobs";
 import { JobDetailPage } from "./pages/JobDetail";
 import { SchedulesPage } from "./pages/Schedules";
-import { SettingsPage } from "./pages/Settings";
+import { AllowlistPage } from "./pages/Allowlist";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { isAuthed, isLoading, token } = useAuth();
@@ -31,41 +31,40 @@ export function App() {
     <>
       <AppToaster />
       <Routes>
-        <Route path="/" element={<Navigate to="/jobs" replace />} />
-      <Route path="/auth" element={<AuthGate />} />
-      <Route
-        path="/jobs"
-        element={
-          <RequireAuth>
-            <JobsPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/jobs/:jobId"
-        element={
-          <RequireAuth>
-            <JobDetailPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/schedules"
-        element={
-          <RequireAuth>
-            <SchedulesPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/settings"
-        element={
-          <RequireAuth>
-            <SettingsPage />
-          </RequireAuth>
-        }
-      />
-        <Route path="*" element={<Navigate to="/jobs" replace />} />
+        <Route path="/auth" element={<AuthGate />} />
+        <Route
+          path="/"
+          element={
+            <RequireAuth>
+              <JobsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/jobs/:jobId"
+          element={
+            <RequireAuth>
+              <JobDetailPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/schedules"
+          element={
+            <RequireAuth>
+              <SchedulesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/allowlist"
+          element={
+            <RequireAuth>
+              <AllowlistPage />
+            </RequireAuth>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );

@@ -321,15 +321,12 @@ export interface components {
         };
         /** JobCreate */
         JobCreate: {
-            /** Project Id */
-            project_id: string;
             /** Prompt */
             prompt: string;
-            /**
-             * Title
-             * @default
-             */
-            title: string;
+            /** Project Id */
+            project_id?: string | null;
+            /** Title */
+            title?: string | null;
         };
         /** JobOut */
         JobOut: {
@@ -403,6 +400,11 @@ export interface components {
             extra_claude_args?: string[];
             /** Idle Timeout Seconds */
             idle_timeout_seconds?: number | null;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
         };
         /** ProjectOut */
         ProjectOut: {
@@ -420,6 +422,11 @@ export interface components {
             extra_claude_args?: string[];
             /** Idle Timeout Seconds */
             idle_timeout_seconds?: number | null;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
             /**
              * Created At
              * Format: date-time
@@ -440,6 +447,8 @@ export interface components {
             extra_claude_args?: string[] | null;
             /** Idle Timeout Seconds */
             idle_timeout_seconds?: number | null;
+            /** Is Default */
+            is_default?: boolean | null;
         };
         /** ScheduleCreate */
         ScheduleCreate: {

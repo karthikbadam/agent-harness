@@ -79,7 +79,7 @@ function ToolBlockedCard({ event, job }: { event: ToolBlockedEvent; job?: JobOut
   const blockedTurn = job?.turns?.find((t) => t.idx === event.turn);
   const retryPrompt = blockedTurn?.prompt;
   return (
-    <Box borderWidth="1px" borderRadius="md" p={3} borderColor="red.500" bg="red.subtle">
+    <Box borderWidth="1px" borderRadius="md" p={3} borderColor="red.emphasized" bg="red.subtle">
       <Stack gap={2}>
         <Flex justify="space-between" align="center">
           <Text fontWeight="medium" color="red.fg">

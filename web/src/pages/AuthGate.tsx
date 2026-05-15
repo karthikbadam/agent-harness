@@ -26,14 +26,14 @@ export function AuthGate() {
     const t = params.get("token");
     if (t) {
       setToken(t);
-      navigate("/jobs", { replace: true });
+      navigate("/", { replace: true });
     }
   }, [params, setToken, navigate]);
 
   const submit = () => {
     if (!value.trim()) return;
     setToken(value.trim());
-    navigate("/jobs", { replace: true });
+    navigate("/", { replace: true });
   };
 
   return (
