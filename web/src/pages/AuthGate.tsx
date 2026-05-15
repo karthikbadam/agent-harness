@@ -53,6 +53,7 @@ export function AuthGate() {
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
           }}
+          fontSize="16px"
           autoFocus
         />
         <Button onClick={submit} colorPalette="blue">

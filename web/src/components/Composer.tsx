@@ -49,6 +49,7 @@ export function Composer({ placeholder = "Tell claude...", disabled, onSend }: P
           resize="none"
           minH="40px"
           maxH="160px"
+          fontSize="16px"
         />
         <Button
           onClick={submit}

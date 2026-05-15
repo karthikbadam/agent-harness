@@ -70,7 +70,7 @@ export function SettingsDrawer({ open, onClose }: Props) {
                           value={pathDraft}
                           onChange={(e) => setPathDraft(e.target.value)}
                           fontFamily="mono"
-                          fontSize="sm"
+                          fontSize="16px"
                         />
                       </Field.Root>
                       <Flex justify="flex-end">
