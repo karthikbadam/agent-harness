@@ -143,6 +143,9 @@ cd web && npm run gen:types:offline
 
 ## Troubleshooting
 
+For deeper diagnostics, common HTTP recipes, and a per-symptom playbook,
+see [docs/operations.md](docs/operations.md). Quick hits below.
+
 **iPhone says "Safari can't connect to the server".**
 Make sure the iPhone is on the same WiFi as the Mac, and that the LAN IP the
 installer printed still matches `ipconfig getifaddr en0` (it changes if you
