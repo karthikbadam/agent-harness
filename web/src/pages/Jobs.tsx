@@ -5,6 +5,7 @@ import { Box, Center, Heading, Spinner, Stack, Text } from "@chakra-ui/react";
 import { Shell } from "../components/Shell";
 import { Composer } from "../components/Composer";
 import { JobCard } from "../components/JobCard";
+import { parseServerDate } from "../api/dates";
 import { useCreateJob, useJobs } from "../hooks/useJobs";
 import type { JobOut } from "../types";
 
@@ -80,7 +81,7 @@ interface DayGroup {
 function groupByDay(jobs: JobOut[]): DayGroup[] {
   const map = new Map<string, JobOut[]>();
   for (const j of jobs) {
-    const d = new Date(j.created_at);
+    const d = parseServerDate(j.created_at);
     const key = ymd(d);
     const arr = map.get(key) ?? [];
     arr.push(j);

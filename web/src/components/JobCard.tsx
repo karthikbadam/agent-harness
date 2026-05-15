@@ -3,6 +3,7 @@ import { Box, Button, Flex, IconButton, Stack, Text } from "@chakra-ui/react";
 import { LuTrash2 } from "react-icons/lu";
 
 import type { JobOut } from "../types";
+import { parseServerDate } from "../api/dates";
 import { useDeleteJob, useStopJob } from "../hooks/useJobs";
 import { StatusPill } from "./StatusPill";
 
@@ -10,7 +11,7 @@ export function JobCard({ job }: { job: JobOut }) {
   const navigate = useNavigate();
   const stop = useStopJob(job.id);
   const del = useDeleteJob();
-  const created = new Date(job.created_at);
+  const created = parseServerDate(job.created_at);
   const live = job.status === "running" || job.status === "queued";
 
   const onDelete = (e: React.MouseEvent) => {
@@ -54,9 +55,10 @@ export function JobCard({ job }: { job: JobOut }) {
             ) : (
               <IconButton
                 aria-label="Delete job"
-                size="xs"
+                size="2xs"
                 variant="ghost"
-                colorPalette="red"
+                color="fg.muted"
+                _hover={{ color: "red.fg", bg: "red.subtle" }}
                 onClick={onDelete}
                 loading={del.isPending}
               >
