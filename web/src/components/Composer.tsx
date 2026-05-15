@@ -39,7 +39,8 @@ export function Composer({ placeholder = "Tell claude...", disabled, onSend }: P
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Enter inserts a newline; ⇧↵ or ⌘/Ctrl+↵ sends.
+    if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void submit();
     }
@@ -103,7 +104,7 @@ export function Composer({ placeholder = "Tell claude...", disabled, onSend }: P
       </Flex>
       {(showHint || showCount) && (
         <Flex justify="space-between" px={2} pt={1} fontSize="xs" color="fg.muted">
-          <Text>{showHint ? "↵ to send · ⇧↵ for newline" : ""}</Text>
+          <Text>{showHint ? "↵ for newline · ⇧↵ to send" : ""}</Text>
           {showCount && <Text>{value.length} chars</Text>}
         </Flex>
       )}
