@@ -286,6 +286,28 @@ async def test_task_run_requires_ready_status(app_client) -> None:
     assert r.status_code == 409
 
 
+async def test_project_skills_become_allowlist_entries(app_client) -> None:
+    from agent_harness.jobs import _gather_allowlist
+
+    client, _ = app_client
+    auth = {"Authorization": "Bearer test-token"}
+    r = await client.post(
+        "/api/projects",
+        json={"name": "skp", "path": "/tmp", "skills": ["init", "review"]},
+        headers=auth,
+    )
+    pid = r.json()["id"]
+    r = await client.post(
+        "/api/allowlist", json={"rule": "Bash(pytest:*)"}, headers=auth
+    )
+    assert r.status_code == 201
+
+    merged = _gather_allowlist(pid)
+    assert "Bash(pytest:*)" in merged
+    assert "Skill(init)" in merged
+    assert "Skill(review)" in merged
+
+
 # ----------------------------- outcomes --------------------------------- #
 
 

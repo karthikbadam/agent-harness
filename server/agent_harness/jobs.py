@@ -37,14 +37,31 @@ def utcnow() -> datetime:
 
 
 def _gather_allowlist(project_id: str) -> list[str]:
+    """Return the merged allowlist for a job: global + project rules + Skill().
+
+    Project `skills` are auto-allowed (`Skill(<name>)`) without the user
+    having to add them as explicit rules.
+    """
     with session_scope() as s:
-        rows = s.execute(
+        rule_rows = s.execute(
             select(models.AllowlistRule.rule).where(
                 (models.AllowlistRule.project_id.is_(None))
                 | (models.AllowlistRule.project_id == project_id)
             )
         ).all()
-    return [r[0] for r in rows]
+        proj = s.get(models.Project, project_id)
+        skills = list(proj.skills or []) if proj is not None else []
+    rules = [r[0] for r in rule_rows]
+    skill_rules = [f"Skill({name})" for name in skills if isinstance(name, str) and name]
+    # Dedupe but preserve order: rules first, then skill rules.
+    seen: set[str] = set()
+    out: list[str] = []
+    for r in rules + skill_rules:
+        if r in seen:
+            continue
+        seen.add(r)
+        out.append(r)
+    return out
 
 
 class JobManager:
