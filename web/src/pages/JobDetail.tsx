@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import { Box, Button, Center, Spinner, Stack, Text } from "@chakra-ui/react";
+import { Box, Button, Center, Spinner, Text } from "@chakra-ui/react";
 
 import { Shell } from "../components/Shell";
 import { TurnTranscript } from "../components/TurnTranscript";
