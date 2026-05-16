@@ -32,6 +32,7 @@ from .services import claude_md, task_runner
 from .routes import allowlist as allowlist_routes
 from .routes import jobs as jobs_routes
 from .routes import outcomes as outcomes_routes
+from .routes import plans as plans_routes
 from .routes import projects as projects_routes
 from .routes import schedules as schedules_routes
 from .routes import stream as stream_routes
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(allowlist_routes.router)
     app.include_router(tasks_routes.router)
     app.include_router(outcomes_routes.router)
+    app.include_router(plans_routes.router)
     app.include_router(stream_routes.router)
     app.include_router(stream_routes.schema_router)
 
