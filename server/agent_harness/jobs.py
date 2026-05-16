@@ -68,7 +68,12 @@ class JobManager:
     # ---------------------------- public api ------------------------------- #
 
     def create_job(
-        self, project_id: str, prompt: str, title: str = "", schedule_id: str | None = None
+        self,
+        project_id: str,
+        prompt: str,
+        title: str = "",
+        schedule_id: str | None = None,
+        task_id: str | None = None,
     ) -> str:
         """Create Job + first Turn rows. Return job_id. Does not start running."""
         with session_scope() as s:
@@ -80,6 +85,7 @@ class JobManager:
                 title=title or prompt[:80],
                 status="queued",
                 schedule_id=schedule_id,
+                task_id=task_id,
             )
             s.add(job)
             s.flush()

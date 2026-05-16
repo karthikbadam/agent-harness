@@ -131,6 +131,7 @@ class JobOut(BaseModel):
     status: str
     session_id: str | None = None
     schedule_id: str | None = None
+    task_id: str | None = None
     created_at: datetime
     ended_at: datetime | None = None
     turns: list[TurnOut] = Field(default_factory=list)

@@ -202,6 +202,90 @@ async def test_allowlist_global_and_project(app_client) -> None:
     assert rules == ["Bash(npm test:*)", "Edit(**/*.py)"]
 
 
+# ----------------------------- tasks ------------------------------------ #
+
+
+async def test_tasks_crud_and_status(app_client) -> None:
+    client, _ = app_client
+    auth = {"Authorization": "Bearer test-token"}
+    r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
+    pid = r.json()["id"]
+
+    r = await client.post(
+        f"/api/projects/{pid}/tasks",
+        json={"title": "t1", "prompt": "do 1"},
+        headers=auth,
+    )
+    assert r.status_code == 201
+    t1 = r.json()
+    # No deps → ready immediately.
+    assert t1["status"] == "ready"
+    assert t1["source"] == "manual"
+
+    r = await client.post(
+        f"/api/projects/{pid}/tasks",
+        json={"title": "t2", "prompt": "do 2", "depends_on": [t1["id"]]},
+        headers=auth,
+    )
+    assert r.status_code == 201
+    t2 = r.json()
+    assert t2["status"] == "pending"
+    assert t2["depends_on"] == [t1["id"]]
+
+    # Cycle detection: t1 cannot depend on t2.
+    r = await client.patch(
+        f"/api/tasks/{t1['id']}", json={"depends_on": [t2["id"]]}, headers=auth
+    )
+    assert r.status_code == 400
+
+    # Delete works only when no jobs reference the task.
+    r = await client.delete(f"/api/tasks/{t2['id']}", headers=auth)
+    assert r.status_code == 204
+    r = await client.get(f"/api/tasks/{t2['id']}", headers=auth)
+    assert r.status_code == 404
+
+
+async def test_task_run_creates_job_and_records_task_id(app_client) -> None:
+    client, app = app_client
+    auth = {"Authorization": "Bearer test-token"}
+    r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
+    pid = r.json()["id"]
+    r = await client.post(
+        f"/api/projects/{pid}/tasks",
+        json={"title": "t1", "prompt": "go"},
+        headers=auth,
+    )
+    tid = r.json()["id"]
+
+    r = await client.post(f"/api/tasks/{tid}/run", headers=auth)
+    assert r.status_code == 200
+    jid = r.json()["id"]
+    assert r.json()["task_id"] == tid
+    await app.state.job_manager.wait(jid)
+
+
+async def test_task_run_requires_ready_status(app_client) -> None:
+    client, _ = app_client
+    auth = {"Authorization": "Bearer test-token"}
+    r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
+    pid = r.json()["id"]
+    r = await client.post(
+        f"/api/projects/{pid}/tasks",
+        json={"title": "t1", "prompt": "go"},
+        headers=auth,
+    )
+    t1 = r.json()["id"]
+    r = await client.post(
+        f"/api/projects/{pid}/tasks",
+        json={"title": "t2", "prompt": "go2", "depends_on": [t1]},
+        headers=auth,
+    )
+    t2 = r.json()["id"]
+    # t2 is pending; cannot run.
+    r = await client.post(f"/api/tasks/{t2}/run", headers=auth)
+    assert r.status_code == 409
+
+
 # ----------------------------- /api/me ---------------------------------- #
 
 
