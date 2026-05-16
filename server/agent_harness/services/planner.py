@@ -17,8 +17,6 @@ import logging
 import re
 from pathlib import Path
 
-from sqlalchemy import select
-
 from .. import models
 from ..db import session_scope
 from ..jobs import JobManager
