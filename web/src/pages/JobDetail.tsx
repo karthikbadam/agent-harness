@@ -4,7 +4,6 @@ import { Box, Button, Center, Spinner, Stack, Text } from "@chakra-ui/react";
 import { Shell } from "../components/Shell";
 import { TurnTranscript } from "../components/TurnTranscript";
 import { Composer } from "../components/Composer";
-import { StatusPill } from "../components/StatusPill";
 import { useFollowup, useJob, useStopJob } from "../hooks/useJobs";
 import { useJobEvents, useJobStream } from "../hooks/useJobStream";
 
@@ -23,14 +22,11 @@ export function JobDetailPage() {
       title={job.data?.title ?? "Job"}
       back="/"
       right={
-        <Stack direction="row" align="center" gap={2}>
-          {job.data && <StatusPill status={job.data.status} />}
-          {running && (
-            <Button size="xs" variant="outline" colorPalette="red" onClick={() => stop.mutate()}>
-              Stop
-            </Button>
-          )}
-        </Stack>
+        running ? (
+          <Button size="xs" variant="outline" colorPalette="red" onClick={() => stop.mutate()}>
+            Stop
+          </Button>
+        ) : undefined
       }
     >
       {job.isLoading && (
