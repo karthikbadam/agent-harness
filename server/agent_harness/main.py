@@ -28,7 +28,7 @@ from .db import init_db
 from .jobs import JobManager
 from .reconcile import reconcile_jobs
 from .schedule_service import ScheduleService
-from .services import claude_md
+from .services import claude_md, task_runner
 from .routes import allowlist as allowlist_routes
 from .routes import jobs as jobs_routes
 from .routes import outcomes as outcomes_routes
@@ -55,6 +55,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ensure_default_project()
     try:
         claude_md.sync_all()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        task_runner.reconcile_on_startup()
     except Exception:  # noqa: BLE001
         pass
     settings = get_settings()

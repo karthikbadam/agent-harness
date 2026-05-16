@@ -315,3 +315,13 @@ class JobManager:
         await broadcaster.publish(make_status_event(job_id, turn_idx, status))
         _ = duration  # currently surfaced via turn_done.duration_ms only
         _ = cost
+
+        # Record an outcome + propagate task status if this job belongs to a task.
+        try:
+            from .services import task_runner
+
+            task_runner.on_job_finalized(
+                job_id, status, log_dir=broadcaster.log_dir
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("task_runner.on_job_finalized failed for %s", job_id)
