@@ -286,6 +286,26 @@ async def test_task_run_requires_ready_status(app_client) -> None:
     assert r.status_code == 409
 
 
+# ----------------------------- outcomes --------------------------------- #
+
+
+async def test_outcomes_empty_until_runner_records(app_client) -> None:
+    client, _ = app_client
+    auth = {"Authorization": "Bearer test-token"}
+    r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
+    pid = r.json()["id"]
+    r = await client.post(
+        f"/api/projects/{pid}/tasks", json={"title": "t", "prompt": "x"}, headers=auth
+    )
+    tid = r.json()["id"]
+    r = await client.get(f"/api/tasks/{tid}/outcomes", headers=auth)
+    assert r.status_code == 200
+    assert r.json() == []
+    r = await client.get(f"/api/projects/{pid}/outcomes", headers=auth)
+    assert r.status_code == 200
+    assert r.json() == []
+
+
 # ----------------------------- /api/me ---------------------------------- #
 
 
