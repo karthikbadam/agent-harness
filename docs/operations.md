@@ -132,6 +132,74 @@ curl -sS -X POST $BASE/api/schedules \
 
 Validated against APScheduler's cron parser; 5-field or 6-field accepted.
 
+### Configure a project's shared context
+
+```bash
+curl -sS -X PATCH $BASE/api/projects/<pid> \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"instructions":"Use snake_case.","skills":["init","review"],"context_paths":["~/notes"]}'
+```
+
+The server writes (or refreshes) a managed block in `<project.path>/CLAUDE.md`:
+
+```
+<!-- BEGIN agent-harness managed: do not edit -->
+... rendered from instructions / skills / context_paths ...
+<!-- END agent-harness managed -->
+```
+
+User content outside the fence is preserved on re-sync.
+
+### Define a task and run it
+
+```bash
+# Task with no deps becomes 'ready' immediately.
+T1=$(curl -sS -X POST $BASE/api/projects/<pid>/tasks \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"scaffold","prompt":"create module skeleton"}' | jq -r .id)
+
+# Dependent task is 'pending' until t1 is 'done'.
+T2=$(curl -sS -X POST $BASE/api/projects/<pid>/tasks \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg d "$T1" '{title:"tests",prompt:"add tests",depends_on:[$d]}')" | jq -r .id)
+
+# Kick t1 (tasks never auto-run; you decide when each ready task starts).
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" $BASE/api/tasks/$T1/run
+```
+
+Job created from a task has `task_id` set; when it finalizes the task
+runner records an outcome and flips `t1` to `done`, which makes `t2` flip
+from `pending` to `ready` (not run — you still kick it).
+
+### Decompose an ask into draft tasks (planner)
+
+```bash
+curl -sS -X POST $BASE/api/projects/<pid>/plan \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"ask":"Add a /jobs/retry endpoint with tests and docs."}'
+# → {"task_ids":["...","..."],"raw":"...","error":null}
+```
+
+The planner is a normal claude job (visible under `/api/jobs`); it returns
+once the job finishes. Drafts land as `status=pending`, `source=planner`,
+ready for edit/confirm via `PATCH /api/tasks/{tid}`. Parse failures return
+`error` + `raw` so you can copy/paste and create tasks manually.
+
+### List outcomes (git checkpoints)
+
+```bash
+# Per task
+curl -sS -H "Authorization: Bearer $TOKEN" $BASE/api/tasks/<tid>/outcomes | jq .
+
+# Project-wide log
+curl -sS -H "Authorization: Bearer $TOKEN" $BASE/api/projects/<pid>/outcomes | jq .
+```
+
+Each outcome row has `commit_sha`, `branch`, `summary` (assistant's closing
+message), and `status` ∈ `success | failed`. `commit_sha`/`branch` are
+captured via `git -C <project.path> rev-parse HEAD` at finalize time; if
+the project path is not a git repo they are null.
+
 ---
 
 ## 3. Where state lives
@@ -140,6 +208,7 @@ Validated against APScheduler's cron parser; 5-field or 6-field accepted.
 ~/.agent-harness/
 ├── config.toml              # auth_token, claude_path, defaults
 ├── harness.db               # SQLite (WAL): projects/jobs/turns/schedules/allowlist
+│                            #               + tasks/task_dependencies/outcomes
 └── logs/
     ├── server.out.log       # uvicorn stdout
     ├── server.err.log       # uvicorn stderr (most useful)

@@ -56,6 +56,28 @@ iPhone (same WiFi) and you're in. That's the whole iPhone setup.
 10. Reboot the Mac → launchd brings the service back → any
     `running` job in the DB is reconciled to `stopped`.
 
+### Projects · Tasks · Outcomes
+
+Beyond one-shot jobs, projects can carry shared context and be driven as
+multi-step plans:
+
+- **Project context** (`instructions`, `skills`, `context_paths`) is synced
+  into a managed block in `<path>/CLAUDE.md`, so every job inherits it
+  natively. Skills are also merged into the allowlist as `Skill(<name>)`.
+- **Tasks** decompose a complex ask into smaller units with DAG dependencies.
+  Status flow: `pending → ready → running → done | failed | canceled`.
+  Tasks do **not** auto-run when their dependencies satisfy — you kick each
+  ready task with `POST /api/tasks/{id}/run`.
+- **Planner**: `POST /api/projects/{id}/plan {ask}` runs a one-off claude
+  job that drafts a task list (status `pending`, source `planner`) for you
+  to edit and confirm.
+- **Outcomes** are checkpoints recorded when a task-bound job finalizes:
+  `commit_sha`, `branch`, the assistant's closing summary, and
+  `success | failed`. List with `GET /api/projects/{id}/outcomes`.
+
+See the [agent-harness skill](.claude/skills/agent-harness/SKILL.md) for curl
+recipes covering each of these.
+
 ## How it works
 
 ### Stream-json parser
@@ -110,6 +132,9 @@ Per-project overrides (set via the API or Settings UI):
 - `permission_mode`: `acceptEdits` (default), `plan`, `default`.
 - `dangerously_skip`: bool.
 - `idle_timeout_seconds`: int | null (null = use global).
+- `instructions`: free-text rules synced into `<path>/CLAUDE.md`.
+- `skills`: list of skill names auto-allowed (`Skill(<name>)`).
+- `context_paths`: extra reference paths surfaced in the CLAUDE.md block.
 
 Environment overrides (`AH_*` prefix): `AH_HOME`, `AH_AUTH_TOKEN`,
 `AH_CLAUDE_PATH`, `AH_IDLE_TIMEOUT_SECONDS`, `AH_PORT`, `AH_HOST`,
