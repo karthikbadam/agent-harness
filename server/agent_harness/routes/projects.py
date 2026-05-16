@@ -8,6 +8,7 @@ from .. import models
 from ..auth import require_auth
 from ..db import get_session
 from ..schemas import ProjectCreate, ProjectOut, ProjectUpdate
+from ..services import claude_md
 
 router = APIRouter(prefix="/api/projects", tags=["projects"], dependencies=[Depends(require_auth)])
 
@@ -62,7 +63,16 @@ def create_project(body: ProjectCreate, s: Session = Depends(get_session)) -> Pr
         _clear_other_defaults(s, p.id)
     s.commit()
     s.refresh(p)
+    _safe_sync_claude_md(p)
     return _to_out(p)
+
+
+def _safe_sync_claude_md(p: models.Project) -> None:
+    try:
+        claude_md.sync_project(p)
+    except Exception:  # noqa: BLE001
+        # CLAUDE.md sync is best-effort; never block a project write on it.
+        pass
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -99,6 +109,7 @@ def update_project(
         _clear_other_defaults(s, p.id)
     s.commit()
     s.refresh(p)
+    _safe_sync_claude_md(p)
     return _to_out(p)
 
 

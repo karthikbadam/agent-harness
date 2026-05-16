@@ -28,6 +28,7 @@ from .db import init_db
 from .jobs import JobManager
 from .reconcile import reconcile_jobs
 from .schedule_service import ScheduleService
+from .services import claude_md
 from .routes import allowlist as allowlist_routes
 from .routes import jobs as jobs_routes
 from .routes import projects as projects_routes
@@ -50,6 +51,10 @@ def _web_dist_dir() -> Path | None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_db()
     ensure_default_project()
+    try:
+        claude_md.sync_all()
+    except Exception:  # noqa: BLE001
+        pass
     settings = get_settings()
     assert settings.logs_dir is not None
     registry = BroadcasterRegistry(settings.logs_dir)
