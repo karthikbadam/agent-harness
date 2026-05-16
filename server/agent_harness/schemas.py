@@ -80,6 +80,9 @@ class ProjectCreate(BaseModel):
     extra_claude_args: list[str] = Field(default_factory=list)
     idle_timeout_seconds: int | None = None
     is_default: bool = False
+    instructions: str | None = None
+    skills: list[str] = Field(default_factory=list)
+    context_paths: list[str] = Field(default_factory=list)
 
 
 class ProjectUpdate(BaseModel):
@@ -90,6 +93,9 @@ class ProjectUpdate(BaseModel):
     extra_claude_args: list[str] | None = None
     idle_timeout_seconds: int | None = None
     is_default: bool | None = None
+    instructions: str | None = None
+    skills: list[str] | None = None
+    context_paths: list[str] | None = None
 
 
 class ProjectOut(BaseModel):
@@ -101,6 +107,9 @@ class ProjectOut(BaseModel):
     extra_claude_args: list[str] = Field(default_factory=list)
     idle_timeout_seconds: int | None = None
     is_default: bool = False
+    instructions: str | None = None
+    skills: list[str] = Field(default_factory=list)
+    context_paths: list[str] = Field(default_factory=list)
     created_at: datetime
 
 

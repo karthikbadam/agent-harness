@@ -64,6 +64,9 @@ async def test_projects_crud(app_client) -> None:
     assert r.status_code == 201
     pid = r.json()["id"]
     assert r.json()["permission_mode"] == "acceptEdits"
+    assert r.json()["instructions"] is None
+    assert r.json()["skills"] == []
+    assert r.json()["context_paths"] == []
 
     r = await client.get("/api/projects", headers=auth)
     assert r.status_code == 200
@@ -79,6 +82,37 @@ async def test_projects_crud(app_client) -> None:
     assert r.status_code == 204
     r = await client.get(f"/api/projects/{pid}", headers=auth)
     assert r.status_code == 404
+
+
+async def test_project_context_fields(app_client) -> None:
+    client, _ = app_client
+    auth = {"Authorization": "Bearer test-token"}
+    r = await client.post(
+        "/api/projects",
+        json={
+            "name": "ctx",
+            "path": "/tmp/ctx",
+            "instructions": "Always use snake_case.",
+            "skills": ["init", "review"],
+            "context_paths": ["/tmp/notes", "/tmp/refs"],
+        },
+        headers=auth,
+    )
+    assert r.status_code == 201
+    pid = r.json()["id"]
+    assert r.json()["instructions"] == "Always use snake_case."
+    assert r.json()["skills"] == ["init", "review"]
+    assert r.json()["context_paths"] == ["/tmp/notes", "/tmp/refs"]
+
+    r = await client.patch(
+        f"/api/projects/{pid}",
+        json={"instructions": "Updated.", "skills": ["security-review"]},
+        headers=auth,
+    )
+    assert r.status_code == 200
+    assert r.json()["instructions"] == "Updated."
+    assert r.json()["skills"] == ["security-review"]
+    assert r.json()["context_paths"] == ["/tmp/notes", "/tmp/refs"]
 
 
 # ----------------------------- jobs end-to-end -------------------------- #

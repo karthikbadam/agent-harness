@@ -59,6 +59,10 @@ def _apply_column_migrations(engine: Engine) -> None:
     """
     additions: list[tuple[str, str, str]] = [
         ("projects", "is_default", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("projects", "instructions", "TEXT"),
+        ("projects", "skills", "JSON"),
+        ("projects", "context_paths", "JSON"),
+        ("jobs", "task_id", "VARCHAR(12)"),
     ]
     from sqlalchemy import text
 

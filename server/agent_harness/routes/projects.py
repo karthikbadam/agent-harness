@@ -22,6 +22,9 @@ def _to_out(p: models.Project) -> ProjectOut:
         extra_claude_args=list(p.extra_claude_args or []),
         idle_timeout_seconds=p.idle_timeout_seconds,
         is_default=bool(p.is_default),
+        instructions=p.instructions,
+        skills=list(p.skills or []),
+        context_paths=list(p.context_paths or []),
         created_at=p.created_at,
     )
 
@@ -49,6 +52,9 @@ def create_project(body: ProjectCreate, s: Session = Depends(get_session)) -> Pr
         extra_claude_args=list(body.extra_claude_args),
         idle_timeout_seconds=body.idle_timeout_seconds,
         is_default=body.is_default,
+        instructions=body.instructions,
+        skills=list(body.skills),
+        context_paths=list(body.context_paths),
     )
     s.add(p)
     s.flush()
@@ -82,6 +88,9 @@ def update_project(
         "extra_claude_args",
         "idle_timeout_seconds",
         "is_default",
+        "instructions",
+        "skills",
+        "context_paths",
     ):
         v = getattr(body, field)
         if v is not None:

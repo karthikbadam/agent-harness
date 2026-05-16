@@ -42,6 +42,9 @@ class Project(Base):
     extra_claude_args: Mapped[list[str]] = mapped_column(JSON, default=list)
     idle_timeout_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_default: Mapped[bool] = mapped_column(default=False)
+    instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    skills: Mapped[list[str]] = mapped_column(JSON, default=list)
+    context_paths: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="project", cascade="all, delete-orphan")
