@@ -45,6 +45,41 @@ def test_allowlist_rule_global_and_project(initdb: Path) -> None:
         assert {r.rule for r in rules} == {"Bash(npm test:*)", "Edit(**/*.py)"}
 
 
+def test_task_and_outcome_models(initdb: Path) -> None:
+    with session_scope() as s:
+        proj = models.Project(name="book", path="/tmp/book")
+        s.add(proj)
+        s.flush()
+        t1 = models.Task(project_id=proj.id, title="t1", prompt="do thing 1")
+        t2 = models.Task(project_id=proj.id, title="t2", prompt="do thing 2")
+        s.add_all([t1, t2])
+        s.flush()
+        s.add(models.TaskDependency(task_id=t2.id, depends_on_id=t1.id))
+        s.flush()
+        job = models.Job(project_id=proj.id, title="run t1", task_id=t1.id)
+        s.add(job)
+        s.flush()
+        s.add(
+            models.Outcome(
+                task_id=t1.id,
+                job_id=job.id,
+                commit_sha="abc123",
+                branch="main",
+                summary="ok",
+                status="success",
+            )
+        )
+        s.flush()
+
+        deps = s.query(models.TaskDependency).all()
+        assert len(deps) == 1
+        assert deps[0].task_id == t2.id and deps[0].depends_on_id == t1.id
+        outcomes = s.query(models.Outcome).all()
+        assert len(outcomes) == 1
+        assert outcomes[0].commit_sha == "abc123"
+        assert s.get(models.Job, job.id).task_id == t1.id
+
+
 def test_schedule_inserts(initdb: Path) -> None:
     with session_scope() as s:
         proj = models.Project(name="book", path="/tmp/book")

@@ -1,11 +1,17 @@
 """SQLAlchemy 2.0 ORM models.
 
 Tables:
-- projects: a repo/working-directory + per-project permission defaults.
-- jobs: a conversation (1..N turns) tied to one project.
+- projects: a repo/working-directory + per-project permission defaults +
+  shared context (instructions/skills/context_paths).
+- jobs: a conversation (1..N turns) tied to one project, optionally a task.
 - turns: a single `claude -p` invocation; first turn captures session_id.
 - schedules: cron entries that enqueue a job when fired.
 - allowlist_rules: rule strings like `Bash(npm test:*)`; global or project-scoped.
+- tasks: a planned unit of work inside a project; depends on other tasks via
+  task_dependencies; produces an outcome when its bound job finishes.
+- task_dependencies: (task_id, depends_on_id) join table for the DAG.
+- outcomes: checkpoint tied to a git commit, recorded when a task-bound job
+  finishes.
 - settings: small kv store for runtime-mutable settings.
 """
 
@@ -62,6 +68,7 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String(16), default="queued")  # queued|running|done|failed|stopped
     session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     schedule_id: Mapped[Optional[str]] = mapped_column(ForeignKey("schedules.id"), nullable=True)
+    task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
@@ -122,3 +129,43 @@ class Setting(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), default="pending"
+    )  # pending|ready|running|done|failed|canceled
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # manual|planner
+    order_idx: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class TaskDependency(Base):
+    __tablename__ = "task_dependencies"
+
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    depends_on_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class Outcome(Base):
+    __tablename__ = "outcomes"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), nullable=False)
+    commit_sha: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="success")  # success|failed
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)

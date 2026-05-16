@@ -183,6 +183,55 @@ class AllowlistRuleOut(BaseModel):
     created_at: datetime
 
 
+class TaskCreate(BaseModel):
+    title: str
+    prompt: str
+    depends_on: list[str] = Field(default_factory=list)
+    order_idx: int = 0
+
+
+class TaskUpdate(BaseModel):
+    title: str | None = None
+    prompt: str | None = None
+    depends_on: list[str] | None = None
+    order_idx: int | None = None
+
+
+class TaskOut(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    prompt: str
+    status: str
+    source: str
+    order_idx: int
+    depends_on: list[str] = Field(default_factory=list)
+    latest_outcome_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class OutcomeOut(BaseModel):
+    id: str
+    task_id: str
+    job_id: str
+    commit_sha: str | None
+    branch: str | None
+    summary: str | None
+    status: str
+    created_at: datetime
+
+
+class PlanCreate(BaseModel):
+    ask: str
+
+
+class PlanOut(BaseModel):
+    task_ids: list[str]
+    raw: str | None = None  # raw model output when parsing failed
+    error: str | None = None
+
+
 class AuthInfo(BaseModel):
     """Returned to authenticated clients on /api/me."""
 
