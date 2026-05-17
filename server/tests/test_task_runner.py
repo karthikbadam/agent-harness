@@ -258,7 +258,11 @@ def test_on_ack_creates_worktree_and_flips_phase(
         s.add(t)
         s.flush()
         job = models.Job(
-            project_id=proj.id, title="run", task_id=t.id, phase="awaiting_ack"
+            project_id=proj.id,
+            title="run",
+            task_id=t.id,
+            phase="awaiting_ack",
+            session_id="plan-session-id",
         )
         s.add(job)
         s.flush()
@@ -279,6 +283,10 @@ def test_on_ack_creates_worktree_and_flips_phase(
         wt = Path(job.cwd_override)
         assert wt.is_dir()
         assert (wt / "f.txt").exists()  # carried over from the initial commit
+        # Claude session files are cwd-scoped; the planning session lives
+        # under project.path and cannot be resumed from the worktree cwd.
+        # on_ack must clear the session id so the execute turn starts fresh.
+        assert job.session_id is None
 
 
 def test_on_ack_rejects_wrong_phase(initdb: Path, tmp_path: Path) -> None:

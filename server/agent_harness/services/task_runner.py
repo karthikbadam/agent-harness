@@ -295,6 +295,12 @@ def on_ack(job_id: str, prompt_addendum: str = "") -> str:
         task.worktree_path = path
         task.worktree_branch = branch
         job.cwd_override = path
+        # Claude session files are scoped by cwd. The planning turn's session
+        # lives under the project path; resuming it from the worktree cwd fails
+        # with exit 1 in ~600ms. Clear session_id so the execute turn starts a
+        # fresh session at the worktree; the plan summary is re-injected via
+        # _augment_prompt_for_phase so continuity is preserved.
+        job.session_id = None
         job.phase = "executing"
         base = task.prompt
     return f"{base}\n\n{prompt_addendum}" if prompt_addendum else base
