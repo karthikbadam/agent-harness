@@ -14,6 +14,7 @@ import { LuChevronRight, LuFolderGit2 } from "react-icons/lu";
 
 import { Shell } from "../components/Shell";
 import { NewProjectComposer } from "../components/NewProjectComposer";
+import { StickyComposer } from "../components/StickyComposer";
 import { useProjects } from "../hooks/useProjects";
 import { useJobs } from "../hooks/useJobs";
 import type { JobOut, ProjectOut } from "../types";
@@ -26,47 +27,28 @@ export function ProjectsPage() {
   const stats = useMemo(() => indexStats(jobs ?? []), [jobs]);
 
   return (
-    <Shell title="Projects">
-      <Box pb="calc(160px + env(safe-area-inset-bottom))">
-        {isLoading && (
-          <Center py={10}>
-            <Spinner />
-          </Center>
-        )}
-        {projects && projects.length === 0 && <EmptyProjectsHint />}
-        {sorted.length > 0 && (
-          <Stack gap={6} maxW="container.md">
-            <ProjectGroup
-              label="Your projects"
-              projects={sorted.user}
-              stats={stats}
-              onOpen={(p) => navigate(`/projects/${p.id}`)}
+    <Shell title="Projects" composerHeight={110}>
+      {isLoading && (
+        <Center py={10}>
+          <Spinner />
+        </Center>
+      )}
+      {projects && projects.length === 0 && <EmptyProjectsHint />}
+      {sorted.length > 0 && (
+        <Stack gap={2} maxW="container.md">
+          {sorted.map((p) => (
+            <ProjectRow
+              key={p.id}
+              project={p}
+              stats={stats[p.id] ?? { total: 0, running: 0 }}
+              onClick={() => navigate(`/projects/${p.id}`)}
             />
-            {sorted.system.length > 0 && (
-              <ProjectGroup
-                label="System"
-                projects={sorted.system}
-                stats={stats}
-                onOpen={(p) => navigate(`/projects/${p.id}`)}
-              />
-            )}
-          </Stack>
-        )}
-      </Box>
-      <Box
-        position="fixed"
-        left={{ base: 0, md: "224px" }}
-        right={0}
-        bottom={0}
-        bg="bg"
-        borderTopWidth="1px"
-        borderColor="border.subtle"
-        zIndex={5}
-      >
-        <Box maxW="container.md" mx={{ base: 0, md: "auto" }}>
-          <NewProjectComposer />
-        </Box>
-      </Box>
+          ))}
+        </Stack>
+      )}
+      <StickyComposer>
+        <NewProjectComposer />
+      </StickyComposer>
     </Shell>
   );
 }
@@ -87,58 +69,14 @@ function indexStats(jobs: JobOut[]): Record<string, JobStats> {
   return m;
 }
 
-interface SortedProjects {
-  user: ProjectOut[];
-  system: ProjectOut[];
-}
-
-function sortProjects(projects: ProjectOut[]): SortedProjects & ProjectOut[] {
-  // Default project to the bottom in a separate "System" group.
-  const user = projects.filter((p) => !p.is_default);
+function sortProjects(projects: ProjectOut[]): ProjectOut[] {
+  // Default project to the bottom, everything else case-insensitive alpha.
+  // No section header — one flat list is enough.
+  const user = projects
+    .filter((p) => !p.is_default)
+    .sort((a, b) => a.name.localeCompare(b.name));
   const system = projects.filter((p) => p.is_default);
-  user.sort((a, b) => a.name.localeCompare(b.name));
-  // Cheap shape: array-like for length checks, with .user/.system grouped views.
-  const all = [...user, ...system] as SortedProjects & ProjectOut[];
-  all.user = user;
-  all.system = system;
-  return all;
-}
-
-function ProjectGroup({
-  label,
-  projects,
-  stats,
-  onOpen,
-}: {
-  label: string;
-  projects: ProjectOut[];
-  stats: Record<string, JobStats>;
-  onOpen: (p: ProjectOut) => void;
-}) {
-  if (projects.length === 0) return null;
-  return (
-    <Stack gap={2}>
-      <Heading
-        size="xs"
-        color="fg.muted"
-        textTransform="uppercase"
-        letterSpacing="wider"
-        fontWeight="medium"
-      >
-        {label}
-      </Heading>
-      <Stack gap={2}>
-        {projects.map((p) => (
-          <ProjectRow
-            key={p.id}
-            project={p}
-            stats={stats[p.id] ?? { total: 0, running: 0 }}
-            onClick={() => onOpen(p)}
-          />
-        ))}
-      </Stack>
-    </Stack>
-  );
+  return [...user, ...system];
 }
 
 function ProjectRow({
@@ -224,11 +162,7 @@ function EmptyProjectsHint() {
           No projects
         </Heading>
         <Text fontSize="sm" color="fg.subtle">
-          Create one with{" "}
-          <Box as="code" px={1} bg="bg.subtle" rounded="sm" fontSize="xs">
-            POST /api/projects
-          </Box>{" "}
-          — point it at a repo path on this machine.
+          Pick a path from the composer below and add a project.
         </Text>
       </Stack>
     </Center>
