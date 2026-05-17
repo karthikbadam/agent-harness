@@ -69,6 +69,30 @@ def test_gather_allowlist_adds_git_rules_when_executing(initdb: Path) -> None:
     assert executing.count("Bash(npm test:*)") == 1
 
 
+def test_gather_allowlist_adds_merge_rules_when_integrating(initdb: Path) -> None:
+    """The integrating phase prompt instructs the agent to checkout/merge/commit
+    on the target branch. Without these rules the agent stalls on permission
+    denials and silently fails to merge."""
+    from agent_harness.jobs import _gather_allowlist
+
+    with session_scope() as s:
+        proj = models.Project(name="r", path="/tmp/r")
+        s.add(proj)
+        s.flush()
+        pid = proj.id
+
+    integrating = _gather_allowlist(pid, phase="integrating")
+    for needed in (
+        "Bash(git checkout:*)",
+        "Bash(git switch:*)",
+        "Bash(git merge:*)",
+        "Bash(git branch:*)",
+        "Bash(git add:*)",
+        "Bash(git commit:*)",
+    ):
+        assert needed in integrating, f"missing {needed} for integrating phase"
+
+
 def test_task_and_outcome_models(initdb: Path) -> None:
     with session_scope() as s:
         proj = models.Project(name="book", path="/tmp/book")

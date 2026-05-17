@@ -78,20 +78,36 @@ def _augment_prompt_for_phase(s, job: "models.Job", prompt: str) -> str:
     return prompt
 
 
-# Rules auto-granted when a job is in the executing phase. The execute prefix
-# instructs the agent to "commit your changes when complete"; without these
-# rules the agent loops on permission-denied and the worktree branch ends up
-# with uncommitted changes that integration can't merge.
+# Rules auto-granted by job phase. Without these the agent loops on
+# permission-denied for git operations the phase prompt explicitly asks for
+# (commit during execute; checkout/switch/merge during integrate).
 _EXECUTE_PHASE_RULES = ("Bash(git add:*)", "Bash(git commit:*)")
+_INTEGRATING_PHASE_RULES = (
+    "Bash(git checkout:*)",
+    "Bash(git switch:*)",
+    "Bash(git merge:*)",
+    "Bash(git branch:*)",
+    "Bash(git fetch:*)",
+    "Bash(git add:*)",
+    "Bash(git commit:*)",
+)
+
+
+def _phase_rules(phase: str | None) -> tuple[str, ...]:
+    if phase == "executing":
+        return _EXECUTE_PHASE_RULES
+    if phase == "integrating":
+        return _INTEGRATING_PHASE_RULES
+    return ()
 
 
 def _gather_allowlist(project_id: str, phase: str | None = None) -> list[str]:
     """Return the merged allowlist for a job: global + project rules + Skill().
 
     Project `skills` are auto-allowed (`Skill(<name>)`) without the user
-    having to add them as explicit rules. When ``phase='executing'``, the
-    rules needed to commit on the worktree branch are auto-included so the
-    execute prefix's "commit your changes" instruction is actually enactable.
+    having to add them as explicit rules. When ``phase`` matches a known
+    phase (``'executing'``, ``'integrating'``), the rules needed to satisfy
+    that phase's prompt instructions are auto-included.
     """
     with session_scope() as s:
         rule_rows = s.execute(
@@ -104,7 +120,7 @@ def _gather_allowlist(project_id: str, phase: str | None = None) -> list[str]:
         skills = list(proj.skills or []) if proj is not None else []
     rules = [r[0] for r in rule_rows]
     skill_rules = [f"Skill({name})" for name in skills if isinstance(name, str) and name]
-    phase_rules = list(_EXECUTE_PHASE_RULES) if phase == "executing" else []
+    phase_rules = list(_phase_rules(phase))
     # Dedupe but preserve order: rules first, then skill rules, then phase rules.
     seen: set[str] = set()
     out: list[str] = []
