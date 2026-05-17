@@ -7,8 +7,15 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..auth import require_auth
 from ..db import get_session
-from ..schemas import IntegrateIn, ProjectCreate, ProjectOut, ProjectUpdate, TaskOut
-from ..services import claude_md, integration
+from ..schemas import (
+    IntegrateIn,
+    ProjectCreate,
+    ProjectOut,
+    ProjectUpdate,
+    TaskOut,
+    WorktreeOut,
+)
+from ..services import claude_md, integration, worktrees
 from ..routes.tasks import _to_out as _task_to_out
 
 router = APIRouter(prefix="/api/projects", tags=["projects"], dependencies=[Depends(require_auth)])
@@ -121,6 +128,45 @@ def delete_project(project_id: str, s: Session = Depends(get_session)) -> None:
         raise HTTPException(404, "not found")
     s.delete(p)
     s.commit()
+
+
+@router.get("/{project_id}/worktrees", response_model=list[WorktreeOut])
+def list_project_worktrees(
+    project_id: str, s: Session = Depends(get_session)
+) -> list[WorktreeOut]:
+    """List outstanding ``git worktree list`` entries for the project.
+
+    Each entry includes the on-disk ``task_id`` if the worktree's path matches
+    a task this harness knows about — useful for spotting orphans left by a
+    killed server or a failed cleanup.
+    """
+    proj = s.get(models.Project, project_id)
+    if proj is None:
+        raise HTTPException(404, "not found")
+    raw = worktrees.list_outstanding(proj)
+    # Build a lookup from worktree_path → task_id for the matching project.
+    task_rows = (
+        s.query(models.Task.id, models.Task.worktree_path)
+        .filter(
+            models.Task.project_id == project_id,
+            models.Task.worktree_path.isnot(None),
+        )
+        .all()
+    )
+    by_path = {row[1]: row[0] for row in task_rows}
+    out: list[WorktreeOut] = []
+    for entry in raw:
+        path = entry.get("worktree", "")
+        out.append(
+            WorktreeOut(
+                path=path,
+                branch=entry.get("branch") or None,
+                head=entry.get("HEAD") or None,
+                detached="detached" in entry,
+                task_id=by_path.get(path),
+            )
+        )
+    return out
 
 
 @router.post("/{project_id}/integrate", response_model=TaskOut)

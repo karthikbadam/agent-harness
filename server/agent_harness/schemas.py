@@ -253,6 +253,14 @@ class IntegrateIn(BaseModel):
     target_branch: str | None = None
 
 
+class WorktreeOut(BaseModel):
+    path: str
+    branch: str | None = None
+    head: str | None = None
+    detached: bool = False
+    task_id: str | None = None  # filled in when the worktree path matches a task
+
+
 class PlanCreate(BaseModel):
     ask: str
 
