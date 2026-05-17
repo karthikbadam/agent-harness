@@ -527,7 +527,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Last Plan
+         * @description Return the most recent planner run for this project, if any.
+         */
+        get: operations["last_plan_api_projects__project_id__plan_get"];
         put?: never;
         /** Plan Project */
         post: operations["plan_project_api_projects__project_id__plan_post"];
@@ -931,6 +935,26 @@ export interface components {
              * @enum {string}
              */
             status: "queued" | "running" | "done" | "failed" | "stopped";
+        };
+        /**
+         * LastPlanOut
+         * @description Most recent planner run for a project — used by the UI's "view plan"
+         *     affordance on the project detail page.
+         */
+        LastPlanOut: {
+            /** Job Id */
+            job_id: string;
+            /** Ask */
+            ask: string;
+            /** Raw */
+            raw: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Task Ids */
+            task_ids?: string[];
         };
         /** MergeIn */
         MergeIn: {
@@ -2641,6 +2665,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutcomeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    last_plan_api_projects__project_id__plan_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LastPlanOut"] | null;
                 };
             };
             /** @description Validation Error */

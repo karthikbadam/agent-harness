@@ -21,6 +21,7 @@ export type TaskOut = components["schemas"]["TaskOut"];
 export type TaskCreate = components["schemas"]["TaskCreate"];
 export type TaskUpdate = components["schemas"]["TaskUpdate"];
 export type OutcomeOut = components["schemas"]["OutcomeOut"];
+export type LastPlanOut = components["schemas"]["LastPlanOut"];
 
 export type ScheduleOut = components["schemas"]["ScheduleOut"];
 export type ScheduleCreate = components["schemas"]["ScheduleCreate"];

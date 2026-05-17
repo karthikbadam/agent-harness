@@ -1,5 +1,12 @@
 import { api } from "./client";
-import type { JobOut, TaskCreate, TaskOut, TaskUpdate, OutcomeOut } from "../types";
+import type {
+  JobOut,
+  LastPlanOut,
+  TaskCreate,
+  TaskOut,
+  TaskUpdate,
+  OutcomeOut,
+} from "../types";
 
 export const tasksApi = {
   listForProject: (projectId: string) =>
@@ -30,4 +37,6 @@ export const tasksApi = {
       `/api/projects/${projectId}/plan`,
       { ask },
     ),
+  lastPlan: (projectId: string) =>
+    api.get<LastPlanOut | null>(`/api/projects/${projectId}/plan`),
 };

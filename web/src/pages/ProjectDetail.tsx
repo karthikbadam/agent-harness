@@ -1,20 +1,27 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   Box,
+  Button,
   Center,
+  Drawer,
   Flex,
   Heading,
+  HStack,
+  Portal,
   Spinner,
   Stack,
   Text,
 } from "@chakra-ui/react";
+import { LuFileText } from "react-icons/lu";
 
 import { Shell } from "../components/Shell";
 import { Composer } from "../components/Composer";
+import { MarkdownText } from "../components/MarkdownText";
 import { TaskCard } from "../components/TaskCard";
+import { parseServerDate, relativeTime } from "../api/dates";
 import { useProjects } from "../hooks/useProjects";
-import { usePlan, useTasks } from "../hooks/useTasks";
+import { useLastPlan, usePlan, useTasks } from "../hooks/useTasks";
 import type { TaskOut } from "../types";
 
 export function ProjectDetailPage() {
@@ -23,11 +30,29 @@ export function ProjectDetailPage() {
   const project = projects?.find((p) => p.id === projectId);
   const { data: tasks, isLoading: tasksLoading } = useTasks(projectId);
   const plan = usePlan(projectId);
+  const { data: lastPlan } = useLastPlan(projectId);
+  const [planOpen, setPlanOpen] = useState(false);
   const groups = useMemo(() => groupByPhase(tasks ?? []), [tasks]);
   const planning = plan.isPending;
 
   return (
-    <Shell title={project?.name ?? "Project"} back="/">
+    <Shell
+      title={project?.name ?? "Project"}
+      back="/"
+      right={
+        lastPlan ? (
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => setPlanOpen(true)}
+            gap={1.5}
+          >
+            <LuFileText />
+            View plan
+          </Button>
+        ) : undefined
+      }
+    >
       <Box pb="calc(160px + env(safe-area-inset-bottom))">
         {(projectsLoading || tasksLoading) && (
           <Center py={8}>
@@ -110,7 +135,95 @@ export function ProjectDetailPage() {
           </Box>
         </Box>
       )}
+      <PlanDrawer open={planOpen} onClose={() => setPlanOpen(false)} />
     </Shell>
+  );
+}
+
+function PlanDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { projectId = "" } = useParams();
+  const { data: plan } = useLastPlan(open ? projectId : undefined);
+  return (
+    <Drawer.Root
+      open={open}
+      onOpenChange={(e) => (e.open ? null : onClose())}
+      placement={{ base: "bottom", md: "end" }}
+      size={{ base: "full", md: "lg" }}
+    >
+      <Portal>
+        <Drawer.Backdrop />
+        <Drawer.Positioner>
+          <Drawer.Content pb="env(safe-area-inset-bottom)">
+            <Drawer.Header>
+              <Stack gap={1}>
+                <Drawer.Title>Project plan</Drawer.Title>
+                {plan && (() => {
+                  const n = plan.task_ids?.length ?? 0;
+                  return (
+                    <Text fontSize="xs" color="fg.muted">
+                      Planned {relativeTime(parseServerDate(plan.created_at))} · {n} task{n === 1 ? "" : "s"}
+                    </Text>
+                  );
+                })()}
+              </Stack>
+            </Drawer.Header>
+            <Drawer.Body>
+              {!plan ? (
+                <Center py={10}>
+                  <Spinner size="sm" />
+                </Center>
+              ) : (
+                <Stack gap={5}>
+                  <Box>
+                    <Text
+                      fontSize="2xs"
+                      color="fg.muted"
+                      textTransform="uppercase"
+                      letterSpacing="wider"
+                      mb={1.5}
+                    >
+                      Ask
+                    </Text>
+                    <Box bg="bg.subtle" rounded="md" px={3.5} py={3}>
+                      <Text fontSize="sm" lineHeight="1.55" whiteSpace="pre-wrap">
+                        {plan.ask}
+                      </Text>
+                    </Box>
+                  </Box>
+                  <Box>
+                    <Text
+                      fontSize="2xs"
+                      color="fg.muted"
+                      textTransform="uppercase"
+                      letterSpacing="wider"
+                      mb={1.5}
+                    >
+                      Planner findings & task list
+                    </Text>
+                    <Box
+                      bg="bg.subtle"
+                      rounded="md"
+                      px={3.5}
+                      py={3}
+                      fontSize="sm"
+                    >
+                      <MarkdownText source={plan.raw || "(empty)"} />
+                    </Box>
+                  </Box>
+                </Stack>
+              )}
+            </Drawer.Body>
+            <Drawer.Footer borderTopWidth="1px" borderColor="border.subtle">
+              <HStack justify="flex-end" w="full">
+                <Button variant="outline" size="sm" onClick={onClose}>
+                  Close
+                </Button>
+              </HStack>
+            </Drawer.Footer>
+          </Drawer.Content>
+        </Drawer.Positioner>
+      </Portal>
+    </Drawer.Root>
   );
 }
 

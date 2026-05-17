@@ -328,6 +328,18 @@ class PlanOut(BaseModel):
     error: str | None = None
 
 
+class LastPlanOut(BaseModel):
+    """Most recent planner run for a project — used by the UI's "view plan"
+    affordance on the project detail page.
+    """
+
+    job_id: str
+    ask: str
+    raw: str
+    created_at: datetime
+    task_ids: list[str] = Field(default_factory=list)
+
+
 class AuthInfo(BaseModel):
     """Returned to authenticated clients on /api/me."""
 

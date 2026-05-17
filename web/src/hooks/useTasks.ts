@@ -11,6 +11,16 @@ import type { TaskCreate, TaskUpdate } from "../types";
 export const tasksKey = (projectId: string) => ["tasks", projectId] as const;
 export const taskKey = (id: string) => ["task", id] as const;
 export const taskOutcomesKey = (id: string) => ["task-outcomes", id] as const;
+export const lastPlanKey = (projectId: string) =>
+  ["last-plan", projectId] as const;
+
+export function useLastPlan(projectId: string | undefined) {
+  return useQuery({
+    queryKey: lastPlanKey(projectId ?? ""),
+    queryFn: () => tasksApi.lastPlan(projectId!),
+    enabled: Boolean(projectId),
+  });
+}
 
 export function useTasks(projectId: string | undefined) {
   return useQuery({
