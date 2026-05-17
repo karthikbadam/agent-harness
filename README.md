@@ -78,6 +78,34 @@ multi-step plans:
 See the [agent-harness skill](.claude/skills/agent-harness/SKILL.md) for curl
 recipes covering each of these.
 
+### v2: plan-then-execute, parallel worktrees, orchestrator MCP
+
+The default task lifecycle now gates on a planning turn:
+
+```
+pending → ready → running (planning) → awaiting_ack → running (executing) → done
+```
+
+- **Plan turn 0** runs in `project.path` (read-only by convention) and ends
+  parked at `phase=awaiting_ack` with an `Outcome(kind=plan)` containing the
+  plan text. A followup on that job acks the plan.
+- **Execute turn 1** runs in a per-task git worktree at
+  `~/.agent-harness/worktrees/<task_id>` on branch `task/<task_id>` so
+  concurrent executes don't fight over the project's git index.
+- **Integration** is itself a synthetic agent task: `POST /api/projects/{id}/integrate
+  {task_ids,target_branch?}` creates a one-shot task whose prompt merges
+  the listed worktree branches into `target_branch`. On success the input
+  worktrees + branches are cleaned up.
+- **Structural ops**: `POST /api/tasks/{id}/split` and
+  `POST /api/tasks/merge` reshape the DAG before any run.
+- **Orchestrator MCP**: the same surface is exposed as a typed MCP tool set
+  at `/mcp` (HTTP) and as a stdio binary `agent-harness-mcp`. Connect a
+  separate Claude Code session to it from outside the harness — jobs spawned
+  by the harness do **not** have the orchestrator tools auto-injected.
+
+Opt out per task with `mode=one_shot` (skip planning, go straight to a
+worktree execute).
+
 ## How it works
 
 ### Stream-json parser

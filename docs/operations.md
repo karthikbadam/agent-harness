@@ -352,6 +352,59 @@ land in the OpenAPI components.
 
 ---
 
+## 4a. v2: worktrees, planning gates, integration
+
+v2 tasks run in two phases by default (`mode=plan_then_execute`). The plan
+turn runs in `project.path`; the execute turn runs in a per-task worktree
+under `~/.agent-harness/worktrees/<task_id>` on branch `task/<task_id>`.
+
+### List outstanding worktrees
+
+```bash
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/projects/$PID/worktrees" | jq .
+# [{"path":"/Users/me/.agent-harness/worktrees/abc","branch":"refs/heads/task/abc",
+#   "head":"…","detached":false,"task_id":"abc"}, …]
+```
+
+`task_id=null` rows are **orphans** — worktrees the harness has no record
+of (server killed mid-execute, or pre-existing manual worktrees).
+
+### Clean up an orphan manually
+
+The harness does **not** auto-delete unknown worktrees. From the project's
+working dir:
+
+```bash
+PROJECT_PATH=$(curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/api/projects/$PID" | jq -r .path)
+
+# Remove the worktree directory + git's internal record.
+git -C "$PROJECT_PATH" worktree remove --force /path/to/worktree
+
+# Delete the branch left behind, if any.
+git -C "$PROJECT_PATH" branch -D task/<task_id>
+```
+
+`git worktree prune` is also safe if a worktree directory has been deleted
+out from under git but the bookkeeping entry remains.
+
+### Stuck integration job
+
+An integration job whose merge conflicts the agent can't resolve stays at
+`phase=integrating`. Followup turns on the same job can fix it:
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "$BASE/api/jobs/$JID/followup" \
+  -d '{"prompt":"the conflict in src/auth.py was a comment-only divergence; keep main"}'
+```
+
+If you give up, `POST /api/jobs/$JID/stop` then `POST /api/tasks/$INT_TASK/cancel`.
+The input tasks stay at `integration_status=conflict`; you can recreate
+the integration task with a fresh `POST /api/projects/$PID/integrate`.
+
+---
+
 ## 5. Service ops
 
 ```bash
