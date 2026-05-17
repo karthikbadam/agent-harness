@@ -1,9 +1,10 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { Box, Button, Center, HStack, Spinner, Text } from "@chakra-ui/react";
+import { Box, Button, Center, Spinner, Text } from "@chakra-ui/react";
 
 import { Shell } from "../components/Shell";
 import { TurnTranscript } from "../components/TurnTranscript";
 import { Composer } from "../components/Composer";
+import { StickyComposer } from "../components/StickyComposer";
 import { useFollowup, useJob, useStopJob } from "../hooks/useJobs";
 import { useJobEvents, useJobStream } from "../hooks/useJobStream";
 
@@ -17,17 +18,34 @@ export function JobDetailPage() {
   const stop = useStopJob(jobId ?? "");
 
   const running = job.data?.status === "running" || job.data?.status === "queued";
+  const subtitleParts: string[] = [];
+  if (job.data?.kind && job.data.kind !== "ad_hoc") subtitleParts.push(job.data.kind);
+  if (job.data?.status) subtitleParts.push(job.data.status);
+  const subtitle = subtitleParts.join(" · ") || undefined;
 
   return (
     <Shell
       title={job.data?.title ?? "Job"}
+      subtitle={subtitle}
       back={job.data?.task_id ? `/jobs?task_id=${job.data.task_id}` : "/jobs"}
+      composerHeight={110}
       right={
-        running ? (
-          <Button size="xs" variant="outline" colorPalette="red" onClick={() => stop.mutate()}>
-            Stop
-          </Button>
-        ) : undefined
+        <>
+          {job.data?.task_id && (
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => navigate(`/projects/${job.data!.project_id}`)}
+            >
+              Project
+            </Button>
+          )}
+          {running && (
+            <Button size="xs" variant="outline" colorPalette="red" onClick={() => stop.mutate()}>
+              Stop
+            </Button>
+          )}
+        </>
       }
     >
       {job.isLoading && (
@@ -36,31 +54,10 @@ export function JobDetailPage() {
         </Center>
       )}
       {job.error && <Text color="red.fg">Failed to load job.</Text>}
-      {job.data && (
-        <HStack gap={2} mb={3} fontSize="xs" color="fg.muted" wrap="wrap">
-          {job.data.kind && job.data.kind !== "ad_hoc" && (
-            <Text>kind: {job.data.kind}</Text>
-          )}
-          {job.data.task_id && (
-            <>
-              <Text>·</Text>
-              <Button
-                size="2xs"
-                variant="outline"
-                onClick={() =>
-                  navigate(`/projects/${job.data!.project_id}`)
-                }
-              >
-                Open project
-              </Button>
-            </>
-          )}
-        </HStack>
-      )}
-      <Box pb={20}>
+      <Box>
         <TurnTranscript events={events} job={job.data} />
       </Box>
-      <Box position="fixed" left={0} right={0} bottom={0} bg="bg">
+      <StickyComposer>
         <Composer
           placeholder={running ? "Wait for current turn..." : "Type a followup..."}
           disabled={running}
@@ -68,7 +65,7 @@ export function JobDetailPage() {
             await followup.mutateAsync({ prompt });
           }}
         />
-      </Box>
+      </StickyComposer>
     </Shell>
   );
 }

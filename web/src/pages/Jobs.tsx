@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Box,
   Button,
   Center,
   Flex,
@@ -14,6 +13,7 @@ import {
 import { Shell } from "../components/Shell";
 import { Composer } from "../components/Composer";
 import { JobCard } from "../components/JobCard";
+import { StickyComposer } from "../components/StickyComposer";
 import { parseServerDate } from "../api/dates";
 import { useCreateJob, useJobs } from "../hooks/useJobs";
 import { useProjects } from "../hooks/useProjects";
@@ -41,7 +41,7 @@ export function JobsPage() {
     projects,
   ]);
 
-  const hasFilter = taskFilter || projectFilter;
+  const hasFilter = Boolean(taskFilter || projectFilter);
   const clearFilters = () => {
     const next = new URLSearchParams(params);
     next.delete("task_id");
@@ -49,15 +49,22 @@ export function JobsPage() {
     setParams(next);
   };
 
+  const title = taskFilter
+    ? "Task jobs"
+    : projectFilter
+      ? projects?.find((p) => p.id === projectFilter)?.name ?? "Project jobs"
+      : "Jobs";
+  const subtitle = taskFilter
+    ? `Filtered to task ${taskFilter.slice(0, 8)}`
+    : projectFilter
+      ? "All jobs in this project"
+      : undefined;
+
   return (
     <Shell
-      title={
-        taskFilter
-          ? `Jobs · task ${taskFilter.slice(0, 6)}`
-          : projectFilter
-            ? `Jobs · ${projects?.find((p) => p.id === projectFilter)?.name ?? "project"}`
-            : "Jobs"
-      }
+      title={title}
+      subtitle={subtitle}
+      composerHeight={110}
       right={
         hasFilter ? (
           <Button size="xs" variant="ghost" onClick={clearFilters}>
@@ -66,79 +73,66 @@ export function JobsPage() {
         ) : undefined
       }
     >
-      <Box pb="calc(160px + env(safe-area-inset-bottom))">
-        {isLoading && (
-          <Center py={8}>
-            <Spinner />
-          </Center>
-        )}
-        {error && <Text color="red.fg">Failed to load jobs.</Text>}
-        {jobs && jobs.length === 0 && (
-          <Center py={12}>
-            <Stack gap={2} align="center" maxW="md" textAlign="center">
-              <Heading size="sm" color="fg.muted">
-                {hasFilter ? "No matching jobs" : "No jobs yet"}
+      {isLoading && (
+        <Center py={8}>
+          <Spinner />
+        </Center>
+      )}
+      {error && <Text color="red.fg">Failed to load jobs.</Text>}
+      {jobs && jobs.length === 0 && (
+        <Center py={12}>
+          <Stack gap={2} align="center" maxW="md" textAlign="center">
+            <Heading size="sm" color="fg.muted">
+              {hasFilter ? "No matching jobs" : "No jobs yet"}
+            </Heading>
+            <Text fontSize="sm" color="fg.subtle">
+              {hasFilter
+                ? "Try clearing the filter, or start a new job below."
+                : "Type a prompt below to start an ad-hoc job."}
+            </Text>
+          </Stack>
+        </Center>
+      )}
+      <Stack gap={6} maxW="container.md">
+        {groups.map((g) => (
+          <Stack key={g.projectId} gap={2.5}>
+            <Flex align="baseline" gap={2}>
+              <Heading
+                size="xs"
+                color="fg.muted"
+                textTransform="uppercase"
+                letterSpacing="wider"
+                fontWeight="medium"
+                cursor="pointer"
+                _hover={{ color: "fg" }}
+                onClick={() => navigate(`/projects/${g.projectId}`)}
+              >
+                {g.label}
               </Heading>
-              <Text fontSize="sm" color="fg.subtle">
-                {hasFilter
-                  ? "Try clearing the filter, or start a new job below."
-                  : "Type a prompt below to start an ad-hoc job."}
+              <Text fontSize="2xs" color="fg.subtle">
+                {g.jobs.length}
               </Text>
+            </Flex>
+            <Stack gap={2}>
+              {g.jobs.map((j) => (
+                <JobCard key={j.id} job={j} />
+              ))}
             </Stack>
-          </Center>
-        )}
-        <Stack gap={6} maxW="container.md">
-          {groups.map((g) => (
-            <Stack key={g.projectId} gap={2.5}>
-              <Flex align="baseline" gap={2}>
-                <Heading
-                  size="xs"
-                  color="fg.muted"
-                  textTransform="uppercase"
-                  letterSpacing="wider"
-                  fontWeight="medium"
-                  cursor="pointer"
-                  _hover={{ color: "fg" }}
-                  onClick={() => navigate(`/projects/${g.projectId}`)}
-                >
-                  {g.label}
-                </Heading>
-                <Text fontSize="2xs" color="fg.subtle">
-                  {g.jobs.length}
-                </Text>
-              </Flex>
-              <Stack gap={2}>
-                {g.jobs.map((j) => (
-                  <JobCard key={j.id} job={j} />
-                ))}
-              </Stack>
-            </Stack>
-          ))}
-        </Stack>
-      </Box>
-      <Box
-        position="fixed"
-        left={{ base: 0, md: "224px" }}
-        right={0}
-        bottom={0}
-        bg="bg"
-        borderTopWidth="1px"
-        borderColor="border.subtle"
-        zIndex={5}
-      >
-        <Box maxW="container.md" mx={{ base: 0, md: "auto" }}>
-          <Composer
-            placeholder="Start an ad-hoc job…"
-            onSend={async (prompt) => {
-              const job = await createJob.mutateAsync({
-                prompt,
-                project_id: projectFilter || undefined,
-              });
-              navigate(`/jobs/${job.id}`);
-            }}
-          />
-        </Box>
-      </Box>
+          </Stack>
+        ))}
+      </Stack>
+      <StickyComposer>
+        <Composer
+          placeholder="Start an ad-hoc job…"
+          onSend={async (prompt) => {
+            const job = await createJob.mutateAsync({
+              prompt,
+              project_id: projectFilter || undefined,
+            });
+            navigate(`/jobs/${job.id}`);
+          }}
+        />
+      </StickyComposer>
     </Shell>
   );
 }
@@ -157,7 +151,6 @@ function groupByProject(jobs: JobOut[], projects: ProjectOut[]): ProjectGroup[] 
     arr.push(j);
     byProj.set(j.project_id, arr);
   }
-  // Sort each project's jobs by created_at desc (newest first).
   for (const arr of byProj.values()) {
     arr.sort(
       (a, b) =>
@@ -165,7 +158,6 @@ function groupByProject(jobs: JobOut[], projects: ProjectOut[]): ProjectGroup[] 
         parseServerDate(a.created_at).getTime(),
     );
   }
-  // Sort projects by their newest job (most-recently-active project first).
   const groups: ProjectGroup[] = Array.from(byProj.entries()).map(([pid, js]) => ({
     projectId: pid,
     label: nameById.get(pid) ?? pid.slice(0, 8),

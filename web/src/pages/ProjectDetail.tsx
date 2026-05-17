@@ -19,6 +19,7 @@ import { Shell } from "../components/Shell";
 import { AutopilotToggle } from "../components/AutopilotToggle";
 import { Composer } from "../components/Composer";
 import { MarkdownText } from "../components/MarkdownText";
+import { StickyComposer } from "../components/StickyComposer";
 import { TaskCard } from "../components/TaskCard";
 import { parseServerDate, relativeTime } from "../api/dates";
 import { useJobs } from "../hooks/useJobs";
@@ -54,10 +55,12 @@ export function ProjectDetailPage() {
   return (
     <Shell
       title={project?.name ?? "Project"}
+      subtitle={project?.path}
       back="/"
+      composerHeight={project ? 110 : 0}
       right={
         project ? (
-          <HStack gap={2}>
+          <>
             {lastPlan && (
               <Button
                 size="xs"
@@ -72,89 +75,68 @@ export function ProjectDetailPage() {
               </Button>
             )}
             <AutopilotToggle projectId={project.id} />
-          </HStack>
+          </>
         ) : undefined
       }
     >
-      <Box pb="calc(160px + env(safe-area-inset-bottom))">
-        {(projectsLoading || tasksLoading) && (
-          <Center py={8}>
-            <Spinner />
-          </Center>
-        )}
-        {!projectsLoading && !project && (
-          <Center py={12}>
-            <Text color="fg.muted">Project not found.</Text>
-          </Center>
-        )}
-        {project && (
-          <Stack gap={5} maxW="container.md">
-            <Stack gap={1}>
-              <Heading size="lg" fontWeight="semibold" lineHeight="short">
-                {project.name}
-              </Heading>
-              <Text fontSize="xs" color="fg.subtle" fontFamily="mono">
-                {project.path}
-              </Text>
-            </Stack>
-            {planning && (
-              <PlanningBanner job={activePlanJob} pending={plan.isPending} />
-            )}
-            {!planning && lastFailedPlanJob && (
-              <FailedPlanBanner job={lastFailedPlanJob} />
-            )}
-            {tasks && tasks.length === 0 && !planning && !lastFailedPlanJob && (
-              <EmptyTasksHint />
-            )}
-            <Stack gap={6}>
-              {groups.map((g) => (
-                <Stack key={g.label} gap={2.5}>
-                  <Flex align="baseline" gap={2}>
-                    <Heading
-                      size="xs"
-                      color="fg.muted"
-                      textTransform="uppercase"
-                      letterSpacing="wider"
-                      fontWeight="medium"
-                    >
-                      {g.label}
-                    </Heading>
-                    <Text fontSize="2xs" color="fg.subtle">
-                      {g.tasks.length}
-                    </Text>
-                  </Flex>
-                  <Stack gap={2}>
-                    {g.tasks.map((t) => (
-                      <TaskCard key={t.id} task={t} />
-                    ))}
-                  </Stack>
-                </Stack>
-              ))}
-            </Stack>
-          </Stack>
-        )}
-      </Box>
+      {(projectsLoading || tasksLoading) && (
+        <Center py={8}>
+          <Spinner />
+        </Center>
+      )}
+      {!projectsLoading && !project && (
+        <Center py={12}>
+          <Text color="fg.muted">Project not found.</Text>
+        </Center>
+      )}
       {project && (
-        <Box
-          position="fixed"
-          left={{ base: 0, md: "224px" }}
-          right={0}
-          bottom={0}
-          bg="bg"
-          borderTopWidth="1px"
-          borderColor="border.subtle"
-          zIndex={5}
-        >
-          <Box maxW="container.md" mx={{ base: 0, md: "auto" }}>
-            <Composer
-              placeholder="Plan a new task — describe what should happen"
-              disabled={planning}
-              onSend={async (prompt) => {
-                await plan.mutateAsync(prompt);
-              }}
-            />
-          </Box>
-        </Box>
+        <Stack gap={5} maxW="container.md">
+          {planning && (
+            <PlanningBanner job={activePlanJob} pending={plan.isPending} />
+          )}
+          {!planning && lastFailedPlanJob && (
+            <FailedPlanBanner job={lastFailedPlanJob} />
+          )}
+          {tasks && tasks.length === 0 && !planning && !lastFailedPlanJob && (
+            <EmptyTasksHint />
+          )}
+          <Stack gap={6}>
+            {groups.map((g) => (
+              <Stack key={g.label} gap={2.5}>
+                <Flex align="baseline" gap={2}>
+                  <Heading
+                    size="xs"
+                    color="fg.muted"
+                    textTransform="uppercase"
+                    letterSpacing="wider"
+                    fontWeight="medium"
+                  >
+                    {g.label}
+                  </Heading>
+                  <Text fontSize="2xs" color="fg.subtle">
+                    {g.tasks.length}
+                  </Text>
+                </Flex>
+                <Stack gap={2}>
+                  {g.tasks.map((t) => (
+                    <TaskCard key={t.id} task={t} />
+                  ))}
+                </Stack>
+              </Stack>
+            ))}
+          </Stack>
+        </Stack>
+      )}
+      {project && (
+        <StickyComposer>
+          <Composer
+            placeholder="Plan a new task — describe what should happen"
+            disabled={planning}
+            onSend={async (prompt) => {
+              await plan.mutateAsync(prompt);
+            }}
+          />
+        </StickyComposer>
       )}
       <PlanDrawer open={planOpen} onClose={() => setPlanOpen(false)} />
     </Shell>
