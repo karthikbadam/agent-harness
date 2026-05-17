@@ -188,7 +188,7 @@ class JobManager:
             ).scalar_one()
             project = s.get(models.Project, job.project_id)
             assert project is not None
-            cwd = project.path
+            cwd = job.cwd_override or project.path
             prompt = turn.prompt
             permission_mode = project.permission_mode
             dangerously_skip = project.dangerously_skip
