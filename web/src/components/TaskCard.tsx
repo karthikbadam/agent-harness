@@ -4,12 +4,48 @@ import { LuGitBranch } from "react-icons/lu";
 
 import type { TaskOut } from "../types";
 import { useAckTask, useRetryTask, useRunTask } from "../hooks/useTasks";
-import { PhaseTracker } from "./PhaseTracker";
-import { StatusPill } from "./StatusPill";
 
 interface Props {
   task: TaskOut;
 }
+
+interface StatusBadge {
+  label: string;
+  color: "blue" | "green" | "red" | "orange" | "gray" | "teal";
+  pulse?: boolean;
+}
+
+function badgeForTask(t: TaskOut): StatusBadge {
+  if (t.status === "failed" || t.phase === "failed")
+    return { label: "Failed", color: "red" };
+  if (t.status === "canceled") return { label: "Canceled", color: "orange" };
+  if (t.phase === "awaiting_ack") return { label: "Awaiting ack", color: "blue" };
+  if (t.phase === "planning") return { label: "Planning…", color: "blue", pulse: true };
+  if (t.phase === "executing") return { label: "Executing…", color: "blue", pulse: true };
+  if (t.phase === "integrating") return { label: "Integrating…", color: "blue", pulse: true };
+  if (t.status === "running") return { label: "Running…", color: "blue", pulse: true };
+  if (t.status === "done") return { label: "Done", color: "green" };
+  if (t.status === "ready") return { label: "Ready", color: "teal" };
+  if (t.status === "pending") return { label: "Blocked on deps", color: "gray" };
+  return { label: t.status, color: "gray" };
+}
+
+const DOT_BG: Record<StatusBadge["color"], string> = {
+  blue: "blue.solid",
+  green: "green.solid",
+  red: "red.solid",
+  orange: "orange.solid",
+  teal: "teal.solid",
+  gray: "border",
+};
+const DOT_FG: Record<StatusBadge["color"], string> = {
+  blue: "blue.fg",
+  green: "green.fg",
+  red: "red.fg",
+  orange: "orange.fg",
+  teal: "teal.fg",
+  gray: "fg.muted",
+};
 
 export function TaskCard({ task }: Props) {
   const navigate = useNavigate();
@@ -20,40 +56,58 @@ export function TaskCard({ task }: Props) {
   const canRun = task.status === "ready";
   const canAck = task.phase === "awaiting_ack";
   const canRetry = task.status === "failed";
-  const showPhase = !task.synthetic && task.mode === "plan_then_execute" && (
-    task.status === "running" ||
-    task.status === "done" ||
-    task.status === "failed"
-  );
+
+  const badge = badgeForTask(task);
 
   return (
     <Box
       bg="bg.subtle"
-      borderRadius="lg"
+      rounded="lg"
       px={4}
       py={3.5}
       _hover={{ bg: "bg.muted" }}
       transition="background-color 0.15s"
     >
-      <Stack gap={3}>
+      <Stack gap={2.5}>
         <Flex justify="space-between" align="flex-start" gap={3}>
-          <Stack gap={1} flex="1" minW={0}>
+          <Stack gap={1.5} flex="1" minW={0}>
             <Text fontWeight="medium" lineHeight="short" truncate>
               {task.title}
             </Text>
-            <HStack gap={2} fontSize="2xs" color="fg.muted" wrap="wrap">
-              <StatusPill status={task.status} />
+            <HStack gap={1.5} align="center">
+              <Box
+                boxSize="1.5"
+                rounded="full"
+                bg={DOT_BG[badge.color]}
+                animation={badge.pulse ? "pulse 1.4s ease-in-out infinite" : undefined}
+              />
+              <Text
+                fontSize="xs"
+                color={DOT_FG[badge.color]}
+                fontWeight="medium"
+              >
+                {badge.label}
+              </Text>
+              {task.source === "planner" && (
+                <>
+                  <Text fontSize="2xs" color="fg.subtle">
+                    ·
+                  </Text>
+                  <Text fontSize="2xs" color="fg.muted">
+                    planner
+                  </Text>
+                </>
+              )}
               {task.synthetic && (
-                <Text textTransform="uppercase" letterSpacing="wider">
-                  · integrate
-                </Text>
+                <>
+                  <Text fontSize="2xs" color="fg.subtle">
+                    ·
+                  </Text>
+                  <Text fontSize="2xs" color="fg.muted">
+                    integration
+                  </Text>
+                </>
               )}
-              {task.mode === "one_shot" && !task.synthetic && (
-                <Text textTransform="uppercase" letterSpacing="wider">
-                  · quick
-                </Text>
-              )}
-              <Text>· {task.source}</Text>
             </HStack>
           </Stack>
           <HStack gap={1.5} flexShrink={0}>
@@ -90,7 +144,6 @@ export function TaskCard({ task }: Props) {
             )}
           </HStack>
         </Flex>
-        {showPhase && <PhaseTracker phase={task.phase} status={task.status} />}
         <Flex justify="space-between" align="center" gap={2} fontSize="2xs" color="fg.muted">
           {task.worktree_branch ? (
             <HStack gap={1.5}>
