@@ -122,4 +122,8 @@ def create_integration_task(
         for t in inputs:
             s.add(models.TaskDependency(task_id=synth.id, depends_on_id=t.id))
         s.flush()
-        return synth.id
+        synth_id = synth.id
+    from . import driver_bus
+
+    driver_bus.get_bus().emit("task_ready", project_id, task_id=synth_id)
+    return synth_id

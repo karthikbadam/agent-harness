@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import select
 
 from .. import models
 from ..db import session_scope
-from . import worktrees
+from . import driver_bus, worktrees
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +104,11 @@ def _all_deps_done(s, task_id: str) -> bool:
     return all(st == "done" for st in statuses)
 
 
-def _reevaluate_downstream(s, task_id: str) -> None:
+def _reevaluate_downstream(s, task_id: str) -> list[tuple[str, str]]:
+    """Flip eligible downstream tasks to 'ready'. Returns (task_id, project_id)
+    pairs for tasks that transitioned, so the caller can emit driver events.
+    """
+    transitions: list[tuple[str, str]] = []
     rows = s.execute(
         select(models.TaskDependency.task_id).where(
             models.TaskDependency.depends_on_id == task_id
@@ -115,6 +120,8 @@ def _reevaluate_downstream(s, task_id: str) -> None:
             continue
         if ds.status == "pending" and _all_deps_done(s, downstream_id):
             ds.status = "ready"
+            transitions.append((ds.id, ds.project_id))
+    return transitions
 
 
 def on_job_finalized(
@@ -135,6 +142,8 @@ def on_job_finalized(
       or ``failed``, and propagate readiness to dependents. For plan-then-
       execute tasks the worktree branch is recorded so integration can find it.
     """
+    bus = driver_bus.get_bus()
+    pending_events: list[tuple[str, dict]] = []  # collected, emitted after commit
     with session_scope() as s:
         job = s.get(models.Job, job_id)
         if job is None or job.task_id is None:
@@ -144,6 +153,7 @@ def on_job_finalized(
             log.warning("task %s missing for job %s; outcome skipped", job.task_id, job_id)
             return
         project = s.get(models.Project, job.project_id)
+        project_id = job.project_id
 
         if job.phase == "awaiting_ack":
             # Planning turn just finished cleanly. Capture the plan text; keep
@@ -161,6 +171,10 @@ def on_job_finalized(
                     kind="plan",
                 )
             )
+            pending_events.append(
+                ("plan_ready", {"project_id": project_id, "task_id": task.id, "job_id": job.id})
+            )
+            _emit_after(bus, pending_events)
             return
 
         if task.synthetic:
@@ -183,6 +197,8 @@ def on_job_finalized(
                 )
             )
             task.status = "done" if job_status == "done" else "failed"
+            if task.status == "failed":
+                task.last_failed_at = datetime.now(timezone.utc)
             dep_rows = s.execute(
                 select(models.TaskDependency.depends_on_id).where(
                     models.TaskDependency.task_id == task.id
@@ -201,7 +217,14 @@ def on_job_finalized(
                 else:
                     dep.integration_status = "conflict"
             s.flush()
-            _reevaluate_downstream(s, task.id)
+            transitions = _reevaluate_downstream(s, task.id)
+            event = "integration_done" if job_status == "done" else "integration_conflict"
+            pending_events.append(
+                (event, {"project_id": project_id, "task_id": task.id, "job_id": job.id})
+            )
+            for tid, pid in transitions:
+                pending_events.append(("task_ready", {"project_id": pid, "task_id": tid}))
+            _emit_after(bus, pending_events)
             return
 
         # Execute / one-shot / ad-hoc path.
@@ -221,10 +244,24 @@ def on_job_finalized(
             )
         )
         task.status = "done" if job_status == "done" else "failed"
+        if task.status == "failed":
+            task.last_failed_at = datetime.now(timezone.utc)
         if task.status == "done" and task.mode == "plan_then_execute" and not task.synthetic:
             task.integration_status = "pending"
         s.flush()
-        _reevaluate_downstream(s, task.id)
+        transitions = _reevaluate_downstream(s, task.id)
+        event = "task_done" if task.status == "done" else "task_failed"
+        pending_events.append(
+            (event, {"project_id": project_id, "task_id": task.id, "job_id": job.id})
+        )
+        for tid, pid in transitions:
+            pending_events.append(("task_ready", {"project_id": pid, "task_id": tid}))
+    _emit_after(bus, pending_events)
+
+
+def _emit_after(bus: "driver_bus.DriverEventBus", events: list[tuple[str, dict]]) -> None:
+    for event, kw in events:
+        bus.emit(event, **kw)
 
 
 def on_ack(job_id: str, prompt_addendum: str = "") -> str:

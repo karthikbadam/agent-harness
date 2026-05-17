@@ -173,6 +173,10 @@ def create_task(
     t.status = _initial_status(s, t.id)
     s.commit()
     s.refresh(t)
+    if t.status == "ready":
+        from ..services import driver_bus
+
+        driver_bus.get_bus().emit("task_ready", project_id, task_id=t.id)
     return _to_out(s, t)
 
 
@@ -354,7 +358,14 @@ def split_task(
             ds.status = _initial_status(s, downstream)
     s.commit()
 
-    return [_to_out(s, s.get(models.Task, nid)) for nid in new_ids]
+    out_tasks = [s.get(models.Task, nid) for nid in new_ids]
+    from ..services import driver_bus
+
+    bus = driver_bus.get_bus()
+    for nt in out_tasks:
+        if nt is not None and nt.status == "ready":
+            bus.emit("task_ready", nt.project_id, task_id=nt.id)
+    return [_to_out(s, nt) for nt in out_tasks if nt is not None]
 
 
 @router.post("/api/tasks/merge", response_model=TaskOut)
@@ -446,6 +457,10 @@ def merge_tasks(body: MergeIn, s: Session = Depends(get_session)) -> TaskOut:
             ds.status = _initial_status(s, down)
     s.commit()
     s.refresh(merged)
+    if merged.status == "ready":
+        from ..services import driver_bus
+
+        driver_bus.get_bus().emit("task_ready", merged.project_id, task_id=merged.id)
     return _to_out(s, merged)
 
 
