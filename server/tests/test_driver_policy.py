@@ -139,6 +139,23 @@ def test_no_integrate_while_one_is_running(initdb: Path) -> None:
     assert not [a for a in actions if a.kind == "integrate"]
 
 
+def test_no_integrate_while_one_is_ready(initdb: Path) -> None:
+    """Regression for the duplicate-integrate race: a synthetic task in
+    ``ready`` (created via /integrate but not yet kicked) must also suppress
+    further integrate actions. Without this, the driver polls in the brief
+    create→start window and fires a second integrate for the same wave.
+    Synthetic tasks start in ``ready``, so this is the actual race we hit."""
+    for status in ("pending", "ready"):
+        with session_scope() as s:
+            pid = _proj(s)
+            _task(s, pid, "int", status=status, synthetic=True, mode="one_shot")
+            _task(s, pid, "t1", status="done", integration_status="pending")
+            actions = driver_policy.next_actions(s, pid)
+        assert not [a for a in actions if a.kind == "integrate"], (
+            f"unexpected integrate when synthetic task is in status={status!r}"
+        )
+
+
 def test_run_bounded_by_parallel_cap(initdb: Path) -> None:
     with session_scope() as s:
         pid = _proj(s)

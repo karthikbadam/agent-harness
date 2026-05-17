@@ -62,13 +62,20 @@ def _running_count(s: Session, project_id: str) -> int:
     )
 
 
-def _integration_running(s: Session, project_id: str) -> bool:
+def _integration_in_flight(s: Session, project_id: str) -> bool:
+    """True iff there's a synthetic integration task in a non-terminal status.
+
+    Suppresses duplicate integrate actions during the small window between
+    ``POST /integrate`` (which creates the synthetic task in ``status='ready'``)
+    and ``POST /run`` (which flips it to ``running``). Without this, the driver
+    polls in that window and fires a second integrate for the same wave.
+    """
     return bool(
         s.execute(
             select(models.Task.id).where(
                 models.Task.project_id == project_id,
                 models.Task.synthetic.is_(True),
-                models.Task.status == "running",
+                models.Task.status.in_(["pending", "ready", "running"]),
             )
         ).first()
     )
@@ -194,7 +201,7 @@ def next_actions(
             return actions
 
     # 3. integrate
-    if not _integration_running(s, project_id):
+    if not _integration_in_flight(s, project_id):
         wave = _wave(s, project_id)
         if wave:
             actions.append(
