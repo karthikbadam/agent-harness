@@ -53,6 +53,63 @@ def _git_head(project_path: str) -> tuple[str | None, str | None]:
     return sha, branch
 
 
+def _branch_tip(project_path: str, branch: str) -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", project_path, "rev-parse", branch],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode().strip()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _commit_reachable_from_other_branch(
+    project_path: str, sha: str, exclude_branch: str
+) -> bool:
+    """Return True iff ``sha`` is reachable from some local branch other than
+    ``exclude_branch``. Used to verify an integration actually moved each input
+    task's work somewhere persistent before we delete its task branch."""
+    try:
+        names = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                project_path,
+                "branch",
+                "--contains",
+                sha,
+                "--format=%(refname:short)",
+            ],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode().splitlines()
+    except Exception:  # noqa: BLE001
+        return False
+    return any(n.strip() and n.strip() != exclude_branch for n in names)
+
+
+def _integration_actually_landed(project_path: str, input_tasks) -> bool:
+    """Defensive check at integration finalize: for every input task whose
+    worktree branch carries commits past the base, those commits must now be
+    reachable from another local branch (the merge target). If any task's tip
+    is only reachable via its own task/<id> branch, the integration didn't
+    actually merge — the agent gave up or hit a permission wall. We refuse to
+    declare success and wipe the input branches in that case."""
+    if not project_path:
+        return False
+    for dep in input_tasks:
+        branch = dep.worktree_branch
+        if not branch:
+            continue
+        tip = _branch_tip(project_path, branch)
+        if tip is None:
+            continue
+        if not _commit_reachable_from_other_branch(project_path, tip, branch):
+            return False
+    return True
+
+
 def _commit_dirty_worktree(cwd: str, message: str) -> bool:
     """If ``cwd`` is a git worktree with uncommitted changes, stage and commit
     them with ``message``. Returns True if a commit was created. Used as a
@@ -226,7 +283,28 @@ def on_job_finalized(
             cwd = project.path if project else None
             sha, branch = (_git_head(cwd) if cwd else (None, None))
             summary = _last_assistant_text(log_dir) if log_dir is not None else None
-            outcome_status = "success" if job_status == "done" else "failed"
+            dep_rows = s.execute(
+                select(models.TaskDependency.depends_on_id).where(
+                    models.TaskDependency.task_id == task.id
+                )
+            ).all()
+            input_tasks = [s.get(models.Task, dep_id) for (dep_id,) in dep_rows]
+            input_tasks = [t for t in input_tasks if t is not None]
+            # Verify the merge actually landed before declaring success: each
+            # input task's tip must be reachable from a branch other than its
+            # own task/<id>. If the agent stopped without merging, this catches
+            # it and we mark the integration failed instead of silently wiping
+            # the input branches and orphaning the work.
+            merge_landed = job_status == "done" and _integration_actually_landed(
+                cwd or "", input_tasks
+            )
+            outcome_status = "success" if merge_landed else "failed"
+            if job_status == "done" and not merge_landed:
+                log.warning(
+                    "integration job %s exited clean but no input branch was merged; "
+                    "marking outcome failed and preserving task branches",
+                    job.id,
+                )
             s.add(
                 models.Outcome(
                     task_id=task.id,
@@ -238,19 +316,11 @@ def on_job_finalized(
                     kind="integrate",
                 )
             )
-            task.status = "done" if job_status == "done" else "failed"
+            task.status = "done" if merge_landed else "failed"
             if task.status == "failed":
                 task.last_failed_at = datetime.now(timezone.utc)
-            dep_rows = s.execute(
-                select(models.TaskDependency.depends_on_id).where(
-                    models.TaskDependency.task_id == task.id
-                )
-            ).all()
-            for (dep_id,) in dep_rows:
-                dep = s.get(models.Task, dep_id)
-                if dep is None:
-                    continue
-                if job_status == "done":
+            for dep in input_tasks:
+                if merge_landed:
                     if project is not None and (dep.worktree_path or dep.worktree_branch):
                         worktrees.remove(project, dep)
                         dep.worktree_path = None
@@ -260,7 +330,7 @@ def on_job_finalized(
                     dep.integration_status = "conflict"
             s.flush()
             transitions = _reevaluate_downstream(s, task.id)
-            event = "integration_done" if job_status == "done" else "integration_conflict"
+            event = "integration_done" if merge_landed else "integration_conflict"
             pending_events.append(
                 (event, {"project_id": project_id, "task_id": task.id, "job_id": job.id})
             )

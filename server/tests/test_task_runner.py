@@ -354,6 +354,120 @@ def test_executing_finalize_skips_commit_when_clean(
     assert new_sha == base_sha
 
 
+def _make_integration_fixture(tmp_path: Path):
+    """Repo + two input tasks on real worktree branches with one commit each,
+    plus a synthetic integration task depending on both. Returns (repo, tid_a,
+    tid_b, synth_id). Caller controls whether the target branch actually
+    merges the inputs to test landed-vs-not-landed paths."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    branches: list[tuple[str, str, str]] = []
+    for label in ("a", "b"):
+        wt = tmp_path / f"wt-{label}"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-b", f"task/{label}", str(wt)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        (wt / f"{label}.txt").write_text("hi", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(wt), "add", "-A"], check=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ["git", "-C", str(wt), "-c", "commit.gpgsign=false", "commit", "-m", f"work-{label}"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        branches.append((label, str(wt), f"task/{label}"))
+
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        inputs = []
+        for label, wt_path, br in branches:
+            t = models.Task(
+                project_id=proj.id, title=f"input-{label}", prompt="p",
+                status="done", mode="plan_then_execute",
+                worktree_path=wt_path, worktree_branch=br,
+                integration_status="pending",
+            )
+            s.add(t)
+            s.flush()
+            inputs.append(t.id)
+        synth = models.Task(
+            project_id=proj.id, title="integrate", prompt="merge them",
+            status="running", mode="one_shot", synthetic=True,
+        )
+        s.add(synth)
+        s.flush()
+        for in_id in inputs:
+            s.add(models.TaskDependency(task_id=synth.id, depends_on_id=in_id))
+        job = models.Job(
+            project_id=proj.id, task_id=synth.id, phase="integrating",
+        )
+        s.add(job)
+        s.flush()
+        return repo, inputs[0], inputs[1], synth.id, job.id
+
+
+def test_integration_finalize_succeeds_when_target_has_merged(
+    initdb: Path, tmp_path: Path
+) -> None:
+    """When the agent did merge the input branches into a target branch, the
+    inputs' tips are reachable from another branch — finalize should mark
+    integration success and clean up."""
+    repo, tid_a, tid_b, synth_id, jid = _make_integration_fixture(tmp_path)
+    # Simulate the agent's work: create harness-test/target and merge both
+    # input branches into it.
+    subprocess.run(
+        ["git", "-C", str(repo), "branch", "harness-test/target", "main"],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "harness-test/target"],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    for br in ("task/a", "task/b"):
+        subprocess.run(
+            ["git", "-C", str(repo), "-c", "commit.gpgsign=false",
+             "merge", "--no-ff", "--no-edit", br],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
+    task_runner.on_job_finalized(jid, "done", log_dir=None)
+
+    with session_scope() as s:
+        outcome = s.query(models.Outcome).one()
+        assert outcome.status == "success"
+        assert outcome.kind == "integrate"
+        assert s.get(models.Task, tid_a).integration_status == "integrated"
+        assert s.get(models.Task, tid_b).integration_status == "integrated"
+        # Worktree fields cleared post-cleanup.
+        assert s.get(models.Task, tid_a).worktree_branch is None
+
+
+def test_integration_finalize_fails_when_no_merge_happened(
+    initdb: Path, tmp_path: Path
+) -> None:
+    """If the agent exited cleanly without actually merging (e.g. blocked on
+    permissions and gave up), finalize must NOT mark success — that would
+    silently orphan the work. Inputs stay 'conflict' and branches survive."""
+    repo, tid_a, tid_b, synth_id, jid = _make_integration_fixture(tmp_path)
+    # No merge done. Just call finalize with the clean exit status.
+    task_runner.on_job_finalized(jid, "done", log_dir=None)
+
+    with session_scope() as s:
+        outcome = s.query(models.Outcome).one()
+        assert outcome.status == "failed"
+        assert outcome.kind == "integrate"
+        # Inputs are marked conflict, not integrated.
+        assert s.get(models.Task, tid_a).integration_status == "conflict"
+        assert s.get(models.Task, tid_b).integration_status == "conflict"
+        # Branches survive (worktree fields retained).
+        assert s.get(models.Task, tid_a).worktree_branch == "task/a"
+
+
 def test_on_ack_creates_worktree_and_flips_phase(
     initdb: Path, tmp_path: Path
 ) -> None:
