@@ -80,6 +80,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     schedules = ScheduleService(manager)
     schedules.start()
     app.state.schedules = schedules
+    # The mounted MCP streamable-http app has its own session manager that
+    # only initializes inside its lifespan. Mounting the app alone doesn't
+    # run that lifespan, so MCP requests would crash with "Task group is not
+    # initialized". Chain the MCP app's lifespan into ours.
+    mcp_app = getattr(app.state, "mcp_http_app", None)
+    if mcp_app is not None:
+        async with mcp_app.router.lifespan_context(mcp_app):
+            try:
+                yield
+            finally:
+                schedules.shutdown()
+                for proc in list(app.state.owned_drivers.values()):
+                    try:
+                        proc.terminate()
+                    except Exception:  # noqa: BLE001
+                        pass
+                app.state.owned_drivers.clear()
+        return
     try:
         yield
     finally:
@@ -123,9 +141,14 @@ def create_app() -> FastAPI:
 
     # Mount the orchestrator MCP at /mcp with the same bearer-token guard as
     # /api/*. External Claude sessions (or curl) connect here; tools are 1:1
-    # with REST routes so the API stays the source of truth.
+    # with REST routes so the API stays the source of truth. We stash the
+    # MCP app on app.state so the parent lifespan can chain its lifespan in
+    # — without that, the streamable-http session manager isn't initialized
+    # and every request 500s with "Task group is not initialized".
     mcp = orchestrator_mcp.build_mcp()
-    app.mount("/mcp", _BearerGuard(mcp.streamable_http_app()))
+    mcp_http_app = mcp.streamable_http_app()
+    app.state.mcp_http_app = mcp_http_app
+    app.mount("/mcp", _BearerGuard(mcp_http_app))
 
     dist = _web_dist_dir()
     if dist is not None:
