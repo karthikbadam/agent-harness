@@ -8,6 +8,7 @@ import { useJobNotifications } from "./hooks/useJobNotifications";
 import { AuthGate } from "./pages/AuthGate";
 import { JobsPage } from "./pages/Jobs";
 import { JobDetailPage } from "./pages/JobDetail";
+import { ProjectsPage } from "./pages/Projects";
 import { SchedulesPage } from "./pages/Schedules";
 
 function RequireAuth({ children }: { children: ReactElement }) {
@@ -33,6 +34,14 @@ export function App() {
         <Route path="/auth" element={<AuthGate />} />
         <Route
           path="/"
+          element={
+            <RequireAuth>
+              <ProjectsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/jobs"
           element={
             <RequireAuth>
               <JobsPage />
