@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import update
 from sqlalchemy.orm import Session
@@ -19,6 +21,12 @@ from ..services import claude_md, integration, worktrees
 from ..routes.tasks import _to_out as _task_to_out
 
 router = APIRouter(prefix="/api/projects", tags=["projects"], dependencies=[Depends(require_auth)])
+
+
+def _expand_path(p: str) -> str:
+    """Resolve ``~`` and ``~user`` in paths supplied by the FE composer. The
+    UI doesn't know the user's home dir, so we expand server-side."""
+    return os.path.expanduser(p) if p else p
 
 
 def _to_out(p: models.Project) -> ProjectOut:
@@ -55,7 +63,7 @@ def list_projects(s: Session = Depends(get_session)) -> list[ProjectOut]:
 def create_project(body: ProjectCreate, s: Session = Depends(get_session)) -> ProjectOut:
     p = models.Project(
         name=body.name,
-        path=body.path,
+        path=_expand_path(body.path),
         permission_mode=body.permission_mode,
         dangerously_skip=body.dangerously_skip,
         extra_claude_args=list(body.extra_claude_args),

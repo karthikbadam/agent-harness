@@ -13,6 +13,7 @@ import {
 import { LuChevronRight, LuFolderGit2 } from "react-icons/lu";
 
 import { Shell } from "../components/Shell";
+import { NewProjectComposer } from "../components/NewProjectComposer";
 import { useProjects } from "../hooks/useProjects";
 import { useJobs } from "../hooks/useJobs";
 import type { JobOut, ProjectOut } from "../types";
@@ -26,30 +27,46 @@ export function ProjectsPage() {
 
   return (
     <Shell title="Projects">
-      {isLoading && (
-        <Center py={10}>
-          <Spinner />
-        </Center>
-      )}
-      {projects && projects.length === 0 && <EmptyProjectsHint />}
-      {sorted.length > 0 && (
-        <Stack gap={6} maxW="container.md">
-          <ProjectGroup
-            label="Your projects"
-            projects={sorted.user}
-            stats={stats}
-            onOpen={(p) => navigate(`/projects/${p.id}`)}
-          />
-          {sorted.system.length > 0 && (
+      <Box pb="calc(160px + env(safe-area-inset-bottom))">
+        {isLoading && (
+          <Center py={10}>
+            <Spinner />
+          </Center>
+        )}
+        {projects && projects.length === 0 && <EmptyProjectsHint />}
+        {sorted.length > 0 && (
+          <Stack gap={6} maxW="container.md">
             <ProjectGroup
-              label="System"
-              projects={sorted.system}
+              label="Your projects"
+              projects={sorted.user}
               stats={stats}
               onOpen={(p) => navigate(`/projects/${p.id}`)}
             />
-          )}
-        </Stack>
-      )}
+            {sorted.system.length > 0 && (
+              <ProjectGroup
+                label="System"
+                projects={sorted.system}
+                stats={stats}
+                onOpen={(p) => navigate(`/projects/${p.id}`)}
+              />
+            )}
+          </Stack>
+        )}
+      </Box>
+      <Box
+        position="fixed"
+        left={{ base: 0, md: "224px" }}
+        right={0}
+        bottom={0}
+        bg="bg"
+        borderTopWidth="1px"
+        borderColor="border.subtle"
+        zIndex={5}
+      >
+        <Box maxW="container.md" mx={{ base: 0, md: "auto" }}>
+          <NewProjectComposer />
+        </Box>
+      </Box>
     </Shell>
   );
 }
