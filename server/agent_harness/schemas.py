@@ -132,7 +132,8 @@ class JobOut(BaseModel):
     session_id: str | None = None
     schedule_id: str | None = None
     task_id: str | None = None
-    phase: str | None = None
+    kind: str = "ad_hoc"  # ad_hoc|plan|execute|integrate
+    cwd: str = ""
     created_at: datetime
     ended_at: datetime | None = None
     turns: list[TurnOut] = Field(default_factory=list)
@@ -206,6 +207,7 @@ class TaskOut(BaseModel):
     title: str
     prompt: str
     status: str
+    phase: str | None = None  # planning|awaiting_ack|executing|integrating|done|failed
     source: str
     order_idx: int
     mode: str = "plan_then_execute"

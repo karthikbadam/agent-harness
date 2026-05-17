@@ -76,6 +76,12 @@ def _apply_column_migrations(engine: Engine) -> None:
         ("projects", "autopilot_mode", "VARCHAR(8) NOT NULL DEFAULT 'off'"),
         ("tasks", "retries", "INTEGER NOT NULL DEFAULT 0"),
         ("tasks", "last_failed_at", "DATETIME"),
+        # v3: phase moves to Task; Jobs carry kind + cwd. The old jobs.phase and
+        # jobs.cwd_override columns stay on disk for the lifetime of the install
+        # (sqlite ALTER doesn't drop columns) but the ORM no longer maps them.
+        ("tasks", "phase", "VARCHAR(16)"),
+        ("jobs", "kind", "VARCHAR(12) NOT NULL DEFAULT 'ad_hoc'"),
+        ("jobs", "cwd", "TEXT NOT NULL DEFAULT ''"),
     ]
 
     with engine.begin() as conn:
@@ -93,6 +99,42 @@ def _apply_column_migrations(engine: Engine) -> None:
             if table == "tasks" and column == "mode":
                 conn.exec_driver_sql(
                     "UPDATE tasks SET mode='one_shot' WHERE mode='plan_then_execute'"
+                )
+            # v3 backfill: copy the old jobs.phase into the new tasks.phase, and
+            # populate jobs.kind/cwd from the old fields so existing rows survive
+            # the cutover. The old columns stay readable via raw SQL but the ORM
+            # ignores them from here on.
+            if table == "tasks" and column == "phase":
+                conn.exec_driver_sql(
+                    """
+                    UPDATE tasks SET phase = (
+                      SELECT j.phase FROM jobs j
+                      WHERE j.task_id = tasks.id AND j.phase IS NOT NULL
+                      ORDER BY j.created_at DESC LIMIT 1
+                    )
+                    """
+                )
+            if table == "jobs" and column == "kind":
+                conn.exec_driver_sql(
+                    """
+                    UPDATE jobs SET kind = CASE
+                      WHEN task_id IS NULL THEN 'ad_hoc'
+                      WHEN phase = 'planning' OR phase = 'awaiting_ack' THEN 'plan'
+                      WHEN phase = 'executing' THEN 'execute'
+                      WHEN phase = 'integrating' THEN 'integrate'
+                      ELSE 'ad_hoc'
+                    END
+                    """
+                )
+            if table == "jobs" and column == "cwd":
+                conn.exec_driver_sql(
+                    """
+                    UPDATE jobs SET cwd = COALESCE(
+                      cwd_override,
+                      (SELECT p.path FROM projects p WHERE p.id = jobs.project_id),
+                      ''
+                    )
+                    """
                 )
 
 
