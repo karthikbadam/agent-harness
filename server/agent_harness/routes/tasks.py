@@ -151,13 +151,22 @@ def _detect_cycle(s: Session, task_id: str, new_deps: list[str]) -> None:
     response_model=TaskOut,
     status_code=status.HTTP_201_CREATED,
 )
-def create_task(
-    project_id: str, body: TaskCreate, s: Session = Depends(get_session)
+async def create_task(
+    project_id: str,
+    body: TaskCreate,
+    request: Request,
+    run: bool = False,
+    s: Session = Depends(get_session),
 ) -> TaskOut:
+    """Create a manual Task. Pass ``?run=true`` to immediately spawn its first
+    Job if the task is ``ready`` after creation (i.e. has no unsatisfied deps).
+    ``mode`` defaults to ``plan_then_execute`` if omitted; pass ``"one_shot"``
+    for ad-hoc tasks that should skip the planning gate.
+    """
     if s.get(models.Project, project_id) is None:
         raise HTTPException(404, "unknown project")
     _validate_deps(s, project_id, body.depends_on)
-    t = models.Task(
+    task_kwargs: dict[str, object] = dict(
         project_id=project_id,
         title=body.title,
         prompt=body.prompt,
@@ -165,6 +174,9 @@ def create_task(
         source="manual",
         status="pending",
     )
+    if body.mode is not None:
+        task_kwargs["mode"] = body.mode
+    t = models.Task(**task_kwargs)
     s.add(t)
     s.flush()
     _detect_cycle(s, t.id, body.depends_on)
@@ -178,7 +190,35 @@ def create_task(
         from ..services import driver_bus
 
         driver_bus.get_bus().emit("task_ready", project_id, task_id=t.id)
+        if run:
+            # Fire the first phase Job immediately. Mirrors run_task but inline
+            # so the response still carries the (now running) Task state.
+            await _kickoff_task(t, request, s)
+            s.refresh(t)
     return _to_out(s, t)
+
+
+async def _kickoff_task(t: models.Task, request: Request, s: Session) -> None:
+    """Spawn the first-phase Job for a ``ready`` task. Mirrors ``run_task``."""
+    project = s.get(models.Project, t.project_id)
+    if project is None:
+        raise HTTPException(500, "project missing")
+    mgr = _manager(request)
+    title = f"[task] {t.title}"[:256]
+    if t.synthetic:
+        phase, kind = "integrating", "integrate"
+    elif t.mode == "plan_then_execute":
+        phase, kind = "planning", "plan"
+    else:
+        phase, kind = "executing", "execute"
+    t.status = "running"
+    t.phase = phase
+    s.commit()
+    jid = mgr.create_job(
+        t.project_id, t.prompt, title=title, task_id=t.id,
+        kind=kind, cwd=project.path,
+    )
+    await mgr.start(jid)
 
 
 @router.get("/api/projects/{project_id}/tasks", response_model=list[TaskOut])

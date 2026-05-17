@@ -192,6 +192,10 @@ class TaskCreate(BaseModel):
     prompt: str
     depends_on: list[str] = Field(default_factory=list)
     order_idx: int = 0
+    # Lifecycle mode. Omit (or None) to keep the model default
+    # (``plan_then_execute``). Set ``one_shot`` for ad-hoc tasks you typed
+    # yourself and don't want the planner gate for.
+    mode: Literal["plan_then_execute", "one_shot"] | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -199,6 +203,7 @@ class TaskUpdate(BaseModel):
     prompt: str | None = None
     depends_on: list[str] | None = None
     order_idx: int | None = None
+    mode: Literal["plan_then_execute", "one_shot"] | None = None
 
 
 class TaskOut(BaseModel):
