@@ -26,8 +26,8 @@ export function NewProjectComposer() {
 
   const eligible = (suggestions ?? []).filter((s) => !s.already_registered);
   const placeholder = selected
-    ? "Describe what should happen first (optional)"
-    : "Pick a path above, then describe what to do";
+    ? "Describe what you want to do"
+    : "Pick a path above to start";
 
   return (
     <Box>

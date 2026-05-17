@@ -93,7 +93,7 @@ def path_suggestions(s: Session = Depends(get_session)) -> list[PathSuggestion]:
         root_abs = os.path.expanduser(root)
         if not os.path.isdir(root_abs):
             continue
-        for entry in sorted(os.listdir(root_abs)):
+        for entry in os.listdir(root_abs):
             if entry.startswith("."):
                 continue
             child = os.path.join(root_abs, entry)
@@ -112,6 +112,9 @@ def path_suggestions(s: Session = Depends(get_session)) -> list[PathSuggestion]:
                     already_registered=real in existing_paths,
                 )
             )
+    # Sort case-insensitive by name. Git repos come first within the same
+    # bucket so the things the user is more likely to want are at the top.
+    out.sort(key=lambda s: (0 if s.is_git else 1, s.name.casefold()))
     return out
 
 
