@@ -27,6 +27,7 @@ def _to_out(j: models.Job) -> JobOut:
         session_id=j.session_id,
         schedule_id=j.schedule_id,
         task_id=j.task_id,
+        phase=j.phase,
         created_at=j.created_at,
         ended_at=j.ended_at,
         turns=[

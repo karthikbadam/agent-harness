@@ -69,6 +69,8 @@ class Job(Base):
     session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     schedule_id: Mapped[Optional[str]] = mapped_column(ForeignKey("schedules.id"), nullable=True)
     task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    phase: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    cwd_override: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
@@ -143,6 +145,15 @@ class Task(Base):
     )  # pending|ready|running|done|failed|canceled
     source: Mapped[str] = mapped_column(String(16), default="manual")  # manual|planner
     order_idx: Mapped[int] = mapped_column(Integer, default=0)
+    mode: Mapped[str] = mapped_column(
+        String(24), default="plan_then_execute"
+    )  # plan_then_execute|one_shot
+    worktree_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    worktree_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    integration_status: Mapped[Optional[str]] = mapped_column(
+        String(16), nullable=True
+    )  # pending|integrated|conflict; null for one_shot and synthetic tasks
+    synthetic: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
@@ -168,4 +179,5 @@ class Outcome(Base):
     branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="success")  # success|failed
+    kind: Mapped[str] = mapped_column(String(16), default="execute")  # plan|execute|integrate
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

@@ -63,16 +63,33 @@ def _apply_column_migrations(engine: Engine) -> None:
         ("projects", "skills", "JSON"),
         ("projects", "context_paths", "JSON"),
         ("jobs", "task_id", "VARCHAR(12)"),
+        # v2: plan-then-execute + worktrees + integration
+        ("jobs", "phase", "VARCHAR(16)"),
+        ("jobs", "cwd_override", "TEXT"),
+        ("tasks", "mode", "VARCHAR(24) NOT NULL DEFAULT 'plan_then_execute'"),
+        ("tasks", "worktree_path", "TEXT"),
+        ("tasks", "worktree_branch", "VARCHAR(255)"),
+        ("tasks", "integration_status", "VARCHAR(16)"),
+        ("tasks", "synthetic", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("outcomes", "kind", "VARCHAR(16) NOT NULL DEFAULT 'execute'"),
     ]
-    from sqlalchemy import text
 
     with engine.begin() as conn:
         for table, column, ddl in additions:
             existing = {
                 row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
             }
-            if column not in existing:
-                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+            if column in existing:
+                continue
+            conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+            # Behavioral backfill for Task.mode: tasks authored before v2 should
+            # keep one-shot behavior. ADD COLUMN fills existing rows with the
+            # column-level default ('plan_then_execute'); flip them to
+            # 'one_shot' so only post-upgrade tasks hit the new planning gate.
+            if table == "tasks" and column == "mode":
+                conn.exec_driver_sql(
+                    "UPDATE tasks SET mode='one_shot' WHERE mode='plan_then_execute'"
+                )
 
 
 def reset_engine() -> None:

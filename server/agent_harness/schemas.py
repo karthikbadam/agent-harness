@@ -132,6 +132,7 @@ class JobOut(BaseModel):
     session_id: str | None = None
     schedule_id: str | None = None
     task_id: str | None = None
+    phase: str | None = None
     created_at: datetime
     ended_at: datetime | None = None
     turns: list[TurnOut] = Field(default_factory=list)
@@ -206,6 +207,11 @@ class TaskOut(BaseModel):
     status: str
     source: str
     order_idx: int
+    mode: str = "plan_then_execute"
+    worktree_path: str | None = None
+    worktree_branch: str | None = None
+    integration_status: str | None = None
+    synthetic: bool = False
     depends_on: list[str] = Field(default_factory=list)
     latest_outcome_id: str | None = None
     created_at: datetime
@@ -220,6 +226,7 @@ class OutcomeOut(BaseModel):
     branch: str | None
     summary: str | None
     status: str
+    kind: str = "execute"
     created_at: datetime
 
 
