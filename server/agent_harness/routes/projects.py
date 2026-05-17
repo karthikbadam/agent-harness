@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..auth import require_auth
 from ..db import get_session
-from ..schemas import ProjectCreate, ProjectOut, ProjectUpdate
-from ..services import claude_md
+from ..schemas import IntegrateIn, ProjectCreate, ProjectOut, ProjectUpdate, TaskOut
+from ..services import claude_md, integration
+from ..routes.tasks import _to_out as _task_to_out
 
 router = APIRouter(prefix="/api/projects", tags=["projects"], dependencies=[Depends(require_auth)])
 
@@ -120,3 +121,25 @@ def delete_project(project_id: str, s: Session = Depends(get_session)) -> None:
         raise HTTPException(404, "not found")
     s.delete(p)
     s.commit()
+
+
+@router.post("/{project_id}/integrate", response_model=TaskOut)
+def create_integration(
+    project_id: str, body: IntegrateIn, s: Session = Depends(get_session)
+) -> TaskOut:
+    """Create a synthetic 'merge these branches' task and return it.
+
+    The caller is responsible for running the returned task via the usual
+    ``POST /api/tasks/{id}/run`` flow.
+    """
+    try:
+        tid = integration.create_integration_task(
+            project_id=project_id,
+            task_ids=body.task_ids,
+            target_branch=body.target_branch,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    t = s.get(models.Task, tid)
+    assert t is not None
+    return _task_to_out(s, t)

@@ -248,6 +248,11 @@ class MergeIn(BaseModel):
     prompt: str
 
 
+class IntegrateIn(BaseModel):
+    task_ids: list[str]
+    target_branch: str | None = None
+
+
 class PlanCreate(BaseModel):
     ask: str
 

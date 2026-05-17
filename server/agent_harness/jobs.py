@@ -147,8 +147,11 @@ class JobManager:
             phase: str | None = None
             if task_id is not None:
                 task = s.get(models.Task, task_id)
-                if task is not None and task.mode == "plan_then_execute":
-                    phase = "planning"
+                if task is not None:
+                    if task.synthetic:
+                        phase = "integrating"
+                    elif task.mode == "plan_then_execute":
+                        phase = "planning"
             job = models.Job(
                 project_id=project_id,
                 title=title or prompt[:80],

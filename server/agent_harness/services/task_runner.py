@@ -163,6 +163,47 @@ def on_job_finalized(
             )
             return
 
+        if task.synthetic:
+            # Integration task. Outcome.kind='integrate', clean up the input
+            # tasks' worktrees on success, mark them integrated. On failure,
+            # mark inputs as 'conflict' so the orchestrator/human can followup.
+            cwd = project.path if project else None
+            sha, branch = (_git_head(cwd) if cwd else (None, None))
+            summary = _last_assistant_text(log_dir) if log_dir is not None else None
+            outcome_status = "success" if job_status == "done" else "failed"
+            s.add(
+                models.Outcome(
+                    task_id=task.id,
+                    job_id=job.id,
+                    commit_sha=sha,
+                    branch=branch,
+                    summary=summary,
+                    status=outcome_status,
+                    kind="integrate",
+                )
+            )
+            task.status = "done" if job_status == "done" else "failed"
+            dep_rows = s.execute(
+                select(models.TaskDependency.depends_on_id).where(
+                    models.TaskDependency.task_id == task.id
+                )
+            ).all()
+            for (dep_id,) in dep_rows:
+                dep = s.get(models.Task, dep_id)
+                if dep is None:
+                    continue
+                if job_status == "done":
+                    if project is not None and (dep.worktree_path or dep.worktree_branch):
+                        worktrees.remove(project, dep)
+                        dep.worktree_path = None
+                        dep.worktree_branch = None
+                    dep.integration_status = "integrated"
+                else:
+                    dep.integration_status = "conflict"
+            s.flush()
+            _reevaluate_downstream(s, task.id)
+            return
+
         # Execute / one-shot / ad-hoc path.
         cwd = job.cwd_override or (project.path if project else None)
         sha, branch = (_git_head(cwd) if cwd else (None, None))
