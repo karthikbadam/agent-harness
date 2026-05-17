@@ -22,10 +22,13 @@ import { SettingsDrawer } from "./SettingsDrawer";
 
 interface ShellProps {
   title?: ReactNode;
+  subtitle?: ReactNode;
   right?: ReactNode;
   back?: string | true;
   children: ReactNode;
-  fullBleed?: boolean;
+  /** Reserve space at the bottom for a sticky composer. Mobile sits ABOVE
+   *  the tab bar; desktop sits at the page bottom. */
+  composerHeight?: number;
 }
 
 const NAV = [
@@ -34,89 +37,182 @@ const NAV = [
   { to: "/schedules", label: "Schedules", icon: <LuClock /> },
 ] as const;
 
+const MOBILE_TAB_HEIGHT = 56; // matches the tab bar px height below
+const CONTENT_MAX_W = { base: "container.sm", md: "container.lg", lg: "container.xl" };
+
 function isCurrent(pathname: string, to: string): boolean {
-  if (to === "/") return pathname === "/" || pathname.startsWith("/?");
+  if (to === "/")
+    return (
+      pathname === "/" ||
+      pathname.startsWith("/?") ||
+      pathname.startsWith("/projects")
+    );
   return pathname === to || pathname.startsWith(`${to}/`) || pathname.startsWith(`${to}?`);
 }
 
-export function Shell({ title, right, back, children, fullBleed = false }: ShellProps) {
+export function Shell({
+  title,
+  subtitle,
+  right,
+  back,
+  children,
+  composerHeight = 0,
+}: ShellProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const desktopNav = (
-    <Stack
-      as="nav"
-      gap={1}
+  const backButton = back ? (
+    <IconButton
+      aria-label="Back"
+      variant="ghost"
+      size="sm"
+      onClick={() => (back === true ? navigate(-1) : navigate(back))}
+    >
+      <LuChevronLeft />
+    </IconButton>
+  ) : null;
+
+  // ------------------------------- DESKTOP -------------------------------- //
+  // Top chrome bar: brand + nav + settings. Sub-header: title/subtitle/actions.
+
+  const desktopChrome = (
+    <Box
+      as="header"
+      hideBelow="md"
       position="sticky"
       top={0}
-      px={3}
-      py={6}
-      borderRightWidth="1px"
-      borderColor="border.subtle"
-      bg="bg.subtle"
-      display={{ base: "none", md: "flex" }}
-      h="100dvh"
-      w="56"
-      flexShrink={0}
-    >
-      <Heading size="sm" px={2} mb={4} color="fg.muted">
-        agent-harness
-      </Heading>
-      {NAV.map((n) => {
-        const current = isCurrent(location.pathname, n.to);
-        return (
-          <Flex
-            as={RouterLink}
-            key={n.to}
-            // @ts-expect-error chakra/router prop interop
-            to={n.to}
-            align="center"
-            gap={2}
-            px={3}
-            py={2}
-            rounded="md"
-            fontSize="sm"
-            color={current ? "fg" : "fg.muted"}
-            bg={current ? "bg" : "transparent"}
-            fontWeight={current ? "medium" : "normal"}
-            _hover={{ bg: "bg", color: "fg" }}
-          >
-            <Box fontSize="md" lineHeight="0" color={current ? "fg" : "fg.muted"}>
-              {n.icon}
-            </Box>
-            {n.label}
-          </Flex>
-        );
-      })}
-      <Box flex="1" />
-      <IconButton
-        aria-label="Settings"
-        variant="ghost"
-        size="sm"
-        onClick={() => setSettingsOpen(true)}
-        justifyContent="flex-start"
-        px={3}
-      >
-        <LuSettings />
-        <Text ml={2} fontSize="sm" fontWeight="normal">
-          Settings
-        </Text>
-      </IconButton>
-    </Stack>
-  );
-
-  const mobileNav = (
-    <Box
-      as="nav"
+      zIndex={20}
+      bg="bg"
       borderBottomWidth="1px"
       borderColor="border.subtle"
-      bg="bg"
-      px={2}
-      py={1}
-      display={{ base: "block", md: "none" }}
     >
-      <HStack gap={0} justify="center">
+      <Container maxW={CONTENT_MAX_W} px={{ base: 4, md: 6 }} py={2}>
+        <Flex align="center" gap={6}>
+          <Text fontWeight="semibold" fontSize="sm" color="fg.muted">
+            agent-harness
+          </Text>
+          <HStack gap={1} flex="1">
+            {NAV.map((n) => {
+              const current = isCurrent(location.pathname, n.to);
+              return (
+                <Flex
+                  as={RouterLink}
+                  key={n.to}
+                  // @ts-expect-error chakra/router prop interop
+                  to={n.to}
+                  align="center"
+                  px={3}
+                  py={1.5}
+                  rounded="md"
+                  fontSize="sm"
+                  fontWeight={current ? "medium" : "normal"}
+                  color={current ? "fg" : "fg.muted"}
+                  bg={current ? "bg.subtle" : "transparent"}
+                  _hover={{ bg: "bg.subtle", color: "fg" }}
+                >
+                  {n.label}
+                </Flex>
+              );
+            })}
+          </HStack>
+          <IconButton
+            aria-label="Settings"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <LuSettings />
+          </IconButton>
+        </Flex>
+      </Container>
+    </Box>
+  );
+
+  const desktopSubHeader = title ? (
+    <Box
+      hideBelow="md"
+      position="sticky"
+      top="52px" // height of desktopChrome row
+      zIndex={15}
+      bg="bg"
+      borderBottomWidth="1px"
+      borderColor="border.subtle"
+    >
+      <Container maxW={CONTENT_MAX_W} px={{ base: 4, md: 6 }} py={3}>
+        <Flex align="flex-start" gap={3}>
+          {backButton}
+          <Stack gap={0.5} flex="1" minW={0}>
+            <Heading size="md" lineHeight="short" truncate>
+              {title}
+            </Heading>
+            {subtitle && (
+              <Text fontSize="xs" color="fg.muted" truncate>
+                {subtitle}
+              </Text>
+            )}
+          </Stack>
+          {right && (
+            <HStack gap={2} flexShrink={0} alignSelf="center">
+              {right}
+            </HStack>
+          )}
+        </Flex>
+      </Container>
+    </Box>
+  ) : null;
+
+  // ------------------------------- MOBILE -------------------------------- //
+  // Compact top: back + title/subtitle + actions. Bottom: tab bar.
+
+  const mobileHeader = (
+    <Box
+      as="header"
+      hideFrom="md"
+      position="sticky"
+      top={0}
+      zIndex={20}
+      bg="bg"
+      borderBottomWidth="1px"
+      borderColor="border.subtle"
+      pt="max(env(safe-area-inset-top), 8px)"
+    >
+      <Flex align="flex-start" gap={2} px={3} py={2}>
+        {backButton}
+        <Stack gap={0} flex="1" minW={0} pt={1}>
+          <Heading size="sm" lineHeight="short" truncate>
+            {title ?? "agent-harness"}
+          </Heading>
+          {subtitle && (
+            <Text fontSize="2xs" color="fg.muted" truncate>
+              {subtitle}
+            </Text>
+          )}
+        </Stack>
+        {right && (
+          <HStack gap={1.5} flexShrink={0} pt={0.5}>
+            {right}
+          </HStack>
+        )}
+      </Flex>
+    </Box>
+  );
+
+  const mobileTabs = (
+    <Box
+      as="nav"
+      hideFrom="md"
+      position="fixed"
+      left={0}
+      right={0}
+      bottom={0}
+      zIndex={25}
+      bg="bg"
+      borderTopWidth="1px"
+      borderColor="border.subtle"
+      pb="env(safe-area-inset-bottom)"
+    >
+      <HStack gap={0} justify="space-around" h={`${MOBILE_TAB_HEIGHT}px`}>
         {NAV.map((n) => {
           const current = isCurrent(location.pathname, n.to);
           return (
@@ -127,17 +223,14 @@ export function Shell({ title, right, back, children, fullBleed = false }: Shell
               to={n.to}
               direction="column"
               align="center"
+              justify="center"
               gap={0.5}
-              px={3}
-              py={1.5}
               flex="1"
-              maxW="32"
+              h="full"
               fontSize="2xs"
               fontWeight="medium"
               color={current ? "fg" : "fg.muted"}
-              borderBottomWidth="2px"
-              borderColor={current ? "fg.emphasized" : "transparent"}
-              transition="color 0.15s"
+              _active={{ bg: "bg.subtle" }}
             >
               <Box fontSize="lg" lineHeight="0">
                 {n.icon}
@@ -146,73 +239,59 @@ export function Shell({ title, right, back, children, fullBleed = false }: Shell
             </Flex>
           );
         })}
+        <Flex
+          direction="column"
+          align="center"
+          justify="center"
+          gap={0.5}
+          flex="1"
+          h="full"
+          fontSize="2xs"
+          fontWeight="medium"
+          color="fg.muted"
+          cursor="pointer"
+          onClick={() => setSettingsOpen(true)}
+          _active={{ bg: "bg.subtle" }}
+        >
+          <Box fontSize="lg" lineHeight="0">
+            <LuSettings />
+          </Box>
+          Settings
+        </Flex>
       </HStack>
     </Box>
   );
 
+  // The body needs bottom padding to clear (composer height + mobile tabs).
+  // Desktop pads only for composer; mobile pads for composer + tab bar.
+  const bottomPadMobile = `calc(${composerHeight + MOBILE_TAB_HEIGHT}px + env(safe-area-inset-bottom))`;
+  const bottomPadDesktop = `${composerHeight}px`;
+
   return (
-    <Flex minH="100dvh" bg="bg" direction={{ base: "column", md: "row" }}>
-      {desktopNav}
-      <Flex direction="column" flex="1" minW={0}>
-        <Box
-          as="header"
-          position="sticky"
-          top={0}
-          zIndex={10}
-          bg="bg"
-          borderBottomWidth="1px"
-          borderColor="border.subtle"
+    <Flex direction="column" minH="100dvh" bg="bg">
+      {desktopChrome}
+      {desktopSubHeader}
+      {mobileHeader}
+      <Box
+        as="main"
+        flex="1"
+        overflowX="hidden"
+        w="100%"
+        pb={{ base: bottomPadMobile, md: bottomPadDesktop }}
+      >
+        <Container
+          maxW={CONTENT_MAX_W}
           px={{ base: 3, md: 6 }}
-          py={3}
-          pt={{ base: "max(env(safe-area-inset-top), 12px)", md: 4 }}
+          py={{ base: 4, md: 5 }}
+          w="100%"
         >
-          <Flex justify="space-between" align="center" gap={2}>
-            <HStack gap={2} flex="1" minW={0}>
-              {back && (
-                <IconButton
-                  aria-label="Back"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => (back === true ? navigate(-1) : navigate(back))}
-                >
-                  <LuChevronLeft />
-                </IconButton>
-              )}
-              <Heading size="md" truncate>
-                {title ?? "agent-harness"}
-              </Heading>
-            </HStack>
-            <HStack gap={1}>
-              {right}
-              <IconButton
-                aria-label="Settings"
-                variant="ghost"
-                size="sm"
-                onClick={() => setSettingsOpen(true)}
-                display={{ base: "inline-flex", md: "none" }}
-              >
-                <LuSettings />
-              </IconButton>
-            </HStack>
-          </Flex>
-        </Box>
-        {mobileNav}
-        <Box as="main" flex="1" overflowX="hidden" w="100%">
-          {fullBleed ? (
-            children
-          ) : (
-            <Container
-              maxW={{ base: "container.sm", md: "container.lg", lg: "container.xl" }}
-              px={{ base: 3, md: 6 }}
-              py={{ base: 4, md: 6 }}
-              w="100%"
-            >
-              {children}
-            </Container>
-          )}
-        </Box>
-      </Flex>
+          {children}
+        </Container>
+      </Box>
+      {mobileTabs}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </Flex>
   );
 }
+
+export { MOBILE_TAB_HEIGHT };
