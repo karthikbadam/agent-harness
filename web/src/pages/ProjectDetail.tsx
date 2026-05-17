@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Box,
   Button,
@@ -20,20 +20,35 @@ import { Composer } from "../components/Composer";
 import { MarkdownText } from "../components/MarkdownText";
 import { TaskCard } from "../components/TaskCard";
 import { parseServerDate, relativeTime } from "../api/dates";
+import { useJobs } from "../hooks/useJobs";
 import { useProjects } from "../hooks/useProjects";
 import { useLastPlan, usePlan, useTasks } from "../hooks/useTasks";
-import type { TaskOut } from "../types";
+import type { JobOut, TaskOut } from "../types";
 
 export function ProjectDetailPage() {
   const { projectId = "" } = useParams();
   const { data: projects, isLoading: projectsLoading } = useProjects();
   const project = projects?.find((p) => p.id === projectId);
   const { data: tasks, isLoading: tasksLoading } = useTasks(projectId);
+  const { data: allJobs } = useJobs();
   const plan = usePlan(projectId);
   const { data: lastPlan } = useLastPlan(projectId);
   const [planOpen, setPlanOpen] = useState(false);
   const groups = useMemo(() => groupByPhase(tasks ?? []), [tasks]);
-  const planning = plan.isPending;
+
+  // Detect an in-flight planner job for this project. The planner is a
+  // standalone ad_hoc job whose title is "[plan] ..."; while it's running,
+  // the project may have zero tasks yet, and we don't want the page to look
+  // empty.
+  const activePlanJob = useMemo(
+    () => findActivePlanJob(allJobs ?? [], projectId),
+    [allJobs, projectId],
+  );
+  const lastFailedPlanJob = useMemo(
+    () => findRecentFailedPlanJob(allJobs ?? [], projectId, !!activePlanJob),
+    [allJobs, projectId, activePlanJob],
+  );
+  const planning = plan.isPending || !!activePlanJob;
 
   return (
     <Shell
@@ -74,7 +89,15 @@ export function ProjectDetailPage() {
                 {project.path}
               </Text>
             </Stack>
-            {tasks && tasks.length === 0 && !planning && <EmptyTasksHint />}
+            {planning && (
+              <PlanningBanner job={activePlanJob} pending={plan.isPending} />
+            )}
+            {!planning && lastFailedPlanJob && (
+              <FailedPlanBanner job={lastFailedPlanJob} />
+            )}
+            {tasks && tasks.length === 0 && !planning && !lastFailedPlanJob && (
+              <EmptyTasksHint />
+            )}
             <Stack gap={6}>
               {groups.map((g) => (
                 <Stack key={g.label} gap={2.5}>
@@ -100,16 +123,6 @@ export function ProjectDetailPage() {
                 </Stack>
               ))}
             </Stack>
-            {planning && (
-              <Box bg="bg.subtle" rounded="lg" px={4} py={3}>
-                <Flex gap={3} align="center">
-                  <Spinner size="sm" />
-                  <Text fontSize="sm" color="fg.muted">
-                    Planning… the planner is decomposing your ask into tasks.
-                  </Text>
-                </Flex>
-              </Box>
-            )}
           </Stack>
         )}
       </Box>
@@ -235,6 +248,119 @@ function EmptyTasksHint() {
       </Text>
     </Box>
   );
+}
+
+function PlanningBanner({
+  job,
+  pending,
+}: {
+  job: JobOut | null;
+  pending: boolean;
+}) {
+  const startedAt = job ? parseServerDate(job.created_at) : null;
+  return (
+    <Box
+      bg="bg.subtle"
+      borderLeftWidth="2px"
+      borderColor="blue.solid"
+      rounded="md"
+      px={4}
+      py={3.5}
+    >
+      <Flex gap={3} align="center">
+        <Spinner size="sm" colorPalette="blue" />
+        <Stack gap={0.5} flex="1">
+          <Text fontSize="sm" fontWeight="medium" color="fg">
+            Planning…
+          </Text>
+          <Text fontSize="xs" color="fg.muted">
+            The planner is auditing the repo and decomposing your ask. Tasks
+            will appear here as they're drafted.
+            {startedAt && (
+              <>
+                {" "}
+                Started {relativeTime(startedAt)}.
+              </>
+            )}
+            {pending && !job && " Submitting…"}
+          </Text>
+        </Stack>
+      </Flex>
+    </Box>
+  );
+}
+
+function FailedPlanBanner({ job }: { job: JobOut }) {
+  const navigate = useNavigate();
+  return (
+    <Box
+      bg="bg.subtle"
+      borderLeftWidth="2px"
+      borderColor="red.solid"
+      rounded="md"
+      px={4}
+      py={3.5}
+    >
+      <Flex gap={3} align="flex-start" justify="space-between">
+        <Stack gap={0.5} flex="1">
+          <Text fontSize="sm" fontWeight="medium" color="red.fg">
+            Plan failed
+          </Text>
+          <Text fontSize="xs" color="fg.muted">
+            The planner job exited{" "}
+            {job.status === "failed" ? "with an error" : `as ${job.status}`}.
+            Common causes: the project path doesn't exist on disk, or the
+            agent ran out of budget. Re-submit your ask below to try again.
+          </Text>
+        </Stack>
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => navigate(`/jobs/${job.id}`)}
+        >
+          View job
+        </Button>
+      </Flex>
+    </Box>
+  );
+}
+
+function findActivePlanJob(jobs: JobOut[], projectId: string): JobOut | null {
+  for (const j of jobs) {
+    if (
+      j.project_id === projectId &&
+      (j.title || "").startsWith("[plan] ") &&
+      j.task_id == null &&
+      (j.status === "running" || j.status === "queued")
+    ) {
+      return j;
+    }
+  }
+  return null;
+}
+
+function findRecentFailedPlanJob(
+  jobs: JobOut[],
+  projectId: string,
+  hasActive: boolean,
+): JobOut | null {
+  if (hasActive) return null;
+  // Most recent plan job by created_at. If it's failed/stopped, surface it.
+  let latest: JobOut | null = null;
+  let latestT = 0;
+  for (const j of jobs) {
+    if (j.project_id !== projectId) continue;
+    if (!(j.title || "").startsWith("[plan] ")) continue;
+    if (j.task_id != null) continue;
+    const t = parseServerDate(j.created_at).getTime();
+    if (t > latestT) {
+      latestT = t;
+      latest = j;
+    }
+  }
+  if (!latest) return null;
+  if (latest.status === "failed" || latest.status === "stopped") return latest;
+  return null;
 }
 
 interface PhaseGroup {
