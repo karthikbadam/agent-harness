@@ -19,7 +19,7 @@ function badgeForTask(t: TaskOut): StatusBadge {
   if (t.status === "failed" || t.phase === "failed")
     return { label: "Failed", color: "red" };
   if (t.status === "canceled") return { label: "Canceled", color: "orange" };
-  if (t.phase === "awaiting_ack") return { label: "Awaiting ack", color: "blue" };
+  if (t.phase === "awaiting_ack") return { label: "Awaiting ack", color: "orange" };
   if (t.phase === "planning") return { label: "Planning…", color: "blue", pulse: true };
   if (t.phase === "executing") return { label: "Executing…", color: "blue", pulse: true };
   if (t.phase === "integrating") return { label: "Integrating…", color: "blue", pulse: true };
