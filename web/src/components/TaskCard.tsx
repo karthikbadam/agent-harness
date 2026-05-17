@@ -1,5 +1,6 @@
 import { Box, Button, Flex, HStack, Stack, Text } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
+import { LuGitBranch } from "react-icons/lu";
 
 import type { TaskOut } from "../types";
 import { useAckTask, useRetryTask, useRunTask } from "../hooks/useTasks";
@@ -19,26 +20,47 @@ export function TaskCard({ task }: Props) {
   const canRun = task.status === "ready";
   const canAck = task.phase === "awaiting_ack";
   const canRetry = task.status === "failed";
+  const showPhase = !task.synthetic && task.mode === "plan_then_execute" && (
+    task.status === "running" ||
+    task.status === "done" ||
+    task.status === "failed"
+  );
 
   return (
-    <Box borderWidth="1px" borderRadius="md" px={4} py={3}>
+    <Box
+      bg="bg.subtle"
+      borderRadius="lg"
+      px={4}
+      py={3.5}
+      _hover={{ bg: "bg.muted" }}
+      transition="background-color 0.15s"
+    >
       <Stack gap={3}>
-        <Flex justify="space-between" align="flex-start" gap={2}>
+        <Flex justify="space-between" align="flex-start" gap={3}>
           <Stack gap={1} flex="1" minW={0}>
-            <Text fontWeight="medium" truncate>
+            <Text fontWeight="medium" lineHeight="short" truncate>
               {task.title}
             </Text>
-            <HStack gap={2} fontSize="xs" color="fg.muted">
+            <HStack gap={2} fontSize="2xs" color="fg.muted" wrap="wrap">
               <StatusPill status={task.status} />
-              {task.synthetic && <Text>· synthetic</Text>}
+              {task.synthetic && (
+                <Text textTransform="uppercase" letterSpacing="wider">
+                  · integrate
+                </Text>
+              )}
+              {task.mode === "one_shot" && !task.synthetic && (
+                <Text textTransform="uppercase" letterSpacing="wider">
+                  · quick
+                </Text>
+              )}
               <Text>· {task.source}</Text>
-              <Text>· {task.mode}</Text>
             </HStack>
           </Stack>
-          <HStack gap={1}>
+          <HStack gap={1.5} flexShrink={0}>
             {canRun && (
               <Button
-                size="xs"
+                size="2xs"
+                colorPalette="blue"
                 onClick={() => run.mutate(task.id)}
                 loading={run.isPending}
               >
@@ -47,7 +69,7 @@ export function TaskCard({ task }: Props) {
             )}
             {canAck && (
               <Button
-                size="xs"
+                size="2xs"
                 colorPalette="blue"
                 onClick={() => ack.mutate({ id: task.id })}
                 loading={ack.isPending}
@@ -57,8 +79,9 @@ export function TaskCard({ task }: Props) {
             )}
             {canRetry && (
               <Button
-                size="xs"
+                size="2xs"
                 variant="outline"
+                colorPalette="orange"
                 onClick={() => retry.mutate(task.id)}
                 loading={retry.isPending}
               >
@@ -67,19 +90,29 @@ export function TaskCard({ task }: Props) {
             )}
           </HStack>
         </Flex>
-        {!task.synthetic && task.mode === "plan_then_execute" && (
-          <PhaseTracker phase={task.phase} status={task.status} />
-        )}
-        <Flex justify="space-between" align="center" gap={2}>
-          <Text fontSize="xs" color="fg.muted" truncate>
-            {task.worktree_branch ? `branch ${task.worktree_branch}` : task.id}
-          </Text>
+        {showPhase && <PhaseTracker phase={task.phase} status={task.status} />}
+        <Flex justify="space-between" align="center" gap={2} fontSize="2xs" color="fg.muted">
+          {task.worktree_branch ? (
+            <HStack gap={1.5}>
+              <Box lineHeight="0">
+                <LuGitBranch />
+              </Box>
+              <Text truncate fontFamily="mono">
+                {task.worktree_branch}
+              </Text>
+            </HStack>
+          ) : (
+            <Text fontFamily="mono" color="fg.subtle">
+              {task.id}
+            </Text>
+          )}
           <Button
-            size="xs"
+            size="2xs"
             variant="ghost"
+            color="fg.muted"
             onClick={() => navigate(`/jobs?task_id=${task.id}`)}
           >
-            Jobs
+            Jobs ›
           </Button>
         </Flex>
       </Stack>
