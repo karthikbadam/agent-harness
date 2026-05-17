@@ -238,6 +238,122 @@ def test_executing_phase_marks_done_and_integration_pending(
         assert task.integration_status == "pending"
 
 
+def test_executing_finalize_commits_dirty_worktree(
+    initdb: Path, tmp_path: Path
+) -> None:
+    """Backstop: if the execute turn left uncommitted changes in the worktree,
+    finalize should commit them so the worktree branch carries the work."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    # Simulate the worktree the harness would create on ack: clone into a
+    # sibling dir on a new branch with uncommitted changes (the "agent forgot
+    # to commit" scenario).
+    wt = tmp_path / "wt"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-b", "task/x", str(wt)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    (wt / "f.txt").write_text("changed by agent", encoding="utf-8")
+    base_sha = subprocess.check_output(
+        ["git", "-C", str(wt), "rev-parse", "HEAD"]
+    ).decode().strip()
+
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        t = models.Task(
+            project_id=proj.id,
+            title="implement feature x",
+            prompt="p",
+            status="running",
+            mode="plan_then_execute",
+            worktree_path=str(wt),
+            worktree_branch="task/x",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(
+            project_id=proj.id,
+            title="run",
+            task_id=t.id,
+            phase="executing",
+            cwd_override=str(wt),
+        )
+        s.add(job)
+        s.flush()
+        jid = job.id
+
+    task_runner.on_job_finalized(jid, "done", log_dir=None)
+
+    new_sha = subprocess.check_output(
+        ["git", "-C", str(wt), "rev-parse", "HEAD"]
+    ).decode().strip()
+    assert new_sha != base_sha, "expected backstop to create a commit"
+    msg = subprocess.check_output(
+        ["git", "-C", str(wt), "log", "-1", "--format=%s"]
+    ).decode().strip()
+    assert msg == "implement feature x"
+    with session_scope() as s:
+        outcome = s.query(models.Outcome).one()
+        assert outcome.commit_sha == new_sha
+        assert outcome.branch == "task/x"
+
+
+def test_executing_finalize_skips_commit_when_clean(
+    initdb: Path, tmp_path: Path
+) -> None:
+    """If the agent already committed (or there are no changes), the backstop
+    must not create an empty commit."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    wt = tmp_path / "wt"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-b", "task/y", str(wt)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    base_sha = subprocess.check_output(
+        ["git", "-C", str(wt), "rev-parse", "HEAD"]
+    ).decode().strip()
+
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        t = models.Task(
+            project_id=proj.id,
+            title="t",
+            prompt="p",
+            status="running",
+            mode="plan_then_execute",
+            worktree_path=str(wt),
+            worktree_branch="task/y",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(
+            project_id=proj.id,
+            task_id=t.id,
+            phase="executing",
+            cwd_override=str(wt),
+        )
+        s.add(job)
+        s.flush()
+        jid = job.id
+
+    task_runner.on_job_finalized(jid, "done", log_dir=None)
+    new_sha = subprocess.check_output(
+        ["git", "-C", str(wt), "rev-parse", "HEAD"]
+    ).decode().strip()
+    assert new_sha == base_sha
+
+
 def test_on_ack_creates_worktree_and_flips_phase(
     initdb: Path, tmp_path: Path
 ) -> None:

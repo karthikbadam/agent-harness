@@ -53,6 +53,48 @@ def _git_head(project_path: str) -> tuple[str | None, str | None]:
     return sha, branch
 
 
+def _commit_dirty_worktree(cwd: str, message: str) -> bool:
+    """If ``cwd`` is a git worktree with uncommitted changes, stage and commit
+    them with ``message``. Returns True if a commit was created. Used as a
+    backstop after the execute turn so the worktree branch always carries the
+    agent's work — even if the agent forgot to commit or got stuck on
+    permission gates.
+    """
+    pdir = Path(cwd)
+    if not pdir.is_dir() or not (pdir / ".git").exists():
+        return False
+    try:
+        status = subprocess.check_output(
+            ["git", "-C", str(pdir), "status", "--porcelain"],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode()
+    except Exception:  # noqa: BLE001
+        return False
+    if not status.strip():
+        return False
+    try:
+        subprocess.run(
+            ["git", "-C", str(pdir), "add", "-A"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+        subprocess.run(
+            ["git", "-C", str(pdir), "commit", "-m", message],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("auto-commit failed in %s: %s", cwd, e)
+        return False
+    log.info("auto-committed dirty worktree at %s", cwd)
+    return True
+
+
 def _last_assistant_text(log_dir: Path) -> str | None:
     """Scan turn-*.jsonl for the most recent assistant_text payload."""
     import json
@@ -229,8 +271,19 @@ def on_job_finalized(
 
         # Execute / one-shot / ad-hoc path.
         cwd = job.cwd_override or (project.path if project else None)
-        sha, branch = (_git_head(cwd) if cwd else (None, None))
         summary = _last_assistant_text(log_dir) if log_dir is not None else None
+        # Backstop: if the execute turn finished cleanly in a worktree but left
+        # uncommitted changes (agent forgot, or hit a permission loop), commit
+        # them now so the worktree branch carries the work for integration.
+        if (
+            job_status == "done"
+            and job.cwd_override
+            and cwd
+            and not task.synthetic
+        ):
+            commit_msg = (task.title or "agent commit")[:72]
+            _commit_dirty_worktree(cwd, commit_msg)
+        sha, branch = (_git_head(cwd) if cwd else (None, None))
         outcome_status = "success" if job_status == "done" else "failed"
         s.add(
             models.Outcome(
