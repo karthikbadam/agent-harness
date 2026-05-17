@@ -134,27 +134,27 @@ def next_actions(
     def _full() -> bool:
         return len(actions) >= max_actions
 
-    # 1. ack
-    jobs = (
+    # 1. ack — Tasks parked at awaiting_ack waiting for the execute Job to spawn
+    tasks_awaiting = (
         s.execute(
-            select(models.Job).where(
-                models.Job.project_id == project_id,
-                models.Job.phase == "awaiting_ack",
+            select(models.Task).where(
+                models.Task.project_id == project_id,
+                models.Task.phase == "awaiting_ack",
             )
         )
         .scalars()
         .all()
     )
-    for job in jobs:
+    for task in tasks_awaiting:
         actions.append(
             Action(
                 kind="ack",
                 project_id=project_id,
-                task_id=job.task_id,
-                job_id=job.id,
-                reason=f"plan ready for ack on job {job.id}",
-                rest_path=f"/api/jobs/{job.id}/followup",
-                payload={"prompt": ""},
+                task_id=task.id,
+                job_id=None,
+                reason=f"plan ready for ack on task {task.id}",
+                rest_path=f"/api/tasks/{task.id}/ack",
+                payload={},
             )
         )
         if _full():

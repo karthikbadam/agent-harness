@@ -178,16 +178,17 @@ def build_mcp() -> Any:
             return _ok(c.post(f"/api/tasks/{task_id}/run"))
 
     @mcp.tool()
-    def ack_plan(job_id: str, notes: str = "") -> dict[str, Any]:
-        """Advance a job from awaiting_ack to executing.
+    def ack_plan(task_id: str, notes: str = "") -> dict[str, Any]:
+        """Advance a Task from ``phase=awaiting_ack`` to ``executing``.
 
-        Equivalent to POSTing a followup on an ``awaiting_ack`` job; ``notes``
-        is appended to the execute-turn prompt as guidance.
+        Spawns a fresh Execute Job in the task's worktree. ``notes`` are
+        appended to the execute prompt as guidance.
         """
+        path = f"/api/tasks/{task_id}/ack"
+        if notes:
+            path += f"?notes={notes}"
         with _client() as c:
-            return _ok(
-                c.post(f"/api/jobs/{job_id}/followup", json={"prompt": notes})
-            )
+            return _ok(c.post(path))
 
     @mcp.tool()
     def cancel_task(task_id: str) -> dict[str, Any]:
