@@ -45,6 +45,30 @@ def test_allowlist_rule_global_and_project(initdb: Path) -> None:
         assert {r.rule for r in rules} == {"Bash(npm test:*)", "Edit(**/*.py)"}
 
 
+def test_gather_allowlist_adds_git_rules_when_executing(initdb: Path) -> None:
+    from agent_harness.jobs import _gather_allowlist
+
+    with session_scope() as s:
+        proj = models.Project(name="r", path="/tmp/r", skills=["init"])
+        s.add(proj)
+        s.flush()
+        s.add(models.AllowlistRule(project_id=proj.id, rule="Bash(npm test:*)"))
+        s.flush()
+        pid = proj.id
+
+    base = _gather_allowlist(pid)
+    assert "Bash(npm test:*)" in base
+    assert "Skill(init)" in base
+    assert "Bash(git add:*)" not in base
+    assert "Bash(git commit:*)" not in base
+
+    executing = _gather_allowlist(pid, phase="executing")
+    assert "Bash(git add:*)" in executing
+    assert "Bash(git commit:*)" in executing
+    # Original rules still present and not duplicated.
+    assert executing.count("Bash(npm test:*)") == 1
+
+
 def test_task_and_outcome_models(initdb: Path) -> None:
     with session_scope() as s:
         proj = models.Project(name="book", path="/tmp/book")

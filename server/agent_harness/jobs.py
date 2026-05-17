@@ -78,11 +78,20 @@ def _augment_prompt_for_phase(s, job: "models.Job", prompt: str) -> str:
     return prompt
 
 
-def _gather_allowlist(project_id: str) -> list[str]:
+# Rules auto-granted when a job is in the executing phase. The execute prefix
+# instructs the agent to "commit your changes when complete"; without these
+# rules the agent loops on permission-denied and the worktree branch ends up
+# with uncommitted changes that integration can't merge.
+_EXECUTE_PHASE_RULES = ("Bash(git add:*)", "Bash(git commit:*)")
+
+
+def _gather_allowlist(project_id: str, phase: str | None = None) -> list[str]:
     """Return the merged allowlist for a job: global + project rules + Skill().
 
     Project `skills` are auto-allowed (`Skill(<name>)`) without the user
-    having to add them as explicit rules.
+    having to add them as explicit rules. When ``phase='executing'``, the
+    rules needed to commit on the worktree branch are auto-included so the
+    execute prefix's "commit your changes" instruction is actually enactable.
     """
     with session_scope() as s:
         rule_rows = s.execute(
@@ -95,10 +104,11 @@ def _gather_allowlist(project_id: str) -> list[str]:
         skills = list(proj.skills or []) if proj is not None else []
     rules = [r[0] for r in rule_rows]
     skill_rules = [f"Skill({name})" for name in skills if isinstance(name, str) and name]
-    # Dedupe but preserve order: rules first, then skill rules.
+    phase_rules = list(_EXECUTE_PHASE_RULES) if phase == "executing" else []
+    # Dedupe but preserve order: rules first, then skill rules, then phase rules.
     seen: set[str] = set()
     out: list[str] = []
-    for r in rules + skill_rules:
+    for r in rules + skill_rules + phase_rules:
         if r in seen:
             continue
         seen.add(r)
@@ -250,6 +260,7 @@ class JobManager:
             dangerously_skip = project.dangerously_skip
             resume_session_id = job.session_id  # set after first turn
             project_id = project.id
+            phase = job.phase
             project_extra = list(project.extra_claude_args or [])
             idle_timeout = (
                 project.idle_timeout_seconds
@@ -257,7 +268,7 @@ class JobManager:
                 else self.default_idle_timeout_seconds
             )
 
-        allowed = _gather_allowlist(project_id)
+        allowed = _gather_allowlist(project_id, phase=phase)
         broadcaster.start_turn(turn_idx)
         await broadcaster.publish(make_status_event(job_id, turn_idx, "running"))
 
