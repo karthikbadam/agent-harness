@@ -239,6 +239,55 @@ def build_mcp() -> Any:
             return _ok(c.get(f"/api/projects/{project_id}/worktrees"))
 
     @mcp.tool()
+    def set_autopilot(project_id: str, mode: str) -> dict[str, Any]:
+        """Toggle a project's driver mode. ``mode`` is 'off' or 'on'.
+
+        Turning on without a connected driver process returns 409 (the
+        harness may auto-spawn one, but if that fails the call rejects).
+        """
+        if mode not in ("off", "on"):
+            raise ValueError("mode must be 'off' or 'on'")
+        with _client() as c:
+            return _ok(c.patch(f"/api/projects/{project_id}/driver", json={"mode": mode}))
+
+    @mcp.tool()
+    def get_driver_state(project_id: str) -> dict[str, Any]:
+        """Get per-project driver state: mode, connected driver, open notes."""
+        with _client() as c:
+            return _ok(c.get(f"/api/projects/{project_id}/driver"))
+
+    @mcp.tool()
+    def get_suggestions(project_id: str) -> list[dict[str, Any]]:
+        """Driver's recommended next actions for this project (copilot view).
+
+        Each suggestion includes ``rest_verb`` / ``rest_path`` / ``payload``
+        so the caller can dispatch it directly via the REST surface.
+        """
+        with _client() as c:
+            return _ok(c.get(f"/api/projects/{project_id}/driver/suggestions"))
+
+    @mcp.tool()
+    def list_driver_notes(
+        project_id: str,
+        severity: str | None = None,
+        acknowledged: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        """List driver notes for a project; filter by severity / acked."""
+        params: dict[str, Any] = {}
+        if severity:
+            params["severity"] = severity
+        if acknowledged is not None:
+            params["acknowledged"] = "true" if acknowledged else "false"
+        with _client() as c:
+            return _ok(c.get(f"/api/projects/{project_id}/driver/notes", params=params))
+
+    @mcp.tool()
+    def acknowledge_note(note_id: str) -> dict[str, Any]:
+        """Dismiss a driver note."""
+        with _client() as c:
+            return _ok(c.post(f"/api/driver/notes/{note_id}/acknowledge"))
+
+    @mcp.tool()
     def tail_job(job_id: str, max_lines: int = 200) -> list[dict[str, Any]]:
         """One-shot read of a job's recent stream events from the log files."""
         import json

@@ -30,6 +30,11 @@ def test_build_mcp_registers_expected_tools() -> None:
         "list_outcomes",
         "integrate",
         "list_worktrees",
+        "set_autopilot",
+        "get_driver_state",
+        "get_suggestions",
+        "list_driver_notes",
+        "acknowledge_note",
         "tail_job",
     }
 
