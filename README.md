@@ -106,6 +106,16 @@ pending → ready → running (planning) → awaiting_ack → running (executing
 Opt out per task with `mode=one_shot` (skip planning, go straight to a
 worktree execute).
 
+### Autopilot driver
+
+For unattended multi-hour runs, set `Project.autopilot_mode='on'` and the
+external `agent-harness-driver` process (auto-spawned by default) reacts to
+harness events and dispatches ack / run / integrate / retry actions without
+human input. Same decision logic powers `GET /api/projects/{id}/driver/
+suggestions` in copilot mode — surfacing one-tap next actions in the UI.
+Every action lands as a `DriverNote` for audit + escalation. Details in
+`docs/driver-design.md`.
+
 ## How it works
 
 ### Stream-json parser

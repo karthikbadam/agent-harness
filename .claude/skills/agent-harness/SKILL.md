@@ -360,6 +360,45 @@ The new session sees typed tools: `list_projects`, `plan_ask`, `list_tasks`,
 `list_outcomes`, `list_worktrees`, `tail_job`, etc. — no freeform
 "orchestrate this" prompts are involved.
 
+### Drive a 12-hour project unattended (autopilot)
+
+`agent-harness-driver` is a separate process that reacts to harness events
+and dispatches actions (ack, run, integrate, retry) when a project is in
+`autopilot_mode=on`. When off, the same decision logic powers `GET
+/driver/suggestions` for the UI.
+
+```bash
+PID="$1"
+
+# (optional) start the driver yourself in a terminal; otherwise the harness
+# auto-spawns it when you flip on (and 409s if it can't).
+agent-harness-driver &
+
+# enable autopilot
+curl -sS -X PATCH -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/projects/$PID/driver" -d '{"mode":"on"}'
+
+# check status
+curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/driver/status" | jq .
+
+# what would the driver do next? (same data even when mode=off)
+curl -sS -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/projects/$PID/driver/suggestions" | jq .
+
+# audit / escalations
+curl -sS -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/projects/$PID/driver/notes?severity=escalate&acknowledged=false" | jq .
+
+# take back the wheel
+curl -sS -X PATCH -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/projects/$PID/driver" -d '{"mode":"off"}'
+```
+
+The driver retries each failed task up to 2 times with exponential backoff
+(60s, 180s); after that it logs an `escalate` note and leaves the task
+failed for human review. Integration conflicts are NOT auto-resolved —
+they're logged for inspection.
+
 ### Allow a tool rule and retry a blocked job
 
 ```bash

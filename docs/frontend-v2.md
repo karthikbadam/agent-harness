@@ -275,7 +275,105 @@ A pragmatic minimum:
 
 ---
 
-## 7. Where to find each thing in the OpenAPI dump
+## 7. Driver (autopilot + copilot)
+
+A per-project mode controls whether the harness drives itself:
+
+- `Project.autopilot_mode: 'off' | 'on'` — defaults to `off`.
+- **Off (copilot):** call `GET /api/projects/{id}/driver/suggestions` to
+  fetch the same actions an autopilot would take, render them as one-tap
+  buttons. Each suggestion has `rest_verb`, `rest_path`, `payload`, `reason`.
+- **On (autopilot):** an external process (`agent-harness-driver`)
+  dispatches the same actions automatically. The harness records each
+  action as a `DriverNote` for audit + escalation.
+
+### New endpoints
+
+```ts
+PATCH /api/projects/{id}/driver        { mode: 'off' | 'on' }    → DriverStateOut
+GET   /api/projects/{id}/driver        → DriverStateOut
+GET   /api/projects/{id}/driver/suggestions  → SuggestedAction[]
+GET   /api/projects/{id}/driver/notes        → DriverNoteOut[]
+       ?severity=info|warn|escalate &acknowledged=true|false
+POST  /api/driver/notes/{id}/acknowledge     → DriverNoteOut
+GET   /api/driver/status               → { connected, last_seen, mode_on_projects }
+POST  /api/tasks/{id}/retry            → JobOut   (used by retry suggestions)
+```
+
+`DriverStateOut`:
+```ts
+{
+  mode: 'off' | 'on'
+  has_connected_driver: boolean
+  open_notes: number   // unacknowledged warn+escalate
+}
+```
+
+`SuggestedAction`:
+```ts
+{
+  kind: 'ack' | 'retry' | 'integrate' | 'run'
+  project_id: string
+  task_id?: string
+  job_id?: string
+  reason: string             // human-readable for the button label
+  rest_verb: 'POST' | 'PATCH'
+  rest_path: string
+  payload?: object           // JSON to send
+}
+```
+
+`DriverNoteOut`:
+```ts
+{
+  id: string
+  project_id: string
+  task_id: string | null
+  job_id: string | null
+  severity: 'info' | 'warn' | 'escalate'
+  kind: string               // 'acked' | 'ran' | 'integrated' | 'retried' |
+                             //  'escalated' | 'suggest' | 'stuck'
+  message: string
+  action_url: string | null
+  created_at: string
+  acknowledged_at: string | null
+}
+```
+
+### Suggested UX
+
+- Project settings: a single **Autopilot** toggle backed by `PATCH /driver`.
+  Disabled if `/api/driver/status.connected === false` (with a hint to
+  start `agent-harness-driver`).
+- A **Driver** tab per project:
+  - Top: if `mode === 'off'`, render the live `suggestions` as a list of
+    one-tap buttons ("Ack plan for X", "Run T1", "Integrate wave of 2").
+    Each button POSTs to the suggested `rest_path` with `payload`.
+  - Below: the **notes timeline** (newest first), grouped by severity.
+    Escalate notes get a prominent treatment and an "Acknowledge" button.
+- Global header: a small dot/counter for un-acked `warn`+`escalate` notes
+  across all projects. Tap → driver tab of the most recent.
+
+### Polling vs SSE
+
+The driver event SSE stream (`/api/driver/events`) is for the driver
+**process** — not for the UI. The UI should fetch `/suggestions` and
+`/notes` on demand: after any mutating action, or on a slow timer
+(e.g., 10s) when the user is viewing the driver tab. Cheap and sufficient.
+
+### Gotchas
+
+- **Mode=on can 409** if no driver is connected and auto-spawn fails.
+  Show the error to the user with a hint to run `agent-harness-driver` or
+  check `~/.agent-harness/logs/driver.log`.
+- **Notes can reference deleted tasks/jobs** — the FK is nullable but
+  doesn't ON DELETE SET NULL; just be defensive when rendering.
+- **The "Ack plan" suggestion** appears for plan-then-execute tasks the
+  same way as in §6 — the driver surfaces it; the UI should treat it as
+  the canonical action even in copilot mode (don't show a competing
+  generic "Followup" form when phase=awaiting_ack).
+
+## 8. Where to find each thing in the OpenAPI dump
 
 | Concept | Path / Schema |
 |---|---|
@@ -287,3 +385,9 @@ A pragmatic minimum:
 | Integrate | `paths./api/projects/{project_id}/integrate.post` (`IntegrateIn`) |
 | Worktrees | `paths./api/projects/{project_id}/worktrees.get` (`WorktreeOut`) |
 | Ack | `paths./api/jobs/{job_id}/followup.post` — same endpoint, branches on `phase` |
+| Driver toggle | `paths./api/projects/{project_id}/driver.patch` (`DriverModeUpdate`) |
+| Driver state | `paths./api/projects/{project_id}/driver.get` (`DriverStateOut`) |
+| Suggestions | `paths./api/projects/{project_id}/driver/suggestions.get` (`SuggestedAction`) |
+| Notes | `paths./api/projects/{project_id}/driver/notes.get` (`DriverNoteOut`) |
+| Driver status | `paths./api/driver/status.get` (`DriverGlobalStatus`) |
+| Retry | `paths./api/tasks/{task_id}/retry.post` |
