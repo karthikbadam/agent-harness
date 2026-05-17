@@ -16,6 +16,7 @@ import {
 import { LuFileText } from "react-icons/lu";
 
 import { Shell } from "../components/Shell";
+import { AutopilotToggle } from "../components/AutopilotToggle";
 import { Composer } from "../components/Composer";
 import { MarkdownText } from "../components/MarkdownText";
 import { TaskCard } from "../components/TaskCard";
@@ -55,16 +56,21 @@ export function ProjectDetailPage() {
       title={project?.name ?? "Project"}
       back="/"
       right={
-        lastPlan ? (
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => setPlanOpen(true)}
-            gap={1.5}
-          >
-            <LuFileText />
-            View plan
-          </Button>
+        project ? (
+          <HStack gap={2}>
+            {lastPlan && (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setPlanOpen(true)}
+                gap={1.5}
+              >
+                <LuFileText />
+                View plan
+              </Button>
+            )}
+            <AutopilotToggle projectId={project.id} />
+          </HStack>
         ) : undefined
       }
     >
