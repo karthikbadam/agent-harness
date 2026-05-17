@@ -17,6 +17,11 @@ export type TurnOut = components["schemas"]["TurnOut"];
 export type JobCreate = components["schemas"]["JobCreate"];
 export type FollowupCreate = components["schemas"]["FollowupCreate"];
 
+export type TaskOut = components["schemas"]["TaskOut"];
+export type TaskCreate = components["schemas"]["TaskCreate"];
+export type TaskUpdate = components["schemas"]["TaskUpdate"];
+export type OutcomeOut = components["schemas"]["OutcomeOut"];
+
 export type ScheduleOut = components["schemas"]["ScheduleOut"];
 export type ScheduleCreate = components["schemas"]["ScheduleCreate"];
 export type ScheduleUpdate = components["schemas"]["ScheduleUpdate"];
