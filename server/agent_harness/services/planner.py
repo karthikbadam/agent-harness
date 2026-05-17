@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+
+from sqlalchemy import select
 from pathlib import Path
 
 from .. import models
@@ -137,8 +139,10 @@ async def plan(
 def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
     """Insert planner-drafted tasks, resolving depends_on_titles to ids.
 
-    Tasks land as `status='pending'`, `source='planner'`. Skips entries
-    missing a title or prompt.
+    Drafts land as ``source='planner'``. Tasks with no deps are inserted as
+    ``ready`` so the user can run them immediately; tasks with deps stay
+    ``pending`` until their predecessors finish. Skips entries missing a
+    title or prompt.
     """
     created_ids: list[str] = []
     with session_scope() as s:
@@ -182,4 +186,25 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
                 if dep_id is None or dep_id == tid:
                     continue
                 s.add(models.TaskDependency(task_id=tid, depends_on_id=dep_id))
+        s.flush()
+        # Promote drafts whose deps are already done (or absent) to 'ready' so
+        # the user doesn't have to PATCH each one to confirm.
+        for tid in created_ids:
+            t = s.get(models.Task, tid)
+            if t is None:
+                continue
+            dep_rows = s.execute(
+                select(models.TaskDependency.depends_on_id).where(
+                    models.TaskDependency.task_id == tid
+                )
+            ).all()
+            if not dep_rows:
+                t.status = "ready"
+                continue
+            dep_ids = [r[0] for r in dep_rows]
+            statuses = s.execute(
+                select(models.Task.status).where(models.Task.id.in_(dep_ids))
+            ).all()
+            if all(r[0] == "done" for r in statuses):
+                t.status = "ready"
     return created_ids

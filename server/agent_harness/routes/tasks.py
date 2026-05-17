@@ -260,6 +260,8 @@ def update_task(
         t.prompt = body.prompt
     if body.order_idx is not None:
         t.order_idx = body.order_idx
+    if body.mode is not None:
+        t.mode = body.mode
     if body.depends_on is not None:
         _validate_deps(s, t.project_id, body.depends_on)
         _detect_cycle(s, t.id, body.depends_on)
@@ -270,9 +272,11 @@ def update_task(
         for d in body.depends_on:
             s.add(models.TaskDependency(task_id=t.id, depends_on_id=d))
         s.flush()
-        # Recompute status if task is still in pre-run states.
-        if t.status in {"pending", "ready"}:
-            t.status = _initial_status(s, t.id)
+    # Re-evaluate status in pre-run states so PATCH also serves as "confirm a
+    # planner draft" — any edit (or empty body) promotes pending→ready when
+    # the task's deps are satisfied.
+    if t.status in {"pending", "ready"}:
+        t.status = _initial_status(s, t.id)
     s.commit()
     s.refresh(t)
     return _to_out(s, t)

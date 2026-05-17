@@ -47,7 +47,7 @@ async def app_client(initdb: Path, monkeypatch: pytest.MonkeyPatch):
             yield client, app
 
 
-async def test_plan_endpoint_creates_pending_tasks(app_client) -> None:
+async def test_plan_endpoint_creates_drafts_with_resolved_status(app_client) -> None:
     client, _ = app_client
     auth = {"Authorization": "Bearer test-token"}
     r = await client.post(
@@ -65,15 +65,13 @@ async def test_plan_endpoint_creates_pending_tasks(app_client) -> None:
     assert len(body["task_ids"]) == 2
 
     r = await client.get(f"/api/projects/{pid}/tasks", headers=auth)
-    titles = [t["title"] for t in r.json()]
-    statuses = [t["status"] for t in r.json()]
-    sources = [t["source"] for t in r.json()]
-    assert "scaffold module" in titles
-    assert "add tests" in titles
-    assert all(s == "pending" for s in statuses)
-    assert all(s == "planner" for s in sources)
-
     by_title = {t["title"]: t for t in r.json()}
+    assert {"scaffold module", "add tests"} <= set(by_title)
+    assert all(t["source"] == "planner" for t in r.json())
+    # Drafts with no deps land as `ready` so the user can run them directly;
+    # drafts with unmet deps stay `pending` until their predecessors finish.
+    assert by_title["scaffold module"]["status"] == "ready"
+    assert by_title["add tests"]["status"] == "pending"
     assert by_title["add tests"]["depends_on"] == [by_title["scaffold module"]["id"]]
 
 
