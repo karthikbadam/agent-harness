@@ -33,6 +33,7 @@ dev = [
 [project.scripts]
 agent-harness = "agent_harness.cli:main"
 agent-harness-mcp = "agent_harness.services.orchestrator_mcp:main"
+agent-harness-driver = "agent_harness.services.driver_runtime:main"
 
 [tool.setuptools]
 package-dir = {"" = "server"}
