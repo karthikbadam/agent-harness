@@ -64,9 +64,11 @@ export function ProjectDetailPage() {
                 variant="outline"
                 onClick={() => setPlanOpen(true)}
                 gap={1.5}
+                aria-label="View plan"
+                px={{ base: 2, md: 3 }}
               >
                 <LuFileText />
-                View plan
+                <Text display={{ base: "none", md: "inline" }}>View plan</Text>
               </Button>
             )}
             <AutopilotToggle projectId={project.id} />

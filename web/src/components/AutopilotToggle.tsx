@@ -39,10 +39,11 @@ export function AutopilotToggle({ projectId }: Props) {
     (n) => n.severity === "escalate" || n.severity === "warn",
   ).length;
 
+  const noteCount = notes?.length ?? 0;
   return (
     <>
       <HStack gap={1.5}>
-        {isOn && (
+        {isOn && noteCount > 0 && (
           <Button
             size="xs"
             variant="ghost"
@@ -50,18 +51,22 @@ export function AutopilotToggle({ projectId }: Props) {
             onClick={() => setDrawerOpen(true)}
             gap={1}
             px={2}
+            aria-label={`${noteCount} driver notes`}
           >
             {recentEscalations > 0 && (
               <Box lineHeight="0">
                 <LuTriangleAlert />
               </Box>
             )}
-            {(notes?.length ?? 0)} {(notes?.length ?? 0) === 1 ? "note" : "notes"}
+            <Text>{noteCount}</Text>
+            <Text display={{ base: "none", md: "inline" }}>
+              {noteCount === 1 ? "note" : "notes"}
+            </Text>
           </Button>
         )}
         <HStack
-          gap={1.5}
-          px={2.5}
+          gap={{ base: 1, md: 1.5 }}
+          px={{ base: 1.5, md: 2.5 }}
           py={1.5}
           rounded="md"
           bg={isOn ? "purple.subtle" : "transparent"}
@@ -75,7 +80,12 @@ export function AutopilotToggle({ projectId }: Props) {
           >
             <LuPlane />
           </Box>
-          <Text fontSize="xs" fontWeight="medium" color={isOn ? "purple.fg" : "fg.muted"}>
+          <Text
+            fontSize="xs"
+            fontWeight="medium"
+            color={isOn ? "purple.fg" : "fg.muted"}
+            display={{ base: "none", md: "inline" }}
+          >
             Autopilot
           </Text>
           <Switch.Root
