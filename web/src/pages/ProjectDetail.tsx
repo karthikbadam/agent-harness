@@ -68,7 +68,7 @@ export function ProjectDetailPage() {
                 px={{ base: 2, md: 3 }}
               >
                 <LuFileText />
-                <Text display={{ base: "none", md: "inline" }}>View plan</Text>
+                <Text hideBelow="md">View plan</Text>
               </Button>
             )}
             <AutopilotToggle projectId={project.id} />

@@ -59,9 +59,7 @@ export function AutopilotToggle({ projectId }: Props) {
               </Box>
             )}
             <Text>{noteCount}</Text>
-            <Text display={{ base: "none", md: "inline" }}>
-              {noteCount === 1 ? "note" : "notes"}
-            </Text>
+            <Text hideBelow="md">{noteCount === 1 ? "note" : "notes"}</Text>
           </Button>
         )}
         <HStack
@@ -84,7 +82,7 @@ export function AutopilotToggle({ projectId }: Props) {
             fontSize="xs"
             fontWeight="medium"
             color={isOn ? "purple.fg" : "fg.muted"}
-            display={{ base: "none", md: "inline" }}
+            hideBelow="md"
           >
             Autopilot
           </Text>
