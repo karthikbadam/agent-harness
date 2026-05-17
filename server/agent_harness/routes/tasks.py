@@ -466,6 +466,15 @@ async def cancel_task(
         if job_row is not None:
             mgr = _manager(request)
             await mgr.stop(job_row[0])
+    # GC the worktree if one was created for this task.
+    if t.worktree_path or t.worktree_branch:
+        from ..services import worktrees
+
+        project = s.get(models.Project, t.project_id)
+        if project is not None:
+            worktrees.remove(project, t)
+        t.worktree_path = None
+        t.worktree_branch = None
     t.status = "canceled"
     s.commit()
     s.refresh(t)
