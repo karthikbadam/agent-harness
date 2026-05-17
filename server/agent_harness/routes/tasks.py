@@ -21,7 +21,7 @@ from .. import models
 from ..auth import require_auth
 from ..db import get_session
 from ..jobs import JobManager
-from ..schemas import JobOut, TaskCreate, TaskOut, TaskUpdate
+from ..schemas import JobOut, MergeIn, SplitIn, TaskCreate, TaskOut, TaskUpdate
 from ..routes.jobs import _to_out as _job_to_out
 
 router = APIRouter(tags=["tasks"], dependencies=[Depends(require_auth)])
@@ -271,6 +271,182 @@ async def run_task(
     job = s.get(models.Job, jid)
     assert job is not None
     return _job_to_out(job)
+
+
+@router.post("/api/tasks/{task_id}/split", response_model=list[TaskOut])
+def split_task(
+    task_id: str, body: SplitIn, s: Session = Depends(get_session)
+) -> list[TaskOut]:
+    """Replace ``task_id`` with N new tasks. Pure DAG surgery — no jobs touched.
+
+    Allowed only when the task is ``pending`` or ``ready``. If
+    ``inherit_deps_in``, the first new task picks up the original's incoming
+    deps. If ``link_in_series``, the new tasks form a chain. The original
+    task's outgoing dependents are rewired to depend on the last new task.
+    The original task row is deleted.
+    """
+    t = s.get(models.Task, task_id)
+    if t is None:
+        raise HTTPException(404, "not found")
+    if t.status not in {"pending", "ready"}:
+        raise HTTPException(
+            409, f"can only split pending/ready tasks (status={t.status!r})"
+        )
+    if not body.new_tasks:
+        raise HTTPException(400, "new_tasks must be non-empty")
+
+    incoming = _deps_of(s, task_id) if body.inherit_deps_in else []
+    outgoing = [
+        r[0]
+        for r in s.execute(
+            select(models.TaskDependency.task_id).where(
+                models.TaskDependency.depends_on_id == task_id
+            )
+        ).all()
+    ]
+    project_id = t.project_id
+    base_idx = t.order_idx
+
+    # Drop deps that involve the original.
+    s.query(models.TaskDependency).filter(
+        (models.TaskDependency.task_id == task_id)
+        | (models.TaskDependency.depends_on_id == task_id)
+    ).delete()
+    s.flush()
+    s.delete(t)
+    s.flush()
+
+    new_ids: list[str] = []
+    for i, item in enumerate(body.new_tasks):
+        nt = models.Task(
+            project_id=project_id,
+            title=item.title,
+            prompt=item.prompt,
+            order_idx=base_idx + i,
+            source="manual",
+            status="pending",
+        )
+        s.add(nt)
+        s.flush()
+        new_ids.append(nt.id)
+
+    if incoming:
+        for d in incoming:
+            s.add(models.TaskDependency(task_id=new_ids[0], depends_on_id=d))
+    if body.link_in_series and len(new_ids) > 1:
+        for prev, nxt in zip(new_ids, new_ids[1:]):
+            s.add(models.TaskDependency(task_id=nxt, depends_on_id=prev))
+    last_new = new_ids[-1]
+    for downstream in outgoing:
+        s.add(models.TaskDependency(task_id=downstream, depends_on_id=last_new))
+    s.flush()
+
+    for nid in new_ids:
+        nt = s.get(models.Task, nid)
+        assert nt is not None
+        nt.status = _initial_status(s, nid)
+    # Downstream tasks may have become unblocked or newly blocked.
+    for downstream in outgoing:
+        ds = s.get(models.Task, downstream)
+        if ds is None:
+            continue
+        if ds.status in {"pending", "ready"}:
+            ds.status = _initial_status(s, downstream)
+    s.commit()
+
+    return [_to_out(s, s.get(models.Task, nid)) for nid in new_ids]
+
+
+@router.post("/api/tasks/merge", response_model=TaskOut)
+def merge_tasks(body: MergeIn, s: Session = Depends(get_session)) -> TaskOut:
+    """Collapse N tasks into one. Pure DAG surgery — no jobs touched.
+
+    All inputs must be ``pending`` and in the same project. The merged task
+    inherits the union of inputs' incoming deps; downstream tasks of any
+    input are rewired to depend on the merged task. Inputs are deleted.
+    Rejected if any input lies on a path through the input set (would
+    collapse a real dependency).
+    """
+    if not body.task_ids:
+        raise HTTPException(400, "task_ids must be non-empty")
+    tasks = [s.get(models.Task, tid) for tid in body.task_ids]
+    if any(t is None for t in tasks):
+        raise HTTPException(404, "one or more tasks not found")
+    project_ids = {t.project_id for t in tasks}
+    if len(project_ids) != 1:
+        raise HTTPException(400, "all tasks must be in the same project")
+    for t in tasks:
+        if t.status != "pending":
+            raise HTTPException(
+                409, f"task {t.id} status={t.status!r}; only pending tasks may merge"
+            )
+    # Reject if any input has a path to another input through the DAG.
+    id_set = set(body.task_ids)
+    for t in tasks:
+        seen: set[str] = set()
+        stack = list(_deps_of(s, t.id))
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            if cur in id_set:
+                raise HTTPException(
+                    400, f"task {t.id} depends on {cur}; cannot collapse"
+                )
+            stack.extend(_deps_of(s, cur))
+
+    project_id = next(iter(project_ids))
+    incoming: set[str] = set()
+    outgoing: set[str] = set()
+    base_idx = min(t.order_idx for t in tasks)
+    for t in tasks:
+        for d in _deps_of(s, t.id):
+            if d not in id_set:
+                incoming.add(d)
+        rows = s.execute(
+            select(models.TaskDependency.task_id).where(
+                models.TaskDependency.depends_on_id == t.id
+            )
+        ).all()
+        for (down,) in rows:
+            if down not in id_set:
+                outgoing.add(down)
+
+    for t in tasks:
+        s.query(models.TaskDependency).filter(
+            (models.TaskDependency.task_id == t.id)
+            | (models.TaskDependency.depends_on_id == t.id)
+        ).delete()
+        s.flush()
+        s.delete(t)
+    s.flush()
+
+    merged = models.Task(
+        project_id=project_id,
+        title=body.title,
+        prompt=body.prompt,
+        order_idx=base_idx,
+        source="manual",
+        status="pending",
+    )
+    s.add(merged)
+    s.flush()
+    for d in incoming:
+        s.add(models.TaskDependency(task_id=merged.id, depends_on_id=d))
+    for down in outgoing:
+        s.add(models.TaskDependency(task_id=down, depends_on_id=merged.id))
+    s.flush()
+    merged.status = _initial_status(s, merged.id)
+    for down in outgoing:
+        ds = s.get(models.Task, down)
+        if ds is None:
+            continue
+        if ds.status in {"pending", "ready"}:
+            ds.status = _initial_status(s, down)
+    s.commit()
+    s.refresh(merged)
+    return _to_out(s, merged)
 
 
 @router.post("/api/tasks/{task_id}/cancel", response_model=TaskOut)

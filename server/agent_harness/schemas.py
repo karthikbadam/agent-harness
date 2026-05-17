@@ -231,6 +231,23 @@ class OutcomeOut(BaseModel):
     created_at: datetime
 
 
+class SplitTaskItem(BaseModel):
+    title: str
+    prompt: str
+
+
+class SplitIn(BaseModel):
+    new_tasks: list[SplitTaskItem]
+    inherit_deps_in: bool = True
+    link_in_series: bool = True
+
+
+class MergeIn(BaseModel):
+    task_ids: list[str]
+    title: str
+    prompt: str
+
+
 class PlanCreate(BaseModel):
     ask: str
 
