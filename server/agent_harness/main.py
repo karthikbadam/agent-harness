@@ -30,6 +30,7 @@ from .reconcile import reconcile_jobs
 from .schedule_service import ScheduleService
 from .services import claude_md, orchestrator_mcp, task_runner
 from .routes import allowlist as allowlist_routes
+from .routes import driver as driver_routes
 from .routes import jobs as jobs_routes
 from .routes import outcomes as outcomes_routes
 from .routes import plans as plans_routes
@@ -74,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.broadcasters = registry
     app.state.job_manager = manager
+    app.state.owned_drivers = {}
     await reconcile_jobs(registry)
     schedules = ScheduleService(manager)
     schedules.start()
@@ -82,6 +84,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         schedules.shutdown()
+        # Kill any drivers we spawned so they don't outlive us.
+        for proc in list(app.state.owned_drivers.values()):
+            try:
+                proc.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+        app.state.owned_drivers.clear()
 
 
 def create_app() -> FastAPI:
@@ -110,6 +119,7 @@ def create_app() -> FastAPI:
     app.include_router(plans_routes.router)
     app.include_router(stream_routes.router)
     app.include_router(stream_routes.schema_router)
+    app.include_router(driver_routes.router)
 
     # Mount the orchestrator MCP at /mcp with the same bearer-token guard as
     # /api/*. External Claude sessions (or curl) connect here; tools are 1:1

@@ -464,6 +464,45 @@ def merge_tasks(body: MergeIn, s: Session = Depends(get_session)) -> TaskOut:
     return _to_out(s, merged)
 
 
+@router.post("/api/tasks/{task_id}/retry", response_model=JobOut)
+async def retry_task(
+    task_id: str, request: Request, s: Session = Depends(get_session)
+) -> JobOut:
+    """Reset a failed task to ready, increment its retry counter, and run it.
+
+    Used by the driver (autopilot) and the copilot one-click retry button.
+    The task's worktree is cleared first so the execute turn starts from a
+    fresh checkout of project HEAD.
+    """
+    t = s.get(models.Task, task_id)
+    if t is None:
+        raise HTTPException(404, "not found")
+    if t.status != "failed":
+        raise HTTPException(409, f"task status is {t.status!r}; only 'failed' may retry")
+    if t.worktree_path or t.worktree_branch:
+        from ..services import worktrees
+
+        project = s.get(models.Project, t.project_id)
+        if project is not None:
+            worktrees.remove(project, t)
+        t.worktree_path = None
+        t.worktree_branch = None
+    t.retries = (t.retries or 0) + 1
+    t.integration_status = None
+    t.status = "ready"
+    s.commit()
+    mgr = _manager(request)
+    title = f"[task] {t.title}"[:256]
+    jid = mgr.create_job(t.project_id, t.prompt, title=title, task_id=t.id)
+    t.status = "running"
+    s.commit()
+    await mgr.start(jid)
+    s.expire_all()
+    job = s.get(models.Job, jid)
+    assert job is not None
+    return _job_to_out(job)
+
+
 @router.post("/api/tasks/{task_id}/cancel", response_model=TaskOut)
 async def cancel_task(
     task_id: str, request: Request, s: Session = Depends(get_session)
