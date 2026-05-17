@@ -28,7 +28,7 @@ from .db import init_db
 from .jobs import JobManager
 from .reconcile import reconcile_jobs
 from .schedule_service import ScheduleService
-from .services import claude_md, task_runner
+from .services import claude_md, orchestrator_mcp, task_runner
 from .routes import allowlist as allowlist_routes
 from .routes import jobs as jobs_routes
 from .routes import outcomes as outcomes_routes
@@ -111,11 +111,64 @@ def create_app() -> FastAPI:
     app.include_router(stream_routes.router)
     app.include_router(stream_routes.schema_router)
 
+    # Mount the orchestrator MCP at /mcp with the same bearer-token guard as
+    # /api/*. External Claude sessions (or curl) connect here; tools are 1:1
+    # with REST routes so the API stays the source of truth.
+    mcp = orchestrator_mcp.build_mcp()
+    app.mount("/mcp", _BearerGuard(mcp.streamable_http_app()))
+
     dist = _web_dist_dir()
     if dist is not None:
         app.mount("/", _SpaStaticFiles(directory=str(dist), html=True), name="frontend")
 
     return app
+
+
+class _BearerGuard:
+    """ASGI middleware: gate a mounted sub-app on the harness bearer token.
+
+    The FastAPI ``require_auth`` Depends() only fires for routes registered on
+    the FastAPI app; mounted ASGI sub-apps (like the MCP server) bypass it,
+    so we wrap them here to share the same auth surface.
+    """
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+        if scope.get("type") not in {"http", "websocket"}:
+            await self._inner(scope, receive, send)
+            return
+        from .config import get_settings
+
+        required = get_settings().auth_token
+        if not required:
+            await self._inner(scope, receive, send)
+            return
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers", [])
+        }
+        auth = headers.get("authorization", "")
+        ok = auth.startswith("Bearer ") and auth[len("Bearer "):] == required
+        if not ok:
+            if scope["type"] == "http":
+                body = b'{"detail":"unauthorized"}'
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"content-length", str(len(body)).encode("ascii")),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+            await send({"type": "websocket.close", "code": 4401})
+            return
+        await self._inner(scope, receive, send)
 
 
 class _SpaStaticFiles(StaticFiles):
