@@ -429,11 +429,23 @@ class JobManager:
         _ = cost
 
         # Record an outcome + propagate task status if this job belongs to a task.
+        autorun_ids: list[str] = []
         try:
             from .services import task_runner
 
-            task_runner.on_job_finalized(
+            autorun_ids = task_runner.on_job_finalized(
                 job_id, status, log_dir=broadcaster.log_dir
             )
         except Exception:  # noqa: BLE001
             log.exception("task_runner.on_job_finalized failed for %s", job_id)
+
+        # Auto-kick planner-sourced tasks that just became ready. Manual-source
+        # tasks are left for the user to ``POST /run`` (or kicked via
+        # ``?run=true`` at creation).
+        for tid in autorun_ids:
+            try:
+                from .services import task_runner as _tr
+
+                await _tr.kickoff_first_phase(tid, self)
+            except Exception:  # noqa: BLE001
+                log.exception("autorun kickoff failed for task %s", tid)

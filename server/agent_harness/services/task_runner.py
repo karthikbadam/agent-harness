@@ -227,8 +227,12 @@ def on_job_finalized(
     job_id: str,
     job_status: str,
     log_dir: Path | None = None,
-) -> None:
+) -> list[str]:
     """Record an Outcome and advance the owning Task's phase.
+
+    Returns the list of task IDs that just transitioned to ``ready`` and are
+    eligible for auto-kickoff (planner-sourced, non-synthetic). The caller is
+    responsible for actually awaiting :func:`kickoff_first_phase` on each.
 
     No-op if the job has no ``task_id``. The Job's ``kind`` selects the path:
 
@@ -246,14 +250,15 @@ def on_job_finalized(
     """
     bus = driver_bus.get_bus()
     pending_events: list[tuple[str, dict]] = []  # collected, emitted after commit
+    autorun_ids: list[str] = []
     with session_scope() as s:
         job = s.get(models.Job, job_id)
         if job is None or job.task_id is None:
-            return
+            return autorun_ids
         task = s.get(models.Task, job.task_id)
         if task is None:
             log.warning("task %s missing for job %s; outcome skipped", job.task_id, job_id)
-            return
+            return autorun_ids
         project = s.get(models.Project, job.project_id)
         project_id = job.project_id
 
@@ -302,7 +307,7 @@ def on_job_finalized(
                     )
                 )
             _emit_after(bus, pending_events)
-            return
+            return autorun_ids
 
         if job.kind == "integrate":
             cwd = job.cwd or (project.path if project else None)
@@ -357,8 +362,11 @@ def on_job_finalized(
             )
             for tid, pid in transitions:
                 pending_events.append(("task_ready", {"project_id": pid, "task_id": tid}))
+                ds = s.get(models.Task, tid)
+                if ds is not None and ds.source == "planner" and not ds.synthetic:
+                    autorun_ids.append(tid)
             _emit_after(bus, pending_events)
-            return
+            return autorun_ids
 
         # Execute / one-shot / ad-hoc (kind='execute' or 'ad_hoc'). The job's
         # cwd is the worktree path for plan-then-execute tasks; project.path
@@ -398,7 +406,48 @@ def on_job_finalized(
         )
         for tid, pid in transitions:
             pending_events.append(("task_ready", {"project_id": pid, "task_id": tid}))
+            ds = s.get(models.Task, tid)
+            if ds is not None and ds.source == "planner" and not ds.synthetic:
+                autorun_ids.append(tid)
     _emit_after(bus, pending_events)
+    return autorun_ids
+
+
+async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
+    """Spawn the first-phase Job for a ``ready`` task.
+
+    Idempotent: returns ``None`` if the task is missing, not ready, or its
+    project no longer exists. Callers — the planner's autorun loop, the
+    task_ready autorun hook, and the manual ``run_task`` route — converge
+    here so that every "start the work" path uses the same phase/kind/cwd
+    rules.
+    """
+    with session_scope() as s:
+        t = s.get(models.Task, task_id)
+        if t is None or t.status != "ready":
+            return None
+        project = s.get(models.Project, t.project_id)
+        if project is None:
+            return None
+        if t.synthetic:
+            phase, kind = "integrating", "integrate"
+        elif t.mode == "plan_then_execute":
+            phase, kind = "planning", "plan"
+        else:
+            phase, kind = "executing", "execute"
+        t.status = "running"
+        t.phase = phase
+        s.commit()
+        project_id = t.project_id
+        prompt = t.prompt
+        title = f"[task] {t.title}"[:256]
+        cwd = project.path
+    jid = job_manager.create_job(
+        project_id, prompt, title=title, task_id=task_id,
+        kind=kind, cwd=cwd,
+    )
+    await job_manager.start(jid)
+    return jid
 
 
 def _emit_after(bus: "driver_bus.DriverEventBus", events: list[tuple[str, dict]]) -> None:

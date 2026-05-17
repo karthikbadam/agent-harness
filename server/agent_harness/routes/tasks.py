@@ -193,32 +193,11 @@ async def create_task(
         if run:
             # Fire the first phase Job immediately. Mirrors run_task but inline
             # so the response still carries the (now running) Task state.
-            await _kickoff_task(t, request, s)
+            from ..services import task_runner
+
+            await task_runner.kickoff_first_phase(t.id, _manager(request))
             s.refresh(t)
     return _to_out(s, t)
-
-
-async def _kickoff_task(t: models.Task, request: Request, s: Session) -> None:
-    """Spawn the first-phase Job for a ``ready`` task. Mirrors ``run_task``."""
-    project = s.get(models.Project, t.project_id)
-    if project is None:
-        raise HTTPException(500, "project missing")
-    mgr = _manager(request)
-    title = f"[task] {t.title}"[:256]
-    if t.synthetic:
-        phase, kind = "integrating", "integrate"
-    elif t.mode == "plan_then_execute":
-        phase, kind = "planning", "plan"
-    else:
-        phase, kind = "executing", "execute"
-    t.status = "running"
-    t.phase = phase
-    s.commit()
-    jid = mgr.create_job(
-        t.project_id, t.prompt, title=title, task_id=t.id,
-        kind=kind, cwd=project.path,
-    )
-    await mgr.start(jid)
 
 
 @router.get("/api/projects/{project_id}/tasks", response_model=list[TaskOut])

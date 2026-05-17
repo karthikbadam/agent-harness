@@ -146,11 +146,12 @@ async def plan(
     job_manager: JobManager,
     log_root: Path,
 ) -> tuple[list[str], str | None, str | None]:
-    """Run the planner and insert draft tasks.
+    """Run the planner, insert draft tasks, and auto-kick any that landed
+    ``ready`` (i.e. have no unsatisfied deps).
 
-    Returns (task_ids, raw_output_or_None, error_or_None).
-    On JSON parse failure the raw output is returned so the caller can show
-    it to the user; no tasks are inserted in that case.
+    Returns (task_ids, raw_output_or_None, error_or_None). On JSON parse
+    failure the raw output is returned so the caller can show it to the user;
+    no tasks are inserted in that case.
     """
     prompt = PLANNER_INSTRUCTIONS + "\n\nAsk:\n" + ask
     title = f"[plan] {ask[:60]}"
@@ -167,7 +168,21 @@ async def plan(
     if parsed is None:
         return [], raw, "could not parse a JSON task array from planner output"
 
-    return _insert_drafts(project_id, parsed), raw, None
+    task_ids = _insert_drafts(project_id, parsed)
+
+    # Auto-kick: planner drafts that landed ``ready`` (no deps) run immediately.
+    # The user already approved the ask by submitting it; gating each task on
+    # a manual Run click adds friction without value. Tasks still in ``pending``
+    # (waiting on a predecessor) auto-kick later via on_job_finalized.
+    from . import task_runner
+
+    for tid in task_ids:
+        try:
+            await task_runner.kickoff_first_phase(tid, job_manager)
+        except Exception:  # noqa: BLE001
+            log.exception("planner autorun failed for task %s", tid)
+
+    return task_ids, raw, None
 
 
 def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
