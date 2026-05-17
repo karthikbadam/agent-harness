@@ -5,8 +5,11 @@ export const tasksApi = {
   listForProject: (projectId: string) =>
     api.get<TaskOut[]>(`/api/projects/${projectId}/tasks`),
   get: (id: string) => api.get<TaskOut>(`/api/tasks/${id}`),
-  create: (projectId: string, body: TaskCreate) =>
-    api.post<TaskOut>(`/api/projects/${projectId}/tasks`, body),
+  create: (projectId: string, body: TaskCreate, opts?: { run?: boolean }) =>
+    api.post<TaskOut>(
+      `/api/projects/${projectId}/tasks${opts?.run ? "?run=true" : ""}`,
+      body,
+    ),
   update: (id: string, body: TaskUpdate) =>
     api.patch<TaskOut>(`/api/tasks/${id}`, body),
   remove: (id: string) => api.del(`/api/tasks/${id}`),

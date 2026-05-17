@@ -282,7 +282,13 @@ export interface paths {
         /** List Tasks */
         get: operations["list_tasks_api_projects__project_id__tasks_get"];
         put?: never;
-        /** Create Task */
+        /**
+         * Create Task
+         * @description Create a manual Task. Pass ``?run=true`` to immediately spawn its first
+         *     Job if the task is ``ready`` after creation (i.e. has no unsatisfied deps).
+         *     ``mode`` defaults to ``plan_then_execute`` if omitted; pass ``"one_shot"``
+         *     for ad-hoc tasks that should skip the planning gate.
+         */
         post: operations["create_task_api_projects__project_id__tasks_post"];
         delete?: never;
         options?: never;
@@ -1174,6 +1180,8 @@ export interface components {
              * @default 0
              */
             order_idx: number;
+            /** Mode */
+            mode?: ("plan_then_execute" | "one_shot") | null;
         };
         /** TaskOut */
         TaskOut: {
@@ -1234,6 +1242,8 @@ export interface components {
             depends_on?: string[] | null;
             /** Order Idx */
             order_idx?: number | null;
+            /** Mode */
+            mode?: ("plan_then_execute" | "one_shot") | null;
         };
         /** ToolResultEvent */
         ToolResultEvent: {
@@ -2179,6 +2189,7 @@ export interface operations {
     create_task_api_projects__project_id__tasks_post: {
         parameters: {
             query?: {
+                run?: boolean;
                 token?: string | null;
             };
             header?: {
