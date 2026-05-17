@@ -103,8 +103,10 @@ pending → ready → running (planning) → awaiting_ack → running (executing
   separate Claude Code session to it from outside the harness — jobs spawned
   by the harness do **not** have the orchestrator tools auto-injected.
 
-Opt out per task with `mode=one_shot` (skip planning, go straight to a
-worktree execute).
+Opt out per task with `mode=one_shot` — skip planning, run a single turn
+directly in `project.path` (no worktree, no ack gate). Useful for trivial
+edits that don't need isolation; concurrent one-shot tasks share the
+project's git index, so don't fan them out in parallel.
 
 ### Autopilot driver
 
