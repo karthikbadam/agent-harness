@@ -68,10 +68,31 @@ _DEFAULT_CODE_ROOTS = ["~/Code", "~/code", "~/src", "~/projects"]
 
 
 def _resolve_code_roots() -> list[str]:
-    override = os.environ.get("AH_CODE_ROOTS")
-    if override:
-        return [r for r in override.split(":") if r.strip()]
-    return _DEFAULT_CODE_ROOTS
+    """Return distinct, existing code-root directories.
+
+    macOS's default APFS is case-insensitive, so ``~/Code`` and ``~/code``
+    resolve to the same directory — but ``os.path.realpath`` preserves the
+    casing of the input, so naive de-dup doesn't catch it. We key by
+    ``(st_dev, st_ino)`` to dedupe at the filesystem-identity level.
+    """
+    raw = os.environ.get("AH_CODE_ROOTS")
+    candidates = (
+        [r for r in raw.split(":") if r.strip()] if raw else list(_DEFAULT_CODE_ROOTS)
+    )
+    seen_keys: set[tuple[int, int]] = set()
+    out: list[str] = []
+    for r in candidates:
+        path = os.path.expanduser(r)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        key = (st.st_dev, st.st_ino)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        out.append(path)
+    return out
 
 
 @router.get("/path-suggestions", response_model=list[PathSuggestion])
