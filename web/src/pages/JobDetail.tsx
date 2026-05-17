@@ -1,5 +1,5 @@
-import { useParams } from "react-router-dom";
-import { Box, Button, Center, Spinner, Text } from "@chakra-ui/react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Box, Button, Center, HStack, Spinner, Text } from "@chakra-ui/react";
 
 import { Shell } from "../components/Shell";
 import { TurnTranscript } from "../components/TurnTranscript";
@@ -9,6 +9,7 @@ import { useJobEvents, useJobStream } from "../hooks/useJobStream";
 
 export function JobDetailPage() {
   const { jobId } = useParams();
+  const navigate = useNavigate();
   const job = useJob(jobId);
   useJobStream(jobId);
   const { data: events = [] } = useJobEvents(jobId);
@@ -20,7 +21,7 @@ export function JobDetailPage() {
   return (
     <Shell
       title={job.data?.title ?? "Job"}
-      back="/"
+      back={job.data?.task_id ? `/jobs?task_id=${job.data.task_id}` : "/jobs"}
       right={
         running ? (
           <Button size="xs" variant="outline" colorPalette="red" onClick={() => stop.mutate()}>
@@ -35,6 +36,27 @@ export function JobDetailPage() {
         </Center>
       )}
       {job.error && <Text color="red.fg">Failed to load job.</Text>}
+      {job.data && (
+        <HStack gap={2} mb={3} fontSize="xs" color="fg.muted" wrap="wrap">
+          {job.data.kind && job.data.kind !== "ad_hoc" && (
+            <Text>kind: {job.data.kind}</Text>
+          )}
+          {job.data.task_id && (
+            <>
+              <Text>·</Text>
+              <Button
+                size="2xs"
+                variant="outline"
+                onClick={() =>
+                  navigate(`/?project=${job.data!.project_id}`)
+                }
+              >
+                Back to task
+              </Button>
+            </>
+          )}
+        </HStack>
+      )}
       <Box pb={20}>
         <TurnTranscript events={events} job={job.data} />
       </Box>

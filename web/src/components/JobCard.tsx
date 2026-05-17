@@ -65,8 +65,14 @@ export function JobCard({ job }: { job: JobOut }) {
           )}
         </Flex>
         <Flex justify="space-between" align="center" gap={2}>
-          <Flex gap={2} align="center" fontSize="xs" color="fg.muted">
+          <Flex gap={2} align="center" fontSize="xs" color="fg.muted" wrap="wrap">
             <StatusPill status={job.status} />
+            {job.kind && job.kind !== "ad_hoc" && (
+              <>
+                <Text>·</Text>
+                <Text>{job.kind}</Text>
+              </>
+            )}
             <Text>·</Text>
             <Text>
               {(job.turns ?? []).length} turn{(job.turns ?? []).length === 1 ? "" : "s"}

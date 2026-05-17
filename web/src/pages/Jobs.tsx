@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { Box, Center, Heading, Spinner, Stack, Text } from "@chakra-ui/react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Box, Button, Center, Heading, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
 
 import { Shell } from "../components/Shell";
 import { Composer } from "../components/Composer";
@@ -11,13 +11,43 @@ import type { JobOut } from "../types";
 
 export function JobsPage() {
   const navigate = useNavigate();
-  const { data: jobs, isLoading, error } = useJobs();
+  const [params, setParams] = useSearchParams();
+  const taskFilter = params.get("task_id") ?? "";
+  const { data: allJobs, isLoading, error } = useJobs();
   const createJob = useCreateJob();
+  const jobs = useMemo(() => {
+    if (!allJobs) return undefined;
+    if (taskFilter) return allJobs.filter((j) => j.task_id === taskFilter);
+    return allJobs;
+  }, [allJobs, taskFilter]);
   const groups = useMemo(() => groupByDay(jobs ?? []), [jobs]);
 
   return (
-    <Shell title="Jobs">
+    <Shell
+      title={taskFilter ? `Jobs · task ${taskFilter.slice(0, 6)}` : "Jobs"}
+      back="/"
+      right={
+        taskFilter ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => {
+              const next = new URLSearchParams(params);
+              next.delete("task_id");
+              setParams(next);
+            }}
+          >
+            Clear filter
+          </Button>
+        ) : undefined
+      }
+    >
       <Box pb="calc(160px + env(safe-area-inset-bottom))">
+        {taskFilter && (
+          <HStack mb={3} fontSize="xs" color="fg.muted">
+            <Text>Filtered to one task</Text>
+          </HStack>
+        )}
         {isLoading && (
           <Center py={8}>
             <Spinner />
