@@ -9,6 +9,7 @@ import { AuthGate } from "./pages/AuthGate";
 import { JobsPage } from "./pages/Jobs";
 import { JobDetailPage } from "./pages/JobDetail";
 import { ProjectsPage } from "./pages/Projects";
+import { ProjectDetailPage } from "./pages/ProjectDetail";
 import { SchedulesPage } from "./pages/Schedules";
 
 function RequireAuth({ children }: { children: ReactElement }) {
@@ -37,6 +38,14 @@ export function App() {
           element={
             <RequireAuth>
               <ProjectsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/projects/:projectId"
+          element={
+            <RequireAuth>
+              <ProjectDetailPage />
             </RequireAuth>
           }
         />

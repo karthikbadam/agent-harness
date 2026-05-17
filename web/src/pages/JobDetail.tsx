@@ -48,10 +48,10 @@ export function JobDetailPage() {
                 size="2xs"
                 variant="outline"
                 onClick={() =>
-                  navigate(`/?project=${job.data!.project_id}`)
+                  navigate(`/projects/${job.data!.project_id}`)
                 }
               >
-                Back to task
+                Open project
               </Button>
             </>
           )}
