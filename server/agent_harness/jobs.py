@@ -36,6 +36,48 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+_PLANNING_PREFIX = (
+    "You are in the PLANNING phase. Do not modify files. Read what you need, "
+    "then produce a numbered plan of the changes you will make as your final "
+    "assistant message. A separate execute turn will run after a human "
+    "acknowledges this plan."
+)
+
+_EXECUTE_PREFIX_TEMPLATE = (
+    "You are in the EXECUTE phase. The previously approved plan was:\n\n"
+    "{plan}\n\n"
+    "Implement it now in this working directory. Commit your changes when "
+    "complete."
+)
+
+
+def _last_plan_summary(s, task_id: str | None) -> str | None:
+    if not task_id:
+        return None
+    row = s.execute(
+        select(models.Outcome.summary)
+        .where(models.Outcome.task_id == task_id, models.Outcome.kind == "plan")
+        .order_by(models.Outcome.created_at.desc())
+    ).first()
+    return row[0] if row is not None else None
+
+
+def _augment_prompt_for_phase(s, job: "models.Job", prompt: str) -> str:
+    """Prepend a phase-specific instruction to the user's prompt.
+
+    Planning turns get a read-only contract. Execute turns get the prior plan
+    summary so the agent has continuity even if the conversation was resumed.
+    All other phases (NULL, integrating, awaiting_ack-as-followup) pass through
+    unchanged.
+    """
+    if job.phase == "planning":
+        return f"{_PLANNING_PREFIX}\n\n{prompt}"
+    if job.phase == "executing":
+        plan = _last_plan_summary(s, job.task_id)
+        return _EXECUTE_PREFIX_TEMPLATE.format(plan=plan or "(plan not recorded)") + "\n\n" + prompt
+    return prompt
+
+
 def _gather_allowlist(project_id: str) -> list[str]:
     """Return the merged allowlist for a job: global + project rules + Skill().
 
@@ -92,17 +134,28 @@ class JobManager:
         schedule_id: str | None = None,
         task_id: str | None = None,
     ) -> str:
-        """Create Job + first Turn rows. Return job_id. Does not start running."""
+        """Create Job + first Turn rows. Return job_id. Does not start running.
+
+        When the job is bound to a plan-then-execute task, the initial phase is
+        ``planning``; one-shot and ad-hoc jobs leave ``phase`` NULL (v1
+        semantics — finalize-by-status, no ack gate).
+        """
         with session_scope() as s:
             proj = s.get(models.Project, project_id)
             if proj is None:
                 raise ValueError(f"unknown project {project_id}")
+            phase: str | None = None
+            if task_id is not None:
+                task = s.get(models.Task, task_id)
+                if task is not None and task.mode == "plan_then_execute":
+                    phase = "planning"
             job = models.Job(
                 project_id=project_id,
                 title=title or prompt[:80],
                 status="queued",
                 schedule_id=schedule_id,
                 task_id=task_id,
+                phase=phase,
             )
             s.add(job)
             s.flush()
@@ -189,7 +242,7 @@ class JobManager:
             project = s.get(models.Project, job.project_id)
             assert project is not None
             cwd = job.cwd_override or project.path
-            prompt = turn.prompt
+            prompt = _augment_prompt_for_phase(s, job, turn.prompt)
             permission_mode = project.permission_mode
             dangerously_skip = project.dangerously_skip
             resume_session_id = job.session_id  # set after first turn
@@ -325,6 +378,13 @@ class JobManager:
             if runner.session_id and not job.session_id:
                 job.session_id = runner.session_id
             job.status = status
+            # Phase transition: a clean planning turn parks the job at
+            # awaiting_ack instead of advancing to executing. The execute turn
+            # itself is enqueued only when the next followup arrives.
+            if job.phase == "planning" and status == "done":
+                job.phase = "awaiting_ack"
+            elif job.phase in ("executing", "integrating") and status != "running":
+                job.phase = "done"
             if status != "running":
                 job.ended_at = utcnow()
 

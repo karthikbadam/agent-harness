@@ -161,6 +161,83 @@ def test_no_git_records_null_sha(initdb: Path, tmp_path: Path) -> None:
         assert o.status == "success"
 
 
+def test_planning_phase_records_plan_outcome_and_keeps_task_running(
+    initdb: Path, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        t = models.Task(
+            project_id=proj.id,
+            title="t",
+            prompt="p",
+            status="running",
+            mode="plan_then_execute",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(
+            project_id=proj.id, title="run", task_id=t.id, phase="awaiting_ack"
+        )
+        s.add(job)
+        s.flush()
+        jid, tid = job.id, t.id
+
+    log_dir = tmp_path / "logs" / jid
+    _write_event_log(log_dir, "1. do a thing\n2. do another")
+    task_runner.on_job_finalized(jid, "done", log_dir=log_dir)
+
+    with session_scope() as s:
+        outcomes = s.query(models.Outcome).all()
+        assert len(outcomes) == 1
+        o = outcomes[0]
+        assert o.kind == "plan"
+        assert o.commit_sha is None
+        assert o.summary and "do a thing" in o.summary
+        # Task is still running — waiting on ack.
+        assert s.get(models.Task, tid).status == "running"
+
+
+def test_executing_phase_marks_done_and_integration_pending(
+    initdb: Path, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        t = models.Task(
+            project_id=proj.id,
+            title="t",
+            prompt="p",
+            status="running",
+            mode="plan_then_execute",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(
+            project_id=proj.id, title="run", task_id=t.id, phase="executing"
+        )
+        s.add(job)
+        s.flush()
+        jid, tid = job.id, t.id
+
+    task_runner.on_job_finalized(jid, "done", log_dir=None)
+    with session_scope() as s:
+        outcomes = s.query(models.Outcome).all()
+        assert len(outcomes) == 1
+        assert outcomes[0].kind == "execute"
+        task = s.get(models.Task, tid)
+        assert task.status == "done"
+        assert task.integration_status == "pending"
+
+
 def test_reconcile_on_startup_flips_pending_to_ready(initdb: Path) -> None:
     with session_scope() as s:
         proj = models.Project(name="r", path="/tmp")

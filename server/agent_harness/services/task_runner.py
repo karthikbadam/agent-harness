@@ -123,8 +123,16 @@ def on_job_finalized(
 ) -> None:
     """Record an Outcome and propagate task status. Safe to call always.
 
-    No-op if the job has no `task_id`. `job_status` is one of the JobManager
-    finalize statuses: done | failed | stopped.
+    No-op if the job has no ``task_id``. Branches on ``job.phase``:
+
+    - ``awaiting_ack`` (planning turn just finished): write
+      ``Outcome(kind='plan')`` capturing the plan text; do NOT mark the task
+      ``done`` — it stays ``running`` while the user/agent reviews. Downstream
+      tasks are NOT re-evaluated; the execute turn hasn't happened yet.
+    - ``done`` after ``executing`` or ad-hoc (``phase`` was NULL): existing v1
+      behavior — write ``Outcome(kind='execute')``, flip the task to ``done``
+      or ``failed``, and propagate readiness to dependents. For plan-then-
+      execute tasks the worktree branch is recorded so integration can find it.
     """
     with session_scope() as s:
         job = s.get(models.Job, job_id)
@@ -135,7 +143,28 @@ def on_job_finalized(
             log.warning("task %s missing for job %s; outcome skipped", job.task_id, job_id)
             return
         project = s.get(models.Project, job.project_id)
-        sha, branch = (_git_head(project.path) if project else (None, None))
+
+        if job.phase == "awaiting_ack":
+            # Planning turn just finished cleanly. Capture the plan text; keep
+            # the task in 'running' so the orchestrator/human still sees it as
+            # an in-flight commitment, just paused for ack.
+            summary = _last_assistant_text(log_dir) if log_dir is not None else None
+            s.add(
+                models.Outcome(
+                    task_id=task.id,
+                    job_id=job.id,
+                    commit_sha=None,
+                    branch=None,
+                    summary=summary,
+                    status="success",
+                    kind="plan",
+                )
+            )
+            return
+
+        # Execute / one-shot / ad-hoc path.
+        cwd = job.cwd_override or (project.path if project else None)
+        sha, branch = (_git_head(cwd) if cwd else (None, None))
         summary = _last_assistant_text(log_dir) if log_dir is not None else None
         outcome_status = "success" if job_status == "done" else "failed"
         s.add(
@@ -146,12 +175,12 @@ def on_job_finalized(
                 branch=branch,
                 summary=summary,
                 status=outcome_status,
+                kind="execute",
             )
         )
-        # Map job status to task status. `stopped` is treated as `failed` here
-        # since the task did not produce a successful outcome; the user can
-        # re-run the task manually if needed.
         task.status = "done" if job_status == "done" else "failed"
+        if task.status == "done" and task.mode == "plan_then_execute" and not task.synthetic:
+            task.integration_status = "pending"
         s.flush()
         _reevaluate_downstream(s, task.id)
 
