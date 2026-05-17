@@ -47,8 +47,8 @@ def _dep(s, task_id: str, depends_on: str) -> None:
     s.flush()
 
 
-def _job(s, project_id: str, task_id: str, phase: str | None = None) -> str:
-    j = models.Job(project_id=project_id, task_id=task_id, phase=phase)
+def _job(s, project_id: str, task_id: str, kind: str = "ad_hoc") -> str:
+    j = models.Job(project_id=project_id, task_id=task_id, kind=kind)
     s.add(j)
     s.flush()
     return j.id
@@ -57,12 +57,15 @@ def _job(s, project_id: str, task_id: str, phase: str | None = None) -> str:
 def test_ack_prioritized_over_run(initdb: Path) -> None:
     with session_scope() as s:
         pid = _proj(s)
-        t_run = _task(s, pid, "t_run", status="ready")
+        _ = _task(s, pid, "t_run", status="ready")
         t_ack = _task(s, pid, "t_ack", status="running")
-        jid = _job(s, pid, t_ack, phase="awaiting_ack")
+        # Mark the awaiting-ack Task directly (phase now lives on Task).
+        s.get(models.Task, t_ack).phase = "awaiting_ack"
+        s.flush()
         actions = driver_policy.next_actions(s, pid)
     assert [a.kind for a in actions] == ["ack", "run"]
-    assert actions[0].job_id == jid
+    assert actions[0].task_id == t_ack
+    assert actions[0].rest_path == f"/api/tasks/{t_ack}/ack"
 
 
 def test_retry_respects_backoff(initdb: Path) -> None:

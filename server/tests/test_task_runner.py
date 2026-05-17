@@ -176,12 +176,17 @@ def test_planning_phase_records_plan_outcome_and_keeps_task_running(
             title="t",
             prompt="p",
             status="running",
+            phase="planning",
             mode="plan_then_execute",
         )
         s.add(t)
         s.flush()
         job = models.Job(
-            project_id=proj.id, title="run", task_id=t.id, phase="awaiting_ack"
+            project_id=proj.id,
+            title="run",
+            task_id=t.id,
+            kind="plan",
+            cwd=str(repo),
         )
         s.add(job)
         s.flush()
@@ -198,8 +203,10 @@ def test_planning_phase_records_plan_outcome_and_keeps_task_running(
         assert o.kind == "plan"
         assert o.commit_sha is None
         assert o.summary and "do a thing" in o.summary
-        # Task is still running — waiting on ack.
-        assert s.get(models.Task, tid).status == "running"
+        # Task is still running but parked at awaiting_ack for the user/driver.
+        task = s.get(models.Task, tid)
+        assert task.status == "running"
+        assert task.phase == "awaiting_ack"
 
 
 def test_executing_phase_marks_done_and_integration_pending(
@@ -217,12 +224,17 @@ def test_executing_phase_marks_done_and_integration_pending(
             title="t",
             prompt="p",
             status="running",
+            phase="executing",
             mode="plan_then_execute",
         )
         s.add(t)
         s.flush()
         job = models.Job(
-            project_id=proj.id, title="run", task_id=t.id, phase="executing"
+            project_id=proj.id,
+            title="run",
+            task_id=t.id,
+            kind="execute",
+            cwd=str(repo),
         )
         s.add(job)
         s.flush()
@@ -235,6 +247,7 @@ def test_executing_phase_marks_done_and_integration_pending(
         assert outcomes[0].kind == "execute"
         task = s.get(models.Task, tid)
         assert task.status == "done"
+        assert task.phase == "done"
         assert task.integration_status == "pending"
 
 
@@ -270,6 +283,7 @@ def test_executing_finalize_commits_dirty_worktree(
             title="implement feature x",
             prompt="p",
             status="running",
+            phase="executing",
             mode="plan_then_execute",
             worktree_path=str(wt),
             worktree_branch="task/x",
@@ -280,8 +294,8 @@ def test_executing_finalize_commits_dirty_worktree(
             project_id=proj.id,
             title="run",
             task_id=t.id,
-            phase="executing",
-            cwd_override=str(wt),
+            kind="execute",
+            cwd=str(wt),
         )
         s.add(job)
         s.flush()
@@ -331,6 +345,7 @@ def test_executing_finalize_skips_commit_when_clean(
             title="t",
             prompt="p",
             status="running",
+            phase="executing",
             mode="plan_then_execute",
             worktree_path=str(wt),
             worktree_branch="task/y",
@@ -340,8 +355,8 @@ def test_executing_finalize_skips_commit_when_clean(
         job = models.Job(
             project_id=proj.id,
             task_id=t.id,
-            phase="executing",
-            cwd_override=str(wt),
+            kind="execute",
+            cwd=str(wt),
         )
         s.add(job)
         s.flush()
@@ -388,7 +403,7 @@ def _make_integration_fixture(tmp_path: Path):
         for label, wt_path, br in branches:
             t = models.Task(
                 project_id=proj.id, title=f"input-{label}", prompt="p",
-                status="done", mode="plan_then_execute",
+                status="done", phase="done", mode="plan_then_execute",
                 worktree_path=wt_path, worktree_branch=br,
                 integration_status="pending",
             )
@@ -397,14 +412,16 @@ def _make_integration_fixture(tmp_path: Path):
             inputs.append(t.id)
         synth = models.Task(
             project_id=proj.id, title="integrate", prompt="merge them",
-            status="running", mode="one_shot", synthetic=True,
+            status="running", phase="integrating",
+            mode="one_shot", synthetic=True,
         )
         s.add(synth)
         s.flush()
         for in_id in inputs:
             s.add(models.TaskDependency(task_id=synth.id, depends_on_id=in_id))
         job = models.Job(
-            project_id=proj.id, task_id=synth.id, phase="integrating",
+            project_id=proj.id, task_id=synth.id,
+            kind="integrate", cwd=str(repo),
         )
         s.add(job)
         s.flush()
@@ -468,7 +485,7 @@ def test_integration_finalize_fails_when_no_merge_happened(
         assert s.get(models.Task, tid_a).worktree_branch == "task/a"
 
 
-def test_on_ack_creates_worktree_and_flips_phase(
+def test_advance_to_executing_creates_worktree_and_flips_phase(
     initdb: Path, tmp_path: Path
 ) -> None:
     repo = tmp_path / "repo"
@@ -483,43 +500,31 @@ def test_on_ack_creates_worktree_and_flips_phase(
             title="t",
             prompt="do the thing",
             status="running",
+            phase="awaiting_ack",
             mode="plan_then_execute",
         )
         s.add(t)
         s.flush()
-        job = models.Job(
-            project_id=proj.id,
-            title="run",
-            task_id=t.id,
-            phase="awaiting_ack",
-            session_id="plan-session-id",
-        )
-        s.add(job)
-        s.flush()
-        jid, tid = job.id, t.id
+        tid = t.id
 
-    exec_prompt = task_runner.on_ack(jid, prompt_addendum="also handle errors")
+    spawn = task_runner.advance_to_executing(tid, prompt_addendum="also handle errors")
 
-    assert "do the thing" in exec_prompt
-    assert "also handle errors" in exec_prompt
+    assert "do the thing" in spawn.prompt
+    assert "also handle errors" in spawn.prompt
     with session_scope() as s:
-        job = s.get(models.Job, jid)
         task = s.get(models.Task, tid)
-        assert job.phase == "executing"
-        assert job.cwd_override is not None
-        assert task.worktree_path == job.cwd_override
+        assert task.phase == "executing"
+        assert task.worktree_path is not None
         assert task.worktree_branch == f"task/{tid}"
-        # The worktree directory exists and is itself a checkout.
-        wt = Path(job.cwd_override)
+        wt = Path(task.worktree_path)
         assert wt.is_dir()
-        assert (wt / "f.txt").exists()  # carried over from the initial commit
-        # Claude session files are cwd-scoped; the planning session lives
-        # under project.path and cannot be resumed from the worktree cwd.
-        # on_ack must clear the session id so the execute turn starts fresh.
-        assert job.session_id is None
+        assert (wt / "f.txt").exists()
+        # The returned spawn.cwd matches the worktree — the route will use it
+        # for the new Execute Job.
+        assert spawn.cwd == task.worktree_path
 
 
-def test_on_ack_rejects_wrong_phase(initdb: Path, tmp_path: Path) -> None:
+def test_advance_to_executing_rejects_wrong_phase(initdb: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
@@ -529,18 +534,16 @@ def test_on_ack_rejects_wrong_phase(initdb: Path, tmp_path: Path) -> None:
         s.flush()
         t = models.Task(
             project_id=proj.id, title="t", prompt="p", status="running",
+            phase="planning",
             mode="plan_then_execute",
         )
         s.add(t)
         s.flush()
-        job = models.Job(project_id=proj.id, task_id=t.id, phase="planning")
-        s.add(job)
-        s.flush()
-        jid = job.id
+        tid = t.id
     import pytest
 
     with pytest.raises(ValueError, match="not awaiting ack"):
-        task_runner.on_ack(jid)
+        task_runner.advance_to_executing(tid)
 
 
 def test_reconcile_on_startup_flips_pending_to_ready(initdb: Path) -> None:

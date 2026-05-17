@@ -45,7 +45,7 @@ def test_allowlist_rule_global_and_project(initdb: Path) -> None:
         assert {r.rule for r in rules} == {"Bash(npm test:*)", "Edit(**/*.py)"}
 
 
-def test_gather_allowlist_adds_git_rules_when_executing(initdb: Path) -> None:
+def test_gather_allowlist_adds_git_rules_for_execute_kind(initdb: Path) -> None:
     from agent_harness.jobs import _gather_allowlist
 
     with session_scope() as s:
@@ -62,15 +62,15 @@ def test_gather_allowlist_adds_git_rules_when_executing(initdb: Path) -> None:
     assert "Bash(git add:*)" not in base
     assert "Bash(git commit:*)" not in base
 
-    executing = _gather_allowlist(pid, phase="executing")
+    executing = _gather_allowlist(pid, kind="execute")
     assert "Bash(git add:*)" in executing
     assert "Bash(git commit:*)" in executing
     # Original rules still present and not duplicated.
     assert executing.count("Bash(npm test:*)") == 1
 
 
-def test_gather_allowlist_adds_merge_rules_when_integrating(initdb: Path) -> None:
-    """The integrating phase prompt instructs the agent to checkout/merge/commit
+def test_gather_allowlist_adds_merge_rules_for_integrate_kind(initdb: Path) -> None:
+    """The integrate Job's prompt instructs the agent to checkout/merge/commit
     on the target branch. Without these rules the agent stalls on permission
     denials and silently fails to merge."""
     from agent_harness.jobs import _gather_allowlist
@@ -81,7 +81,7 @@ def test_gather_allowlist_adds_merge_rules_when_integrating(initdb: Path) -> Non
         s.flush()
         pid = proj.id
 
-    integrating = _gather_allowlist(pid, phase="integrating")
+    integrating = _gather_allowlist(pid, kind="integrate")
     for needed in (
         "Bash(git checkout:*)",
         "Bash(git switch:*)",
@@ -90,7 +90,7 @@ def test_gather_allowlist_adds_merge_rules_when_integrating(initdb: Path) -> Non
         "Bash(git add:*)",
         "Bash(git commit:*)",
     ):
-        assert needed in integrating, f"missing {needed} for integrating phase"
+        assert needed in integrating, f"missing {needed} for integrate kind"
 
 
 def test_task_and_outcome_models(initdb: Path) -> None:
