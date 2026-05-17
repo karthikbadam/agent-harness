@@ -261,6 +261,56 @@ class WorktreeOut(BaseModel):
     task_id: str | None = None  # filled in when the worktree path matches a task
 
 
+class DriverNoteOut(BaseModel):
+    id: str
+    project_id: str
+    task_id: str | None = None
+    job_id: str | None = None
+    severity: Literal["info", "warn", "escalate"]
+    kind: str
+    message: str
+    action_url: str | None = None
+    created_at: datetime
+    acknowledged_at: datetime | None = None
+
+
+class DriverNoteCreate(BaseModel):
+    project_id: str
+    severity: Literal["info", "warn", "escalate"] = "info"
+    kind: str
+    message: str = ""
+    action_url: str | None = None
+    task_id: str | None = None
+    job_id: str | None = None
+
+
+class DriverModeUpdate(BaseModel):
+    mode: Literal["off", "on"]
+
+
+class DriverStateOut(BaseModel):
+    mode: Literal["off", "on"]
+    has_connected_driver: bool
+    open_notes: int  # unacknowledged warn+escalate
+
+
+class DriverGlobalStatus(BaseModel):
+    connected: bool
+    last_seen: datetime | None = None
+    mode_on_projects: list[str] = Field(default_factory=list)
+
+
+class SuggestedAction(BaseModel):
+    kind: Literal["ack", "retry", "integrate", "run"]
+    project_id: str
+    task_id: str | None = None
+    job_id: str | None = None
+    reason: str = ""
+    rest_verb: str  # GET|POST|PATCH
+    rest_path: str
+    payload: dict[str, object] | None = None
+
+
 class PlanCreate(BaseModel):
     ask: str
 

@@ -51,6 +51,7 @@ class Project(Base):
     instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     skills: Mapped[list[str]] = mapped_column(JSON, default=list)
     context_paths: Mapped[list[str]] = mapped_column(JSON, default=list)
+    autopilot_mode: Mapped[str] = mapped_column(String(8), default="off")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -154,6 +155,8 @@ class Task(Base):
         String(16), nullable=True
     )  # pending|integrated|conflict; null for one_shot and synthetic tasks
     synthetic: Mapped[bool] = mapped_column(default=False)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    last_failed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
@@ -167,6 +170,23 @@ class TaskDependency(Base):
     depends_on_id: Mapped[str] = mapped_column(
         ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
     )
+
+
+class DriverNote(Base):
+    """Audit + escalation surface for the driver (autopilot + copilot)."""
+
+    __tablename__ = "driver_notes"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    job_id: Mapped[Optional[str]] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    severity: Mapped[str] = mapped_column(String(8), default="info")  # info|warn|escalate
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    message: Mapped[str] = mapped_column(Text, default="")
+    action_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
 
 class Outcome(Base):

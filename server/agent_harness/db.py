@@ -72,6 +72,10 @@ def _apply_column_migrations(engine: Engine) -> None:
         ("tasks", "integration_status", "VARCHAR(16)"),
         ("tasks", "synthetic", "BOOLEAN NOT NULL DEFAULT 0"),
         ("outcomes", "kind", "VARCHAR(16) NOT NULL DEFAULT 'execute'"),
+        # driver
+        ("projects", "autopilot_mode", "VARCHAR(8) NOT NULL DEFAULT 'off'"),
+        ("tasks", "retries", "INTEGER NOT NULL DEFAULT 0"),
+        ("tasks", "last_failed_at", "DATETIME"),
     ]
 
     with engine.begin() as conn:
