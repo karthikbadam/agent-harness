@@ -11,6 +11,7 @@ from ..auth import require_auth
 from ..db import get_session
 from ..schemas import (
     IntegrateIn,
+    PathSuggestion,
     ProjectCreate,
     ProjectOut,
     ProjectUpdate,
@@ -57,6 +58,61 @@ def _clear_other_defaults(s: Session, keep_id: str) -> None:
 @router.get("", response_model=list[ProjectOut])
 def list_projects(s: Session = Depends(get_session)) -> list[ProjectOut]:
     return [_to_out(p) for p in s.query(models.Project).order_by(models.Project.created_at).all()]
+
+
+# Common roots we'll scan for candidate project directories. macOS users
+# typically use ``~/Code`` (capital C); ``~/code`` and ``~/src``/``~/projects``
+# are common alternatives. Override via the ``AH_CODE_ROOTS`` env var
+# (colon-separated list of paths) for non-standard setups.
+_DEFAULT_CODE_ROOTS = ["~/Code", "~/code", "~/src", "~/projects"]
+
+
+def _resolve_code_roots() -> list[str]:
+    override = os.environ.get("AH_CODE_ROOTS")
+    if override:
+        return [r for r in override.split(":") if r.strip()]
+    return _DEFAULT_CODE_ROOTS
+
+
+@router.get("/path-suggestions", response_model=list[PathSuggestion])
+def path_suggestions(s: Session = Depends(get_session)) -> list[PathSuggestion]:
+    """List candidate project directories the user can pick from when
+    creating a project. Scans immediate subdirectories of common code roots
+    (``~/Code``, ``~/code``, ``~/src``, ``~/projects``; override with
+    ``AH_CODE_ROOTS``). Hidden directories (``.foo``) are skipped.
+    """
+    existing_paths = {
+        os.path.realpath(p.path)
+        for p in s.query(models.Project.path)
+        .filter(models.Project.path.isnot(None))
+        .all()
+    }
+    out: list[PathSuggestion] = []
+    seen: set[str] = set()
+    for root in _resolve_code_roots():
+        root_abs = os.path.expanduser(root)
+        if not os.path.isdir(root_abs):
+            continue
+        for entry in sorted(os.listdir(root_abs)):
+            if entry.startswith("."):
+                continue
+            child = os.path.join(root_abs, entry)
+            if not os.path.isdir(child):
+                continue
+            real = os.path.realpath(child)
+            if real in seen:
+                continue
+            seen.add(real)
+            is_git = os.path.isdir(os.path.join(child, ".git"))
+            out.append(
+                PathSuggestion(
+                    path=child,
+                    name=entry,
+                    is_git=is_git,
+                    already_registered=real in existing_paths,
+                )
+            )
+    return out
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)

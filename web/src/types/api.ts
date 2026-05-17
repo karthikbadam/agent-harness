@@ -56,6 +56,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/path-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Path Suggestions
+         * @description List candidate project directories the user can pick from when
+         *     creating a project. Scans immediate subdirectories of common code roots
+         *     (``~/Code``, ``~/code``, ``~/src``, ``~/projects``; override with
+         *     ``AH_CODE_ROOTS``). Hidden directories (``.foo``) are skipped.
+         */
+        get: operations["path_suggestions_api_projects_path_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}": {
         parameters: {
             query?: never;
@@ -992,6 +1015,25 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * PathSuggestion
+         * @description A candidate project path the FE can offer in its dropdown.
+         *
+         *     `path` is the absolute filesystem path; `name` is the basename used as a
+         *     default project name; `is_git` is true iff the directory contains a
+         *     `.git` folder. `already_registered` is true iff a project already points
+         *     at this path, so the UI can dim or hide it.
+         */
+        PathSuggestion: {
+            /** Path */
+            path: string;
+            /** Name */
+            name: string;
+            /** Is Git */
+            is_git: boolean;
+            /** Already Registered */
+            already_registered: boolean;
+        };
         /** PlanCreate */
         PlanCreate: {
             /** Ask */
@@ -1523,6 +1565,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    path_suggestions_api_projects_path_suggestions_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PathSuggestion"][];
                 };
             };
             /** @description Validation Error */

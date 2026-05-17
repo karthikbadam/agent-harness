@@ -1,86 +1,175 @@
-import { Box, Text } from "@chakra-ui/react";
+import { useState } from "react";
+import {
+  Box,
+  Button,
+  Flex,
+  HStack,
+  Menu,
+  Portal,
+  Spinner,
+  Text,
+} from "@chakra-ui/react";
+import { LuChevronDown, LuCheck, LuFolderGit2, LuFolder } from "react-icons/lu";
 import { useNavigate } from "react-router-dom";
 
 import { Composer } from "./Composer";
 import { tasksApi } from "../api/tasks";
-import { useCreateProject } from "../hooks/useProjects";
-
-/**
- * Parse a free-text project description into `{ ask, path, name }`.
- *
- * Heuristic:
- *  1. Find the first path-like token (starts with `/`, `~/`, or `./`).
- *  2. The text around the path (stripped of filler like "at", "in", "the")
- *     becomes the ask sent to the planner. Empty ask → just create the
- *     project, no planning.
- *  3. `name` is derived from the path's basename, since the ask is shown
- *     verbatim on the project's plan view.
- *
- * Examples:
- *   "/Users/me/code/blog"
- *     → { ask: "", path: ".../blog", name: "blog" }
- *   "Build a photo gallery at ~/code/gallery"
- *     → { ask: "Build a photo gallery", path: "~/code/gallery", name: "gallery" }
- */
-export function parseProjectInput(
-  text: string,
-): { ask: string; path: string; name: string } | null {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  const pathRe = /(^|\s)(~\/[^\s]+|\/[^\s]+|\.\/[^\s]+)/;
-  const match = pathRe.exec(trimmed);
-  if (!match || !match[2]) return null;
-  const path: string = match[2];
-  const before = trimmed.slice(0, match.index).trim();
-  const after = trimmed.slice(match.index + match[0].length).trim();
-  const askRaw = (before + " " + after).trim();
-  // Strip the "at <path>"/"in <path>" connector tokens that wrapped the path.
-  const ask = askRaw
-    .replace(/\b(at|in|inside|under)\s*$/i, "")
-    .replace(/^(at|in|inside|under)\s+/i, "")
-    .replace(/[,;:]\s*$/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const basename = path.replace(/\/+$/, "").split("/").pop() ?? path;
-  return { ask, path, name: basename };
-}
+import { useCreateProject, usePathSuggestions } from "../hooks/useProjects";
+import type { PathSuggestion } from "../types";
 
 export function NewProjectComposer() {
   const navigate = useNavigate();
   const create = useCreateProject();
+  const [selected, setSelected] = useState<PathSuggestion | null>(null);
+  const { data: suggestions, isLoading: loadingSuggestions } =
+    usePathSuggestions(true);
+
+  const eligible = (suggestions ?? []).filter((s) => !s.already_registered);
+  const placeholder = selected
+    ? "Describe what should happen first (optional)"
+    : "Pick a path above, then describe what to do";
+
   return (
     <Box>
+      <PathPicker
+        selected={selected}
+        onSelect={setSelected}
+        options={eligible}
+        loading={loadingSuggestions}
+      />
       <Composer
-        placeholder="New project — e.g. “Build a photo gallery at ~/code/gallery”"
-        onSend={async (text) => {
-          const parsed = parseProjectInput(text);
-          if (!parsed) {
-            alert("Include a path like /Users/you/code/foo or ~/code/foo");
-            return;
-          }
+        placeholder={placeholder}
+        disabled={!selected || create.isPending}
+        onSend={async (ask) => {
+          if (!selected) return;
           const p = await create.mutateAsync({
-            name: parsed.name,
-            path: parsed.path,
+            name: selected.name,
+            path: selected.path,
             permission_mode: "acceptEdits",
             dangerously_skip: false,
             is_default: false,
           });
-          // Navigate immediately so the user sees the project; the planner
-          // call below runs in the background and the detail page polls.
           navigate(`/projects/${p.id}`);
-          if (parsed.ask) {
-            // Fire-and-forget the planner. We don't await because navigation
-            // already happened and the detail page picks it up via polling.
-            tasksApi.plan(p.id, parsed.ask).catch((err) => {
+          if (ask.trim()) {
+            tasksApi.plan(p.id, ask.trim()).catch((err) => {
               console.error("planner failed for new project:", err);
             });
           }
+          setSelected(null);
         }}
       />
-      <Text fontSize="2xs" color="fg.subtle" px={4} pb={1}>
-        Include a path (e.g. <Box as="code">~/code/foo</Box>). Tilde is expanded server-side.
-        Any prose around the path becomes the first plan.
-      </Text>
     </Box>
+  );
+}
+
+interface PathPickerProps {
+  selected: PathSuggestion | null;
+  onSelect: (s: PathSuggestion | null) => void;
+  options: PathSuggestion[];
+  loading: boolean;
+}
+
+function PathPicker({ selected, onSelect, options, loading }: PathPickerProps) {
+  return (
+    <Flex
+      align="center"
+      gap={2}
+      px={4}
+      pt={3}
+      pb={2}
+      borderBottomWidth="1px"
+      borderColor="border.subtle"
+    >
+      <Text fontSize="2xs" color="fg.muted" letterSpacing="wide">
+        PATH
+      </Text>
+      <Menu.Root positioning={{ placement: "top-start" }}>
+        <Menu.Trigger asChild>
+          <Button
+            size="2xs"
+            variant={selected ? "subtle" : "outline"}
+            colorPalette={selected ? "blue" : "gray"}
+            fontFamily={selected ? "mono" : "body"}
+            fontWeight="normal"
+            justifyContent="space-between"
+            gap={2}
+            maxW={{ base: "60%", md: "lg" }}
+          >
+            <HStack gap={1.5} minW={0}>
+              <Box lineHeight="0">
+                {selected?.is_git ? <LuFolderGit2 /> : <LuFolder />}
+              </Box>
+              <Text truncate>
+                {selected
+                  ? selected.path
+                  : loading
+                    ? "Loading…"
+                    : "Pick a project directory"}
+              </Text>
+            </HStack>
+            <LuChevronDown />
+          </Button>
+        </Menu.Trigger>
+        <Portal>
+          <Menu.Positioner>
+            <Menu.Content maxH="80" overflowY="auto" minW="sm">
+              {options.length === 0 && !loading && (
+                <Box px={3} py={2} fontSize="xs" color="fg.muted">
+                  No unregistered directories found in <code>~/Code</code>,{" "}
+                  <code>~/code</code>, <code>~/src</code>, or <code>~/projects</code>.
+                </Box>
+              )}
+              {loading && (
+                <HStack px={3} py={2} gap={2}>
+                  <Spinner size="xs" />
+                  <Text fontSize="xs" color="fg.muted">
+                    Scanning…
+                  </Text>
+                </HStack>
+              )}
+              {options.map((s) => {
+                const current = selected?.path === s.path;
+                return (
+                  <Menu.Item
+                    key={s.path}
+                    value={s.path}
+                    onClick={() => onSelect(s)}
+                  >
+                    <HStack gap={2} flex="1" minW={0}>
+                      <Box lineHeight="0" color="fg.muted">
+                        {s.is_git ? <LuFolderGit2 /> : <LuFolder />}
+                      </Box>
+                      <Box flex="1" minW={0}>
+                        <Text fontSize="sm" fontWeight="medium" truncate>
+                          {s.name}
+                        </Text>
+                        <Text fontSize="2xs" color="fg.subtle" truncate fontFamily="mono">
+                          {s.path}
+                        </Text>
+                      </Box>
+                      {current && (
+                        <Box color="blue.fg" lineHeight="0">
+                          <LuCheck />
+                        </Box>
+                      )}
+                    </HStack>
+                  </Menu.Item>
+                );
+              })}
+            </Menu.Content>
+          </Menu.Positioner>
+        </Portal>
+      </Menu.Root>
+      {selected && (
+        <Button
+          size="2xs"
+          variant="ghost"
+          color="fg.muted"
+          onClick={() => onSelect(null)}
+        >
+          Clear
+        </Button>
+      )}
+    </Flex>
   );
 }

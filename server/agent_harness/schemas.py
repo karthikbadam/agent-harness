@@ -340,6 +340,21 @@ class LastPlanOut(BaseModel):
     task_ids: list[str] = Field(default_factory=list)
 
 
+class PathSuggestion(BaseModel):
+    """A candidate project path the FE can offer in its dropdown.
+
+    `path` is the absolute filesystem path; `name` is the basename used as a
+    default project name; `is_git` is true iff the directory contains a
+    `.git` folder. `already_registered` is true iff a project already points
+    at this path, so the UI can dim or hide it.
+    """
+
+    path: str
+    name: str
+    is_git: bool
+    already_registered: bool
+
+
 class AuthInfo(BaseModel):
     """Returned to authenticated clients on /api/me."""
 
