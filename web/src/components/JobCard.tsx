@@ -3,7 +3,7 @@ import { Box, Button, Flex, HStack, IconButton, Stack, Text } from "@chakra-ui/r
 import { LuTrash2, LuListTodo } from "react-icons/lu";
 
 import type { JobOut } from "../types";
-import { parseServerDate } from "../api/dates";
+import { parseServerDate, relativeTime } from "../api/dates";
 import { useDeleteJob, useStopJob } from "../hooks/useJobs";
 import { StatusPill } from "./StatusPill";
 
@@ -88,7 +88,7 @@ export function JobCard({ job }: { job: JobOut }) {
           </HStack>
         </Flex>
         <Text fontSize="2xs" color="fg.subtle" alignSelf="flex-end">
-          {created.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          {relativeTime(created)}
         </Text>
       </Stack>
     </Box>
