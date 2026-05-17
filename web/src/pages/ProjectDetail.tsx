@@ -15,7 +15,7 @@ import { Composer } from "../components/Composer";
 import { TaskCard } from "../components/TaskCard";
 import { useProjects } from "../hooks/useProjects";
 import { usePlan, useTasks } from "../hooks/useTasks";
-import type { ProjectOut, TaskOut } from "../types";
+import type { TaskOut } from "../types";
 
 export function ProjectDetailPage() {
   const { projectId = "" } = useParams();
@@ -49,7 +49,6 @@ export function ProjectDetailPage() {
                 {project.path}
               </Text>
             </Stack>
-            <Summary project={project} tasks={tasks ?? []} />
             {tasks && tasks.length === 0 && !planning && <EmptyTasksHint />}
             <Stack gap={6}>
               {groups.map((g) => (
@@ -112,62 +111,6 @@ export function ProjectDetailPage() {
         </Box>
       )}
     </Shell>
-  );
-}
-
-function Summary({ tasks }: { project: ProjectOut; tasks: TaskOut[] }) {
-  const counts = useMemo(() => {
-    let active = 0;
-    let awaiting = 0;
-    let done = 0;
-    let failed = 0;
-    for (const t of tasks) {
-      if (t.status === "running") active += 1;
-      if (t.phase === "awaiting_ack") awaiting += 1;
-      if (t.status === "done") done += 1;
-      if (t.status === "failed") failed += 1;
-    }
-    return { active, awaiting, done, failed };
-  }, [tasks]);
-  if (tasks.length === 0) return null;
-  return (
-    <Flex gap={4} flexWrap="wrap" fontSize="xs">
-      <Stat label="Active" value={counts.active} accent="blue" />
-      <Stat label="Awaiting ack" value={counts.awaiting} accent="blue" />
-      <Stat label="Done" value={counts.done} accent="green" />
-      {counts.failed > 0 && (
-        <Stat label="Failed" value={counts.failed} accent="red" />
-      )}
-      <Stat label="Total" value={tasks.length} accent="gray" />
-    </Flex>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: number | string;
-  accent: "blue" | "green" | "red" | "gray" | "purple";
-}) {
-  const colorMap = {
-    blue: { dot: "blue.solid", text: "fg" },
-    green: { dot: "green.solid", text: "fg" },
-    red: { dot: "red.solid", text: "fg" },
-    gray: { dot: "border", text: "fg.muted" },
-    purple: { dot: "purple.solid", text: "fg" },
-  } as const;
-  const c = colorMap[accent];
-  return (
-    <Flex align="center" gap={1.5}>
-      <Box boxSize="1.5" rounded="full" bg={c.dot} />
-      <Text color={c.text} fontWeight="medium">
-        {value}
-      </Text>
-      <Text color="fg.muted">{label}</Text>
-    </Flex>
   );
 }
 
