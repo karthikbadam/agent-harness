@@ -38,7 +38,9 @@ const NAV = [
 ] as const;
 
 const MOBILE_TAB_HEIGHT = 56; // matches the tab bar px height below
-const CONTENT_MAX_W = { base: "container.sm", md: "container.lg", lg: "container.xl" };
+// Cap content at a comfortable reading width on desktop (~85 characters).
+// Mobile is full-width minus container padding.
+const CONTENT_MAX_W = { base: "100%", md: "85ch" } as const;
 
 function isCurrent(pathname: string, to: string): boolean {
   if (to === "/")
