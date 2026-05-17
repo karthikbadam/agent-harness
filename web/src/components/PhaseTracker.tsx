@@ -1,4 +1,4 @@
-import { Box, Flex, Text } from "@chakra-ui/react";
+import { Flex, HStack, Text } from "@chakra-ui/react";
 
 const PHASES = ["planning", "awaiting_ack", "executing", "done"] as const;
 type Phase = (typeof PHASES)[number];
@@ -12,8 +12,7 @@ const PHASE_LABEL: Record<Phase, string> = {
 
 function rank(phase: string | null | undefined): number {
   if (phase === null || phase === undefined) return -1;
-  const idx = (PHASES as readonly string[]).indexOf(phase);
-  return idx;
+  return (PHASES as readonly string[]).indexOf(phase);
 }
 
 interface Props {
@@ -24,37 +23,62 @@ interface Props {
 export function PhaseTracker({ phase, status }: Props) {
   const cur = rank(phase);
   const failed = status === "failed" || phase === "failed";
+
   return (
-    <Flex gap={1} align="center">
+    <HStack gap={1.5} align="center">
       {PHASES.map((p, idx) => {
         const reached = idx <= cur && !failed;
         const active = idx === cur && !failed;
         const isFailedHere = failed && idx === Math.max(cur, 0);
+
+        let dotBg = "border.subtle";
+        let dotBorder = "border";
+        let textColor = "fg.muted";
+        let textWeight: "normal" | "medium" = "normal";
+
+        if (isFailedHere) {
+          dotBg = "red.solid";
+          dotBorder = "red.solid";
+          textColor = "red.fg";
+          textWeight = "medium";
+        } else if (active) {
+          dotBg = "blue.solid";
+          dotBorder = "blue.solid";
+          textColor = "fg";
+          textWeight = "medium";
+        } else if (reached) {
+          dotBg = "green.solid";
+          dotBorder = "green.solid";
+          textColor = "fg.muted";
+        }
+
         return (
-          <Flex key={p} flex="1" align="center" gap={1}>
-            <Box
-              flex="1"
-              h="2"
-              borderRadius="full"
-              bg={
-                isFailedHere
-                  ? "red.solid"
-                  : reached
-                    ? active
-                      ? "blue.solid"
-                      : "green.solid"
-                    : "bg.subtle"
-              }
+          <Flex key={p} align="center" gap={1.5}>
+            <Flex
+              w="1.5"
+              h="1.5"
+              rounded="full"
+              bg={dotBg}
               borderWidth="1px"
-              borderColor={active ? "blue.emphasized" : "border"}
-              transition="background-color 0.2s"
+              borderColor={dotBorder}
             />
+            <Text
+              fontSize="2xs"
+              color={textColor}
+              fontWeight={textWeight}
+              letterSpacing="wide"
+              textTransform="uppercase"
+            >
+              {PHASE_LABEL[p]}
+            </Text>
+            {idx < PHASES.length - 1 && (
+              <Text fontSize="2xs" color="border" mx={0.5}>
+                ›
+              </Text>
+            )}
           </Flex>
         );
       })}
-      <Text fontSize="xs" color="fg.muted" minW="16">
-        {failed ? "failed" : phase ? PHASE_LABEL[phase as Phase] ?? phase : "pending"}
-      </Text>
-    </Flex>
+    </HStack>
   );
 }
