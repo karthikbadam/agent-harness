@@ -106,10 +106,27 @@ async def followup_job(
     j = s.get(models.Job, job_id)
     if j is None:
         raise HTTPException(404, "not found")
-    try:
-        await mgr.followup(job_id, body.prompt)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    # If the job is parked at the plan-ack gate, treat this followup as the
+    # ack: create the worktree, flip the phase, and enqueue the execute turn
+    # with the original task prompt (plus any addendum the caller supplied).
+    if j.phase == "awaiting_ack":
+        from ..services import task_runner
+
+        try:
+            exec_prompt = task_runner.on_ack(
+                job_id, prompt_addendum=body.prompt or ""
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        try:
+            await mgr.followup(job_id, exec_prompt)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    else:
+        try:
+            await mgr.followup(job_id, body.prompt)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     s.expire_all()
     j = s.get(models.Job, job_id)
     assert j is not None

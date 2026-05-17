@@ -238,6 +238,73 @@ def test_executing_phase_marks_done_and_integration_pending(
         assert task.integration_status == "pending"
 
 
+def test_on_ack_creates_worktree_and_flips_phase(
+    initdb: Path, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        t = models.Task(
+            project_id=proj.id,
+            title="t",
+            prompt="do the thing",
+            status="running",
+            mode="plan_then_execute",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(
+            project_id=proj.id, title="run", task_id=t.id, phase="awaiting_ack"
+        )
+        s.add(job)
+        s.flush()
+        jid, tid = job.id, t.id
+
+    exec_prompt = task_runner.on_ack(jid, prompt_addendum="also handle errors")
+
+    assert "do the thing" in exec_prompt
+    assert "also handle errors" in exec_prompt
+    with session_scope() as s:
+        job = s.get(models.Job, jid)
+        task = s.get(models.Task, tid)
+        assert job.phase == "executing"
+        assert job.cwd_override is not None
+        assert task.worktree_path == job.cwd_override
+        assert task.worktree_branch == f"task/{tid}"
+        # The worktree directory exists and is itself a checkout.
+        wt = Path(job.cwd_override)
+        assert wt.is_dir()
+        assert (wt / "f.txt").exists()  # carried over from the initial commit
+
+
+def test_on_ack_rejects_wrong_phase(initdb: Path, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        t = models.Task(
+            project_id=proj.id, title="t", prompt="p", status="running",
+            mode="plan_then_execute",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(project_id=proj.id, task_id=t.id, phase="planning")
+        s.add(job)
+        s.flush()
+        jid = job.id
+    import pytest
+
+    with pytest.raises(ValueError, match="not awaiting ack"):
+        task_runner.on_ack(jid)
+
+
 def test_reconcile_on_startup_flips_pending_to_ready(initdb: Path) -> None:
     with session_scope() as s:
         proj = models.Project(name="r", path="/tmp")

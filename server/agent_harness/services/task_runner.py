@@ -23,6 +23,7 @@ from sqlalchemy import select
 
 from .. import models
 from ..db import session_scope
+from . import worktrees
 
 log = logging.getLogger(__name__)
 
@@ -183,6 +184,42 @@ def on_job_finalized(
             task.integration_status = "pending"
         s.flush()
         _reevaluate_downstream(s, task.id)
+
+
+def on_ack(job_id: str, prompt_addendum: str = "") -> str:
+    """Transition an ``awaiting_ack`` job into ``executing``.
+
+    Creates the per-task git worktree, records its path + branch on the task,
+    points the job's ``cwd_override`` at the worktree, and flips
+    ``job.phase='executing'``. Returns the prompt the caller should pass to
+    ``JobManager.followup`` for the execute turn (the original task prompt
+    plus any optional addendum). The caller is responsible for actually
+    enqueueing the followup; this function only handles DB state and worktree
+    setup so it's safely callable from sync contexts (routes, MCP tools).
+    """
+    with session_scope() as s:
+        job = s.get(models.Job, job_id)
+        if job is None:
+            raise ValueError(f"unknown job {job_id}")
+        if job.phase != "awaiting_ack":
+            raise ValueError(
+                f"job {job_id} is not awaiting ack (phase={job.phase!r})"
+            )
+        if job.task_id is None:
+            raise ValueError(f"job {job_id} has no bound task")
+        task = s.get(models.Task, job.task_id)
+        if task is None:
+            raise ValueError(f"task {job.task_id} for job {job_id} not found")
+        project = s.get(models.Project, job.project_id)
+        if project is None:
+            raise ValueError(f"project {job.project_id} for job {job_id} not found")
+        path, branch = worktrees.create(project, task)
+        task.worktree_path = path
+        task.worktree_branch = branch
+        job.cwd_override = path
+        job.phase = "executing"
+        base = task.prompt
+    return f"{base}\n\n{prompt_addendum}" if prompt_addendum else base
 
 
 def reconcile_on_startup() -> None:

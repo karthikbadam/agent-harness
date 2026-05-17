@@ -145,7 +145,8 @@ class JobCreate(BaseModel):
 
 
 class FollowupCreate(BaseModel):
-    prompt: str
+    # Optional so an ack on an awaiting_ack job can omit it.
+    prompt: str = ""
 
 
 class ScheduleCreate(BaseModel):
