@@ -400,7 +400,11 @@ def on_job_finalized(
         task.phase = "done" if job_status == "done" else "failed"
         if task.status == "failed":
             task.last_failed_at = datetime.now(timezone.utc)
-        if task.status == "done" and task.mode == "plan_then_execute" and not task.synthetic:
+        if (
+            task.status == "done"
+            and not task.synthetic
+            and task.mode in ("plan_then_execute", "execute_only")
+        ):
             task.integration_status = "pending"
         s.flush()
         transitions = _reevaluate_downstream(s, task.id)
@@ -411,7 +415,10 @@ def on_job_finalized(
         for tid, pid in transitions:
             pending_events.append(("task_ready", {"project_id": pid, "task_id": tid}))
             ds = s.get(models.Task, tid)
-            if ds is not None and ds.source == "planner" and not ds.synthetic:
+            # Planner-sourced tasks auto-run as soon as deps land. Synthetic
+            # integrate tasks the planner emitted are included so the wave
+            # shape flows without manual clicks. Manual tasks are not.
+            if ds is not None and ds.source == "planner":
                 autorun_ids.append(tid)
     _emit_after(bus, pending_events)
     # After all the finalize bookkeeping is committed, see if the project
@@ -432,6 +439,17 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
     task_ready autorun hook, and the manual ``run_task`` route — converge
     here so that every "start the work" path uses the same phase/kind/cwd
     rules.
+
+    Mode → first-phase mapping:
+      - ``synthetic`` (integrate task) → integrate job at project path.
+      - ``plan_then_execute`` → plan job at project path (worktree comes
+        later on ack).
+      - ``execute_only`` → execute job in a fresh worktree, skipping the
+        plan/ack handshake. The task still gets a per-task branch and can
+        be integrated.
+      - ``one_shot`` → execute job at project path, no worktree, cannot
+        be integrated. Used for narrow one-off edits that should not
+        produce a branch.
     """
     with session_scope() as s:
         t = s.get(models.Task, task_id)
@@ -440,19 +458,44 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
         project = s.get(models.Project, t.project_id)
         if project is None:
             return None
+        cwd: str
         if t.synthetic:
             phase, kind = "integrating", "integrate"
+            cwd = project.path
         elif t.mode == "plan_then_execute":
             phase, kind = "planning", "plan"
+            cwd = project.path
+        elif t.mode == "execute_only":
+            phase, kind = "executing", "execute"
+            if t.worktree_path and t.worktree_branch:
+                cwd = t.worktree_path
+            else:
+                base_ref = _resolve_base_ref(s, t)
+                try:
+                    wt_path, wt_branch = worktrees.create(
+                        project, t, base_ref=base_ref
+                    )
+                except Exception:  # noqa: BLE001
+                    log.exception(
+                        "execute_only worktree create failed for task %s; "
+                        "falling back to project path",
+                        task_id,
+                    )
+                    cwd = project.path
+                else:
+                    t.worktree_path = wt_path
+                    t.worktree_branch = wt_branch
+                    t.integration_status = "pending"
+                    cwd = wt_path
         else:
             phase, kind = "executing", "execute"
+            cwd = project.path
         t.status = "running"
         t.phase = phase
         s.commit()
         project_id = t.project_id
         prompt = t.prompt
         title = f"[task] {t.title}"[:256]
-        cwd = project.path
     jid = job_manager.create_job(
         project_id, prompt, title=title, task_id=task_id,
         kind=kind, cwd=cwd,
@@ -524,6 +567,58 @@ class ExecuteSpawn:
         self.title = title
 
 
+def _resolve_base_ref(s, task: models.Task) -> str | None:
+    """Pick the git ref a new task worktree should branch from.
+
+    Precedence:
+      1. If any direct dep is a synthetic integrate task whose merge landed on
+         a real branch — use that branch. This is the "wave shape" the planner
+         is encouraged to produce: foundation tasks → integrate task →
+         dependents. The dependents share the integration tip as their base.
+      2. Else if the task has exactly one direct dep, use that dep's
+         ``worktree_branch`` tip. This handles ``A → B`` chains where B should
+         see A's files even without an explicit integrate in between.
+      3. Else (no deps, or multi-dep with no integrate ancestor) — return
+         ``None`` and let the worktree fork from project HEAD. Multi-dep
+         without an integrate is ambiguous; the planner prompt warns against
+         this shape.
+    """
+    dep_ids = _deps_of(s, task.id)
+    if not dep_ids:
+        return None
+    deps = [s.get(models.Task, did) for did in dep_ids]
+    deps = [d for d in deps if d is not None]
+    # Rule 1: integrate-task ancestor.
+    for d in deps:
+        if d.synthetic and d.status == "done":
+            # Synthetic integrate task: its execute outcome's ``branch`` is the
+            # merge target (e.g. main, harness-test/foo). That target now
+            # carries all merged work.
+            target = _last_integrate_target(s, d.id)
+            if target:
+                return target
+    # Rule 2: single dep tip.
+    if len(deps) == 1 and deps[0].worktree_branch and deps[0].status == "done":
+        return deps[0].worktree_branch
+    return None
+
+
+def _last_integrate_target(s, synth_task_id: str) -> str | None:
+    """The branch the synthetic integrate task merged onto (its outcome's
+    ``branch`` field). Returns None if no successful integrate outcome found.
+    """
+    row = s.execute(
+        select(models.Outcome.branch)
+        .where(
+            models.Outcome.task_id == synth_task_id,
+            models.Outcome.kind == "integrate",
+            models.Outcome.status == "success",
+        )
+        .order_by(models.Outcome.created_at.desc())
+    ).first()
+    return row[0] if row else None
+
+
 def advance_to_executing(task_id: str, prompt_addendum: str = "") -> ExecuteSpawn:
     """Transition a Task from ``awaiting_ack`` to ``executing``.
 
@@ -532,6 +627,9 @@ def advance_to_executing(task_id: str, prompt_addendum: str = "") -> ExecuteSpaw
     route layer feeds into ``JobManager.create_job`` to start the execute
     Job (its own conversation, born at the worktree cwd — no resume from the
     plan Job).
+
+    The worktree's base ref is chosen by :func:`_resolve_base_ref` so that
+    tasks with deps see their predecessors' work in their starting tree.
     """
     with session_scope() as s:
         task = s.get(models.Task, task_id)
@@ -549,7 +647,8 @@ def advance_to_executing(task_id: str, prompt_addendum: str = "") -> ExecuteSpaw
             # the execute Job). Reuse it.
             path, branch = task.worktree_path, task.worktree_branch
         else:
-            path, branch = worktrees.create(project, task)
+            base_ref = _resolve_base_ref(s, task)
+            path, branch = worktrees.create(project, task, base_ref=base_ref)
             task.worktree_path = path
             task.worktree_branch = branch
         task.phase = "executing"

@@ -36,31 +36,37 @@ def branch_name_for(task_id: str) -> str:
     return f"task/{task_id}"
 
 
-def create(project: models.Project, task: models.Task) -> tuple[str, str]:
+def create(
+    project: models.Project,
+    task: models.Task,
+    base_ref: str | None = None,
+) -> tuple[str, str]:
     """Create a git worktree for ``task`` off ``project.path``.
 
-    Returns ``(path, branch)``. Raises ``FileExistsError`` if the target
-    directory already exists, and ``subprocess.CalledProcessError`` if git
-    refuses (e.g. the branch already exists, repo is not a git work tree).
+    When ``base_ref`` is provided the new branch starts from that ref (a branch
+    name, tag, or sha resolvable in ``project.path``); otherwise it forks from
+    the project's current HEAD. Returns ``(path, branch)``. Raises
+    ``FileExistsError`` if the target directory already exists, and
+    ``subprocess.CalledProcessError`` if git refuses (branch already exists,
+    base_ref unresolvable, repo isn't a git work tree, etc.).
     """
     path = worktree_path_for(task.id)
     branch = branch_name_for(task.id)
     if path.exists():
         raise FileExistsError(f"worktree path already exists: {path}")
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            project.path,
-            "worktree",
-            "add",
-            str(path),
-            "-b",
-            branch,
-        ],
-        check=True,
-        capture_output=True,
-    )
+    cmd = [
+        "git",
+        "-C",
+        project.path,
+        "worktree",
+        "add",
+        str(path),
+        "-b",
+        branch,
+    ]
+    if base_ref:
+        cmd.append(base_ref)
+    subprocess.run(cmd, check=True, capture_output=True)
     return str(path), branch
 
 
