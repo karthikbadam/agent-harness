@@ -45,7 +45,11 @@ def test_allowlist_rule_global_and_project(initdb: Path) -> None:
         assert {r.rule for r in rules} == {"Bash(npm test:*)", "Edit(**/*.py)"}
 
 
-def test_gather_allowlist_adds_git_rules_for_execute_kind(initdb: Path) -> None:
+def test_gather_allowlist_grants_bash_for_execute_kind(initdb: Path) -> None:
+    """Execute jobs run inside an isolated worktree; granting full Bash there
+    keeps language toolchains (npm, pytest, cargo, …) and git workflow
+    commands from deadlocking on permission prompts the non-interactive
+    `claude -p` process can't answer."""
     from agent_harness.jobs import _gather_allowlist
 
     with session_scope() as s:
@@ -59,20 +63,19 @@ def test_gather_allowlist_adds_git_rules_for_execute_kind(initdb: Path) -> None:
     base = _gather_allowlist(pid)
     assert "Bash(npm test:*)" in base
     assert "Skill(init)" in base
-    assert "Bash(git add:*)" not in base
-    assert "Bash(git commit:*)" not in base
+    assert "Bash(*)" not in base  # only granted for execute/integrate kinds
 
     executing = _gather_allowlist(pid, kind="execute")
-    assert "Bash(git add:*)" in executing
-    assert "Bash(git commit:*)" in executing
+    assert "Bash(*)" in executing
     # Original rules still present and not duplicated.
     assert executing.count("Bash(npm test:*)") == 1
 
 
-def test_gather_allowlist_adds_merge_rules_for_integrate_kind(initdb: Path) -> None:
-    """The integrate Job's prompt instructs the agent to checkout/merge/commit
-    on the target branch. Without these rules the agent stalls on permission
-    denials and silently fails to merge."""
+def test_gather_allowlist_grants_bash_for_integrate_kind(initdb: Path) -> None:
+    """The integrate Job runs in the project repo and needs to merge task
+    branches, run language toolchains for any post-merge verification, and
+    push the result. Full Bash is the simplest blast radius that doesn't
+    deadlock on approval prompts."""
     from agent_harness.jobs import _gather_allowlist
 
     with session_scope() as s:
@@ -82,15 +85,7 @@ def test_gather_allowlist_adds_merge_rules_for_integrate_kind(initdb: Path) -> N
         pid = proj.id
 
     integrating = _gather_allowlist(pid, kind="integrate")
-    for needed in (
-        "Bash(git checkout:*)",
-        "Bash(git switch:*)",
-        "Bash(git merge:*)",
-        "Bash(git branch:*)",
-        "Bash(git add:*)",
-        "Bash(git commit:*)",
-    ):
-        assert needed in integrating, f"missing {needed} for integrate kind"
+    assert "Bash(*)" in integrating
 
 
 def test_task_and_outcome_models(initdb: Path) -> None:
