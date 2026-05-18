@@ -85,7 +85,7 @@ export function Shell({
       position="sticky"
       top={0}
       zIndex={20}
-      bg="bg"
+      bg="bg.subtle"
       borderBottomWidth="1px"
       borderColor="border.subtle"
     >
@@ -110,8 +110,8 @@ export function Shell({
                   fontSize="sm"
                   fontWeight={current ? "medium" : "normal"}
                   color={current ? "fg" : "fg.muted"}
-                  bg={current ? "bg.subtle" : "transparent"}
-                  _hover={{ bg: "bg.subtle", color: "fg" }}
+                  bg={current ? "bg" : "transparent"}
+                  _hover={{ bg: "bg", color: "fg" }}
                 >
                   {n.label}
                 </Flex>
@@ -137,7 +137,7 @@ export function Shell({
       position="sticky"
       top="52px" // height of desktopChrome row
       zIndex={15}
-      bg="bg"
+      bg="bg.subtle"
       borderBottomWidth="1px"
       borderColor="border.subtle"
     >
@@ -174,7 +174,7 @@ export function Shell({
       position="sticky"
       top={0}
       zIndex={20}
-      bg="bg"
+      bg="bg.subtle"
       borderBottomWidth="1px"
       borderColor="border.subtle"
       pt="max(env(safe-area-inset-top), 8px)"
@@ -209,7 +209,7 @@ export function Shell({
       right={0}
       bottom={0}
       zIndex={25}
-      bg="bg"
+      bg="bg.subtle"
       borderTopWidth="1px"
       borderColor="border.subtle"
       pb="env(safe-area-inset-bottom)"
@@ -232,7 +232,7 @@ export function Shell({
               fontSize="2xs"
               fontWeight="medium"
               color={current ? "fg" : "fg.muted"}
-              _active={{ bg: "bg.subtle" }}
+              _active={{ bg: "bg" }}
             >
               <Box fontSize="lg" lineHeight="0">
                 {n.icon}
@@ -253,7 +253,7 @@ export function Shell({
           color="fg.muted"
           cursor="pointer"
           onClick={() => setSettingsOpen(true)}
-          _active={{ bg: "bg.subtle" }}
+          _active={{ bg: "bg" }}
         >
           <Box fontSize="lg" lineHeight="0">
             <LuSettings />
@@ -270,7 +270,7 @@ export function Shell({
   const bottomPadDesktop = `${composerHeight}px`;
 
   return (
-    <Flex direction="column" minH="100dvh" bg="bg">
+    <Flex direction="column" minH="100dvh" bg="bg.subtle">
       {desktopChrome}
       {desktopSubHeader}
       {mobileHeader}

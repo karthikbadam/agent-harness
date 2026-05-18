@@ -187,7 +187,7 @@ function PlanDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
                     >
                       Ask
                     </Text>
-                    <Box bg="bg.subtle" rounded="md" px={3.5} py={3}>
+                    <Box bg="bg" rounded="md" px={3.5} py={3}>
                       <Text fontSize="sm" lineHeight="1.55" whiteSpace="pre-wrap">
                         {plan.ask}
                       </Text>
@@ -204,7 +204,7 @@ function PlanDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
                       Planner findings & task list
                     </Text>
                     <Box
-                      bg="bg.subtle"
+                      bg="bg"
                       rounded="md"
                       px={3.5}
                       py={3}
@@ -232,7 +232,7 @@ function PlanDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 function EmptyTasksHint() {
   return (
-    <Box bg="bg.subtle" rounded="lg" px={4} py={6} textAlign="center">
+    <Box bg="bg" rounded="lg" px={4} py={6} textAlign="center">
       <Text fontSize="sm" color="fg.muted">
         No tasks yet — describe an ask below and the planner will draft them.
       </Text>
@@ -250,7 +250,7 @@ function PlanningBanner({
   const startedAt = job ? parseServerDate(job.created_at) : null;
   return (
     <Box
-      bg="bg.subtle"
+      bg="bg"
       borderLeftWidth="2px"
       borderColor="blue.solid"
       rounded="md"
@@ -284,7 +284,7 @@ function FailedPlanBanner({ job }: { job: JobOut }) {
   const navigate = useNavigate();
   return (
     <Box
-      bg="bg.subtle"
+      bg="bg"
       borderLeftWidth="2px"
       borderColor="red.solid"
       rounded="md"

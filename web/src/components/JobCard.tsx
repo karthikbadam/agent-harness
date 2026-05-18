@@ -25,7 +25,7 @@ export function JobCard({ job }: { job: JobOut }) {
     <Box
       onClick={() => navigate(`/jobs/${job.id}`)}
       cursor="pointer"
-      bg="bg.subtle"
+      bg="bg"
       rounded="lg"
       px={4}
       py={3.5}

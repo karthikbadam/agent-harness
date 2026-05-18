@@ -15,7 +15,7 @@ export function StickyComposer({ children }: { children: ReactNode }) {
       left={0}
       right={0}
       zIndex={15}
-      bg="bg"
+      bg="bg.subtle"
       borderTopWidth="1px"
       borderColor="border.subtle"
       bottom={{

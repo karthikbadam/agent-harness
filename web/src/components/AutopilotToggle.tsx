@@ -198,7 +198,7 @@ function NoteRow({ note }: NoteRowProps) {
     gray: "border",
   }[tone];
   return (
-    <Box bg="bg.subtle" rounded="md" px={3.5} py={3}>
+    <Box bg="bg" rounded="md" px={3.5} py={3}>
       <Flex gap={2.5} align="flex-start">
         <Box boxSize="1.5" rounded="full" bg={dotColor} mt={1.5} flexShrink={0} />
         <Stack gap={0.5} flex="1" minW={0}>

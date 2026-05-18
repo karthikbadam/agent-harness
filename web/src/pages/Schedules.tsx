@@ -135,7 +135,7 @@ function ScheduleRow({ schedule }: { schedule: ScheduleOut }) {
   const update = useUpdateSchedule(schedule.id);
   const del = useDeleteSchedule();
   return (
-    <Box bg="bg.subtle" rounded="lg" px={4} py={3.5}>
+    <Box bg="bg" rounded="lg" px={4} py={3.5}>
       <Stack gap={2.5}>
         <Flex justify="space-between" align="flex-start" gap={2}>
           <Stack gap={1} flex="1" minW={0}>
@@ -152,7 +152,7 @@ function ScheduleRow({ schedule }: { schedule: ScheduleOut }) {
                 {schedule.enabled ? "Enabled" : "Disabled"}
               </Text>
               <Text>·</Text>
-              <Code fontSize="2xs" px={1} py={0} bg="bg" rounded="sm">
+              <Code fontSize="2xs" px={1} py={0} bg="bg.subtle" rounded="sm">
                 {schedule.cron}
               </Code>
               <Text>UTC</Text>

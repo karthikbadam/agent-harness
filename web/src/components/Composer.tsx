@@ -52,11 +52,11 @@ export function Composer({ placeholder = "Tell claude...", disabled, onSend }: P
   const showCount = value.length >= HINT_AT;
 
   return (
-    <Box px={3} pt={3} pb="max(env(safe-area-inset-bottom), 10px)" bg="bg">
+    <Box px={3} pt={3} pb="max(env(safe-area-inset-bottom), 10px)" bg="bg.subtle">
       <Flex
         align="flex-end"
         gap={2}
-        bg="bg.subtle"
+        bg="bg"
         borderRadius="lg"
         px={3.5}
         py={2.5}

@@ -115,7 +115,7 @@ function ProjectRow({
 }) {
   return (
     <Flex
-      bg="bg.subtle"
+      bg="bg"
       rounded="lg"
       px={4}
       py={3.5}
@@ -129,7 +129,7 @@ function ProjectRow({
       <Box
         boxSize="9"
         rounded="md"
-        bg="bg"
+        bg="bg.subtle"
         borderWidth="1px"
         borderColor="border.subtle"
         display="flex"

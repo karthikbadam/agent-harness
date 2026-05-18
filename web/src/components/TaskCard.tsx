@@ -63,7 +63,7 @@ export function TaskCard({ task }: Props) {
 
   return (
     <Box
-      bg="bg.subtle"
+      bg="bg"
       rounded="lg"
       px={4}
       py={3.5}
