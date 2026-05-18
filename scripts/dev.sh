@@ -24,7 +24,8 @@ cleanup() { for p in "${pids[@]:-}"; do kill "$p" 2>/dev/null || true; done; wai
 trap cleanup EXIT INT TERM
 
 echo "==> Backend on :8765 (also serves web/dist/)"
-(cd "$REPO" && "$VENV_BIN/python" -m uvicorn agent_harness.main:app --reload --port 8765 --app-dir server) &
+# Bind 0.0.0.0 so phones on the same LAN can hit http://<mac-ip>:8765.
+(cd "$REPO" && "$VENV_BIN/python" -m uvicorn agent_harness.main:app --reload --host 0.0.0.0 --port 8765 --app-dir server) &
 pids+=("$!")
 
 echo "==> Vite build --watch → web/dist/"
