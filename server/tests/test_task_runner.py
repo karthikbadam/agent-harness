@@ -251,6 +251,65 @@ def test_executing_phase_marks_done_and_integration_pending(
         assert task.integration_status == "pending"
 
 
+def test_autodisables_autopilot_when_project_runs_dry(initdb: Path) -> None:
+    """A finalize that leaves the project with no actionable tasks should
+    flip autopilot_mode='on' → 'off'. Conservative: any pending/ready/
+    running/failed task blocks the autodisable."""
+    with session_scope() as s:
+        proj = models.Project(name="r", path="/tmp", autopilot_mode="on")
+        s.add(proj)
+        s.flush()
+        # One task that's about to finish.
+        t = models.Task(
+            project_id=proj.id, title="t", prompt="p",
+            status="running", phase="executing", mode="one_shot",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(
+            project_id=proj.id, task_id=t.id, kind="execute", cwd="/tmp",
+        )
+        s.add(job)
+        s.flush()
+        pid, jid = proj.id, job.id
+
+    task_runner.on_job_finalized(jid, "done", log_dir=None)
+
+    with session_scope() as s:
+        assert s.get(models.Project, pid).autopilot_mode == "off"
+
+
+def test_autopilot_stays_on_when_other_tasks_pending(initdb: Path) -> None:
+    """If something is still queued for the driver to do, leave autopilot on."""
+    with session_scope() as s:
+        proj = models.Project(name="r", path="/tmp", autopilot_mode="on")
+        s.add(proj)
+        s.flush()
+        finishing = models.Task(
+            project_id=proj.id, title="a", prompt="p",
+            status="running", phase="executing", mode="one_shot",
+        )
+        s.add(finishing)
+        # A second task still ready — driver would run it next.
+        s.add(models.Task(
+            project_id=proj.id, title="b", prompt="p",
+            status="ready", mode="one_shot",
+        ))
+        s.flush()
+        job = models.Job(
+            project_id=proj.id, task_id=finishing.id,
+            kind="execute", cwd="/tmp",
+        )
+        s.add(job)
+        s.flush()
+        pid, jid = proj.id, job.id
+
+    task_runner.on_job_finalized(jid, "done", log_dir=None)
+
+    with session_scope() as s:
+        assert s.get(models.Project, pid).autopilot_mode == "on"
+
+
 def test_executing_finalize_commits_dirty_worktree(
     initdb: Path, tmp_path: Path
 ) -> None:

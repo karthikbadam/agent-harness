@@ -366,6 +366,10 @@ def on_job_finalized(
                 if ds is not None and ds.source == "planner" and not ds.synthetic:
                     autorun_ids.append(tid)
             _emit_after(bus, pending_events)
+            try:
+                try_autodisable_autopilot(project_id)
+            except Exception:  # noqa: BLE001
+                log.exception("autodisable autopilot failed for %s", project_id)
             return autorun_ids
 
         # Execute / one-shot / ad-hoc (kind='execute' or 'ad_hoc'). The job's
@@ -410,6 +414,13 @@ def on_job_finalized(
             if ds is not None and ds.source == "planner" and not ds.synthetic:
                 autorun_ids.append(tid)
     _emit_after(bus, pending_events)
+    # After all the finalize bookkeeping is committed, see if the project
+    # ran dry. Conservative: only flips autopilot off when there's nothing
+    # the driver could do — no pending, ready, running, or failed tasks.
+    try:
+        try_autodisable_autopilot(project_id)
+    except Exception:  # noqa: BLE001
+        log.exception("autodisable autopilot failed for %s", project_id)
     return autorun_ids
 
 
@@ -453,6 +464,41 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
 def _emit_after(bus: "driver_bus.DriverEventBus", events: list[tuple[str, dict]]) -> None:
     for event, kw in events:
         bus.emit(event, **kw)
+
+
+def try_autodisable_autopilot(project_id: str) -> bool:
+    """Flip ``project.autopilot_mode`` to ``off`` when the project has no
+    actionable work left. Returns True if a flip happened.
+
+    "Actionable" means anything the driver could legitimately do something
+    with: a task in ``pending``/``ready``/``running``, or a ``failed`` task
+    that the retry policy might still re-fire. When the project is purely
+    ``done`` / ``canceled``, autopilot would just sit there — turn it off so
+    it doesn't appear as if the agent is still working.
+    """
+    bus = driver_bus.get_bus()
+    with session_scope() as s:
+        p = s.get(models.Project, project_id)
+        if p is None or p.autopilot_mode != "on":
+            return False
+        leftover = s.execute(
+            select(models.Task.id).where(
+                models.Task.project_id == project_id,
+                models.Task.status.in_(
+                    ["pending", "ready", "running", "failed"]
+                ),
+            )
+        ).first()
+        if leftover:
+            return False
+        p.autopilot_mode = "off"
+    # Wake the driver one last time with the mode_off signal so it stops
+    # polling this project. The driver process itself stays alive — killing
+    # it requires app.state access from the route layer. If you want the
+    # process gone, toggle autopilot off from the UI on any remaining
+    # project (or restart the harness).
+    bus.emit("mode_off", project_id, force=True)
+    return True
 
 
 class ExecuteSpawn:
