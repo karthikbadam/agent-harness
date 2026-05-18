@@ -1,5 +1,5 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { Box, Flex, IconButton, Text } from "@chakra-ui/react";
+import { Box, Flex, IconButton, Portal, Text } from "@chakra-ui/react";
 import { LuTrash2 } from "react-icons/lu";
 
 /**
@@ -42,6 +42,9 @@ export function SwipeableRow({
   const [open, setOpen] = useState(false);
   const [dx, setDx] = useState(0); // current translateX while dragging
   const [hovered, setHovered] = useState(false);
+  // Right-click context menu state (desktop): when set, render a small
+  // floating menu anchored at the cursor position with a Delete action.
+  const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
   const startX = useRef<number | null>(null);
   const startY = useRef<number | null>(null);
   const dragging = useRef(false);
@@ -74,6 +77,21 @@ export function SwipeableRow({
       document.removeEventListener("touchstart", handler);
     };
   }, [open, reset]);
+
+  // Right-click context menu: close on outside click or Escape.
+  useEffect(() => {
+    if (!ctx) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent && e.key !== "Escape") return;
+      setCtx(null);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [ctx]);
 
   const handleDelete = useCallback(async () => {
     if (confirmMessage && !window.confirm(confirmMessage)) {
@@ -198,22 +216,35 @@ export function SwipeableRow({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onClickCapture={onClickCapture}
+        onContextMenu={(e) => {
+          // Desktop right-click → small floating menu with Delete. iOS doesn't
+          // fire contextmenu reliably; we keep swipe-to-delete as the touch
+          // affordance.
+          e.preventDefault();
+          setCtx({ x: e.clientX, y: e.clientY });
+        }}
         css={{ touchAction: "pan-y" }}
       >
         {children}
+        {/* Desktop hover-reveal trash, sitting OUTSIDE the row's right
+            content (offset to the right of the card) so it doesn't fight
+            with chevrons / status indicators. */}
         <IconButton
           aria-label="Delete"
           position="absolute"
           top="50%"
-          right={2}
+          right={-10}
           transform="translateY(-50%)"
-          size="xs"
+          size="sm"
           variant="ghost"
+          rounded="full"
           color="fg.subtle"
+          bg="bg"
+          shadow="sm"
           _hover={{ color: "red.fg", bg: "red.subtle" }}
           opacity={hovered && !open ? 1 : 0}
           pointerEvents={hovered && !open ? "auto" : "none"}
-          transition="opacity 0.15s"
+          transition="opacity 0.15s, transform 0.15s"
           hideBelow="md"
           onClick={(e) => {
             e.stopPropagation();
@@ -223,6 +254,46 @@ export function SwipeableRow({
           <LuTrash2 />
         </IconButton>
       </Box>
+      {ctx && (
+        <Portal>
+          <Box
+            position="fixed"
+            top={`${ctx.y}px`}
+            left={`${ctx.x}px`}
+            zIndex={1000}
+            bg="bg"
+            borderWidth="1px"
+            borderColor="border.subtle"
+            rounded="md"
+            shadow="lg"
+            minW="40"
+            py={1}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <Flex
+              as="button"
+              w="full"
+              align="center"
+              gap={2}
+              px={3}
+              py={1.5}
+              fontSize="sm"
+              color="red.fg"
+              cursor="pointer"
+              _hover={{ bg: "red.subtle" }}
+              onClick={() => {
+                setCtx(null);
+                void handleDelete();
+              }}
+            >
+              <Box lineHeight="0">
+                <LuTrash2 />
+              </Box>
+              <Text>Delete</Text>
+            </Flex>
+          </Box>
+        </Portal>
+      )}
     </Box>
   );
 }
