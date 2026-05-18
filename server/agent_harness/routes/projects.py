@@ -208,10 +208,89 @@ def update_project(
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(project_id: str, s: Session = Depends(get_session)) -> None:
+    """Delete a project and all its dependent rows.
+
+    The schema wasn't built with ``ondelete=CASCADE`` on every reference, so
+    naive ``s.delete(project)`` fails with FOREIGN KEY constraints. Tear down
+    in dependency order so each DELETE sees only orphans:
+
+      outcomes ──┐
+                 ├──> tasks  ──> (TaskDependency cascades on its own)
+      turns ─────┤
+                 ├──> jobs
+      driver_notes ──> (project + tasks + jobs)
+      schedules  ──> (project)
+      allowlist  ──> (handled by Project.rules SQLA cascade)
+      project
+    """
+    from sqlalchemy import or_, select as sa_select
+
     p = s.get(models.Project, project_id)
     if p is None:
         raise HTTPException(404, "not found")
-    s.delete(p)
+    if p.is_default:
+        raise HTTPException(409, "cannot delete the default project")
+
+    job_ids = [
+        r[0]
+        for r in s.execute(
+            sa_select(models.Job.id).where(models.Job.project_id == project_id)
+        ).all()
+    ]
+    task_ids = [
+        r[0]
+        for r in s.execute(
+            sa_select(models.Task.id).where(models.Task.project_id == project_id)
+        ).all()
+    ]
+
+    if job_ids or task_ids:
+        s.execute(
+            models.Outcome.__table__.delete().where(
+                or_(
+                    models.Outcome.job_id.in_(job_ids or [""]),
+                    models.Outcome.task_id.in_(task_ids or [""]),
+                )
+            )
+        )
+    s.execute(
+        models.DriverNote.__table__.delete().where(
+            or_(
+                models.DriverNote.project_id == project_id,
+                models.DriverNote.job_id.in_(job_ids or [""]),
+                models.DriverNote.task_id.in_(task_ids or [""]),
+            )
+        )
+    )
+    if job_ids:
+        # Turn rows are cascade-deleted via Job.turns SQLA relationship when
+        # we delete each Job, but the bulk SQL DELETE below bypasses that.
+        # Wipe turns directly first.
+        s.execute(
+            models.Turn.__table__.delete().where(models.Turn.job_id.in_(job_ids))
+        )
+        s.execute(
+            models.Job.__table__.delete().where(models.Job.id.in_(job_ids))
+        )
+    if task_ids:
+        s.execute(
+            models.Task.__table__.delete().where(models.Task.id.in_(task_ids))
+        )
+    s.execute(
+        models.Schedule.__table__.delete().where(
+            models.Schedule.project_id == project_id
+        )
+    )
+    s.execute(
+        models.AllowlistRule.__table__.delete().where(
+            models.AllowlistRule.project_id == project_id
+        )
+    )
+    # Project itself last. The SQLA relationships from Project to jobs/rules
+    # would normally cascade, but we've already drained those.
+    s.execute(
+        models.Project.__table__.delete().where(models.Project.id == project_id)
+    )
     s.commit()
 
 
