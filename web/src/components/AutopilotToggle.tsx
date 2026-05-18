@@ -8,7 +8,6 @@ import {
   Portal,
   Spinner,
   Stack,
-  Switch,
   Text,
 } from "@chakra-ui/react";
 import { LuPlane, LuTriangleAlert } from "react-icons/lu";
@@ -38,72 +37,63 @@ export function AutopilotToggle({ projectId }: Props) {
   const recentEscalations = (notes ?? []).filter(
     (n) => n.severity === "escalate" || n.severity === "warn",
   ).length;
-
   const noteCount = notes?.length ?? 0;
+
+  // Click behavior:
+  //  - off → toggle on
+  //  - on  → if there are notes, open the drawer (so a single tap surfaces
+  //    what autopilot is doing); user can long-press / right-click later
+  //    if we want explicit "turn off". For now, turn off from inside the drawer.
+  //  - on with no notes yet → toggle off
+  const onClick = () => {
+    if (!isOn) {
+      setMode.mutate("on");
+      return;
+    }
+    if (noteCount > 0) {
+      setDrawerOpen(true);
+      return;
+    }
+    setMode.mutate("off");
+  };
+
   return (
     <>
-      <HStack gap={1.5}>
+      <Button
+        size="xs"
+        variant={isOn ? "solid" : "outline"}
+        colorPalette={recentEscalations > 0 ? "red" : "purple"}
+        onClick={onClick}
+        loading={setMode.isPending}
+        gap={1.5}
+        px={{ base: 2, md: 3 }}
+        position="relative"
+        aria-label={isOn ? "Autopilot on" : "Autopilot off"}
+      >
+        <Box lineHeight="0">
+          {recentEscalations > 0 ? <LuTriangleAlert /> : <LuPlane />}
+        </Box>
+        <Text hideBelow="md">Autopilot</Text>
         {isOn && noteCount > 0 && (
-          <Button
-            size="xs"
-            variant="ghost"
-            color={recentEscalations > 0 ? "red.fg" : "fg.muted"}
-            onClick={() => setDrawerOpen(true)}
-            gap={1}
-            px={2}
-            aria-label={`${noteCount} driver notes`}
-          >
-            {recentEscalations > 0 && (
-              <Box lineHeight="0">
-                <LuTriangleAlert />
-              </Box>
-            )}
-            <Text>{noteCount}</Text>
-            <Text hideBelow="md">{noteCount === 1 ? "note" : "notes"}</Text>
-          </Button>
-        )}
-        <HStack
-          gap={{ base: 1, md: 1.5 }}
-          px={{ base: 1.5, md: 2.5 }}
-          py={1.5}
-          rounded="md"
-          bg={isOn ? "purple.subtle" : "transparent"}
-          borderWidth="1px"
-          borderColor={isOn ? "purple.emphasized" : "border.subtle"}
-        >
           <Box
-            lineHeight="0"
-            color={isOn ? "purple.fg" : "fg.muted"}
-            opacity={setMode.isPending ? 0.5 : 1}
+            as="span"
+            ml={0.5}
+            fontSize="2xs"
+            opacity={0.8}
+            fontWeight="normal"
           >
-            <LuPlane />
+            · {noteCount}
           </Box>
-          <Text
-            fontSize="xs"
-            fontWeight="medium"
-            color={isOn ? "purple.fg" : "fg.muted"}
-            hideBelow="md"
-          >
-            Autopilot
-          </Text>
-          <Switch.Root
-            size="sm"
-            checked={isOn}
-            disabled={setMode.isPending}
-            onCheckedChange={(d) =>
-              setMode.mutate(d.checked ? "on" : "off")
-            }
-            colorPalette="purple"
-          >
-            <Switch.HiddenInput />
-            <Switch.Control />
-          </Switch.Root>
-        </HStack>
-      </HStack>
+        )}
+      </Button>
       <DriverNotesDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         projectId={projectId}
+        onTurnOff={() => {
+          setMode.mutate("off");
+          setDrawerOpen(false);
+        }}
       />
     </>
   );
@@ -113,10 +103,12 @@ function DriverNotesDrawer({
   open,
   onClose,
   projectId,
+  onTurnOff,
 }: {
   open: boolean;
   onClose: () => void;
   projectId: string;
+  onTurnOff: () => void;
 }) {
   const { data: notes } = useDriverNotes(open ? projectId : undefined);
   return (
@@ -156,7 +148,15 @@ function DriverNotesDrawer({
               </Stack>
             </Drawer.Body>
             <Drawer.Footer borderTopWidth="1px" borderColor="border.subtle">
-              <HStack justify="flex-end" w="full">
+              <HStack justify="space-between" w="full">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  colorPalette="purple"
+                  onClick={onTurnOff}
+                >
+                  Turn off autopilot
+                </Button>
                 <Button variant="outline" size="sm" onClick={onClose}>
                   Close
                 </Button>
