@@ -184,9 +184,13 @@ Environment overrides (`AH_*` prefix): `AH_HOME`, `AH_AUTH_TOKEN`,
 
 ```bash
 ./scripts/dev.sh
-# Backend on :8765 (uvicorn --reload)
-# Frontend on :5173 (vite, proxies /api to :8765)
+# Backend on :8765 (uvicorn --reload, also serves the built SPA at /)
+# Vite runs `build --watch` into web/dist/ — no separate dev port.
+# Open http://localhost:8765
 ```
+
+Hard-refresh the browser to pick up frontend changes (the bundle hash changes
+on each rebuild, so it busts the cache).
 
 Run tests:
 
