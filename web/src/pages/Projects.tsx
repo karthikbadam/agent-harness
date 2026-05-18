@@ -15,16 +15,35 @@ import { LuChevronRight, LuFolderGit2 } from "react-icons/lu";
 import { Shell } from "../components/Shell";
 import { NewProjectComposer } from "../components/NewProjectComposer";
 import { StickyComposer } from "../components/StickyComposer";
-import { useProjects } from "../hooks/useProjects";
+import { SwipeableRow } from "../components/SwipeableRow";
+import { projectsApi } from "../api/projects";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  projectsKey,
+  useProjects,
+} from "../hooks/useProjects";
 import { useJobs } from "../hooks/useJobs";
 import type { JobOut, ProjectOut } from "../types";
 
 export function ProjectsPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: projects, isLoading } = useProjects();
   const { data: jobs } = useJobs();
   const sorted = useMemo(() => sortProjects(projects ?? []), [projects]);
   const stats = useMemo(() => indexStats(jobs ?? []), [jobs]);
+
+  const handleDelete = async (p: ProjectOut) => {
+    try {
+      await projectsApi.remove(p.id);
+      qc.invalidateQueries({ queryKey: projectsKey });
+    } catch (err) {
+      console.error("delete project failed:", err);
+      alert(
+        `Could not delete project "${p.name}". The server may have rejected the request (open tasks?).`,
+      );
+    }
+  };
 
   return (
     <Shell title="Projects" composerHeight={110}>
@@ -37,12 +56,18 @@ export function ProjectsPage() {
       {sorted.length > 0 && (
         <Stack gap={2} maxW="container.md">
           {sorted.map((p) => (
-            <ProjectRow
+            <SwipeableRow
               key={p.id}
-              project={p}
-              stats={stats[p.id] ?? { total: 0, running: 0 }}
-              onClick={() => navigate(`/projects/${p.id}`)}
-            />
+              disabled={p.is_default}
+              confirmMessage={`Delete project "${p.name}"? Tasks and jobs are removed too.`}
+              onDelete={() => handleDelete(p)}
+            >
+              <ProjectRow
+                project={p}
+                stats={stats[p.id] ?? { total: 0, running: 0 }}
+                onClick={() => navigate(`/projects/${p.id}`)}
+              />
+            </SwipeableRow>
           ))}
         </Stack>
       )}
