@@ -52,17 +52,18 @@ export function Composer({ placeholder = "Tell claude...", disabled, onSend }: P
   const showCount = value.length >= HINT_AT;
 
   return (
-    <Box px={3} pt={2} pb="max(env(safe-area-inset-bottom), 8px)" bg="bg">
+    <Box px={3} pt={3} pb="max(env(safe-area-inset-bottom), 10px)" bg="bg">
       <Flex
         align="flex-end"
         gap={2}
-        borderWidth="1px"
-        borderColor={focused ? "border.emphasized" : "border"}
-        borderRadius="2xl"
         bg="bg.subtle"
-        px={3}
-        py={2}
-        transition="border-color 0.15s ease"
+        borderRadius="lg"
+        px={3.5}
+        py={2.5}
+        outline={focused ? "1px solid" : undefined}
+        outlineColor={focused ? "blue.solid" : undefined}
+        outlineOffset="0"
+        transition="outline-color 0.15s ease"
       >
         <Textarea
           ref={ref}
