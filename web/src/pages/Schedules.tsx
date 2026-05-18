@@ -22,6 +22,7 @@ import { LuPlus, LuTrash2 } from "react-icons/lu";
 
 import { Shell } from "../components/Shell";
 import { CronPicker } from "../components/CronPicker";
+import { parseServerDate } from "../api/dates";
 import { useProjects } from "../hooks/useProjects";
 import {
   useCreateSchedule,
@@ -126,7 +127,11 @@ function groupByProject(
     .map(([pid, ss]) => ({
       projectId: pid,
       label: nameById.get(pid) ?? pid.slice(0, 8),
-      schedules: ss.sort((a, b) => a.name.localeCompare(b.name)),
+      schedules: ss.sort(
+        (a, b) =>
+          parseServerDate(b.created_at).getTime() -
+          parseServerDate(a.created_at).getTime(),
+      ),
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 }

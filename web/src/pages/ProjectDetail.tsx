@@ -371,7 +371,13 @@ function groupByPhase(tasks: TaskOut[]): PhaseGroup[] {
   const seen = new Set<string>();
   const groups: PhaseGroup[] = [];
   for (const g of order) {
-    const ts = tasks.filter((t) => !seen.has(t.id) && g.match(t));
+    const ts = tasks
+      .filter((t) => !seen.has(t.id) && g.match(t))
+      .sort(
+        (a, b) =>
+          parseServerDate(b.created_at).getTime() -
+          parseServerDate(a.created_at).getTime(),
+      );
     ts.forEach((t) => seen.add(t.id));
     if (ts.length > 0) groups.push({ label: g.label, tasks: ts });
   }

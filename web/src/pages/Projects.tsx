@@ -16,6 +16,7 @@ import { Shell } from "../components/Shell";
 import { NewProjectComposer } from "../components/NewProjectComposer";
 import { StickyComposer } from "../components/StickyComposer";
 import { SwipeableRow } from "../components/SwipeableRow";
+import { parseServerDate } from "../api/dates";
 import { projectsApi } from "../api/projects";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -95,11 +96,16 @@ function indexStats(jobs: JobOut[]): Record<string, JobStats> {
 }
 
 function sortProjects(projects: ProjectOut[]): ProjectOut[] {
-  // Default project to the bottom, everything else case-insensitive alpha.
-  // No section header — one flat list is enough.
+  // Default project pinned to the bottom; everything else newest-first by
+  // creation timestamp — matches the reverse-chronological feed convention
+  // used on Jobs (recent activity surfaces at the top).
   const user = projects
     .filter((p) => !p.is_default)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort(
+      (a, b) =>
+        parseServerDate(b.created_at).getTime() -
+        parseServerDate(a.created_at).getTime(),
+    );
   const system = projects.filter((p) => p.is_default);
   return [...user, ...system];
 }
