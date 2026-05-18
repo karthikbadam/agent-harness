@@ -1,17 +1,22 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { Box, Flex, IconButton } from "@chakra-ui/react";
+import { Box, Flex, IconButton, Text } from "@chakra-ui/react";
 import { LuTrash2 } from "react-icons/lu";
 
 /**
  * iOS-style swipe-left-to-delete row.
  *
- * Mobile: drag the row left with a finger. Past ~40% reveal threshold the
- *   row snaps open and the delete button is hit-targetable.
- * Desktop: a small trash icon appears on hover in the top-right of the row.
- *   Reflects the Mac convention (Finder, Mail) of hover-reveal affordances.
+ * Mobile flow:
+ *   1. Drag the row left with a finger.
+ *   2. Past ~40% reveal threshold, the row snaps open and the red Delete
+ *      pane on the right becomes hit-targetable.
+ *   3. Tap the Delete pane → confirm → delete.
+ *   4. Tap anywhere else on the row → just close the swipe (does NOT trigger
+ *      the row's own onClick like "navigate to detail"). Subtle but
+ *      important — without this guard, every tap-to-close also navigates.
  *
- * Implementation: pointer events (work for touch + mouse), translateX on a
- * wrapper, fixed delete pane behind. No external deps.
+ * Desktop flow:
+ *   - A small trash icon appears on hover in the top-right of the row
+ *     (Finder / Mail convention). Hidden during swipe-open state.
  */
 interface Props {
   children: ReactNode;
@@ -23,10 +28,10 @@ interface Props {
   disabled?: boolean;
 }
 
-const REVEAL_PX = 92; // width of the delete pane
+const REVEAL_PX = 96; // width of the delete pane
 const OPEN_THRESHOLD = 36; // drag at least this far to snap open
 const SWIPE_LOCK_PX = 8; // small horizontal movement before we capture the touch
-const ACTIVATE_PX = REVEAL_PX * 0.7; // drag past this to trigger delete on release
+const ACTIVATE_PX = REVEAL_PX * 0.75; // drag past this on release → fire delete
 
 export function SwipeableRow({
   children,
@@ -41,6 +46,10 @@ export function SwipeableRow({
   const startY = useRef<number | null>(null);
   const dragging = useRef(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  // Snapshot of open at pointerdown — used by the click-capture guard so a
+  // tap that started while open still closes (without firing children's
+  // onClick) even after pointerup has reset open.
+  const openAtPointerDown = useRef(false);
 
   const reset = useCallback(() => {
     setOpen(false);
@@ -81,33 +90,27 @@ export function SwipeableRow({
 
   // Pointer handlers — work for touch and mouse alike.
   const onPointerDown = (e: React.PointerEvent) => {
-    // Only capture primary button on mouse; touch is always primary.
     if (e.pointerType === "mouse" && e.button !== 0) return;
     startX.current = e.clientX;
     startY.current = e.clientY;
     dragging.current = false;
+    openAtPointerDown.current = open;
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (startX.current === null || startY.current === null) return;
     const deltaX = e.clientX - startX.current;
     const deltaY = e.clientY - startY.current;
-    // Capture the gesture only when horizontal movement dominates and exceeds
-    // the lock threshold. Otherwise let the page scroll vertically.
     if (
       !dragging.current &&
       Math.abs(deltaX) > SWIPE_LOCK_PX &&
       Math.abs(deltaX) > Math.abs(deltaY)
     ) {
       dragging.current = true;
-      // Capture pointer so subsequent moves come to us even if leaving the
-      // element bounds.
       (e.target as Element).setPointerCapture?.(e.pointerId);
     }
     if (!dragging.current) return;
     e.preventDefault();
-    // Only allow leftward drag (negative dx). Allow tiny right-drag for
-    // overscroll feel only when already open.
     const base = open ? -REVEAL_PX : 0;
     const next = Math.max(-REVEAL_PX * 1.2, Math.min(0, base + deltaX));
     setDx(next);
@@ -115,19 +118,19 @@ export function SwipeableRow({
 
   const onPointerUp = (e: React.PointerEvent) => {
     if (!dragging.current) {
-      // Plain tap — let the inner content handle it. Reset state if open.
-      if (open) {
+      // Plain tap (no drag).
+      if (openAtPointerDown.current) {
+        // Tap-to-close while open. The click-capture handler below catches
+        // the subsequent click and prevents the inner onClick from firing.
         reset();
       }
       startX.current = null;
       return;
     }
     (e.target as Element).releasePointerCapture?.(e.pointerId);
-    const opened = -dx >= OPEN_THRESHOLD;
     if (-dx >= ACTIVATE_PX) {
-      // Released past activate threshold → fire delete directly.
       void handleDelete();
-    } else if (opened) {
+    } else if (-dx >= OPEN_THRESHOLD) {
       setOpen(true);
       setDx(-REVEAL_PX);
     } else {
@@ -138,13 +141,23 @@ export function SwipeableRow({
     dragging.current = false;
   };
 
+  // Capture-phase click guard: if a click lands on the row while it WAS open
+  // at pointerdown, stop it before it reaches children. The user is closing
+  // the swipe, not invoking the row's own onClick.
+  const onClickCapture = (e: React.MouseEvent) => {
+    if (openAtPointerDown.current) {
+      e.stopPropagation();
+      e.preventDefault();
+      openAtPointerDown.current = false;
+    }
+  };
+
   return (
     <Box
       ref={wrapRef}
       position="relative"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      // Prevent page text from being highlighted while dragging.
       style={{ userSelect: dragging.current ? "none" : "auto" }}
     >
       {/* Delete pane sits behind the row, revealed as the row translates left. */}
@@ -155,18 +168,25 @@ export function SwipeableRow({
         right={0}
         align="center"
         justify="center"
+        gap={1.5}
         width={`${REVEAL_PX}px`}
         bg="red.solid"
         rounded="lg"
         cursor="pointer"
+        // pointerEvents must be enabled even when closed (in case finger
+        // ends exactly at the edge); but we tap-test by visibility through
+        // the row. When closed, the row Box covers this fully.
         onClick={(e) => {
           e.stopPropagation();
           void handleDelete();
         }}
       >
-        <Box color="white" fontSize="lg" lineHeight="0">
+        <Box color="white" fontSize="md" lineHeight="0">
           <LuTrash2 />
         </Box>
+        <Text color="white" fontSize="xs" fontWeight="medium">
+          Delete
+        </Text>
       </Flex>
       {/* The row itself — translates left as the user drags. */}
       <Box
@@ -177,13 +197,8 @@ export function SwipeableRow({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        // Desktop hover affordance: trash icon top-right while hovered, only
-        // when the row isn't already swiped open. Hidden below md so it
-        // doesn't conflict with the swipe gesture on touch.
-        css={{
-          // Block native pull-to-refresh / page swipe interference.
-          touchAction: "pan-y",
-        }}
+        onClickCapture={onClickCapture}
+        css={{ touchAction: "pan-y" }}
       >
         {children}
         <IconButton
