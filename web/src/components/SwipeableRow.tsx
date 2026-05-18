@@ -35,17 +35,26 @@ export function SwipeableRow({
   confirmMessage,
   disabled = false,
 }: Props) {
-  if (disabled) {
-    return <Box>{children}</Box>;
-  }
+  // Always render the flex layout so the affordance is visible. On mobile,
+  // disabled rows skip the swipe handlers. On desktop, the trash button
+  // renders disabled (greyed out) so the user can SEE that delete exists
+  // but isn't available — e.g. the __default project.
   return (
     <Flex align="stretch" gap={1.5}>
       <Box flex="1" minW={0}>
-        <MobileSwipeable onDelete={onDelete} confirmMessage={confirmMessage}>
-          {children}
-        </MobileSwipeable>
+        {disabled ? (
+          children
+        ) : (
+          <MobileSwipeable onDelete={onDelete} confirmMessage={confirmMessage}>
+            {children}
+          </MobileSwipeable>
+        )}
       </Box>
-      <DesktopDeleteButton onDelete={onDelete} confirmMessage={confirmMessage} />
+      <DesktopDeleteButton
+        onDelete={onDelete}
+        confirmMessage={confirmMessage}
+        disabled={disabled}
+      />
     </Flex>
   );
 }
@@ -205,9 +214,11 @@ function MobileSwipeable({
 function DesktopDeleteButton({
   onDelete,
   confirmMessage,
+  disabled = false,
 }: {
   onDelete: Props["onDelete"];
   confirmMessage?: string;
+  disabled?: boolean;
 }) {
   const handleDelete = async () => {
     if (confirmMessage && !window.confirm(confirmMessage)) return;
@@ -216,14 +227,21 @@ function DesktopDeleteButton({
   return (
     <IconButton
       hideBelow="md"
-      aria-label="Delete"
+      aria-label={disabled ? "Delete (not available)" : "Delete"}
+      title={disabled ? "This row can't be deleted" : "Delete"}
       size="sm"
       variant="ghost"
       color="fg.subtle"
       alignSelf="center"
-      _hover={{ color: "red.fg", bg: "red.subtle" }}
+      disabled={disabled}
+      _hover={
+        disabled
+          ? undefined
+          : { color: "red.fg", bg: "red.subtle" }
+      }
       onClick={(e) => {
         e.stopPropagation();
+        if (disabled) return;
         void handleDelete();
       }}
     >
