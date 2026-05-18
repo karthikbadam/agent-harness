@@ -365,65 +365,66 @@ def on_job_finalized(
                 ds = s.get(models.Task, tid)
                 if ds is not None and ds.source == "planner" and not ds.synthetic:
                     autorun_ids.append(tid)
-            _emit_after(bus, pending_events)
-            try:
-                try_autodisable_autopilot(project_id)
-            except Exception:  # noqa: BLE001
-                log.exception("autodisable autopilot failed for %s", project_id)
-            return autorun_ids
-
-        # Execute / one-shot / ad-hoc (kind='execute' or 'ad_hoc'). The job's
-        # cwd is the worktree path for plan-then-execute tasks; project.path
-        # for one-shot tasks; whatever the caller specified for ad-hoc.
-        cwd = job.cwd or (project.path if project else None)
-        summary = _last_assistant_text(log_dir) if log_dir is not None else None
-        in_worktree = bool(
-            cwd and project and cwd != project.path
-        )
-        if job_status == "done" and in_worktree and not task.synthetic:
-            commit_msg = (task.title or "agent commit")[:72]
-            _commit_dirty_worktree(cwd, commit_msg)
-        sha, branch = (_git_head(cwd) if cwd else (None, None))
-        outcome_status = "success" if job_status == "done" else "failed"
-        s.add(
-            models.Outcome(
-                task_id=task.id,
-                job_id=job.id,
-                commit_sha=sha,
-                branch=branch,
-                summary=summary,
-                status=outcome_status,
-                kind="execute",
+            # Fall through to the common post-commit block. We used to call
+            # try_autodisable_autopilot here, inside the still-uncommitted
+            # session — its inner session_scope opened a fresh DB read and
+            # never saw the integrate task as done, so it always returned
+            # False at the moment the wave actually completed.
+        else:
+            # Execute / one-shot / ad-hoc (kind='execute' or 'ad_hoc'). The
+            # job's cwd is the worktree path for plan-then-execute tasks;
+            # project.path for one-shot tasks; whatever the caller
+            # specified for ad-hoc.
+            cwd = job.cwd or (project.path if project else None)
+            summary = _last_assistant_text(log_dir) if log_dir is not None else None
+            in_worktree = bool(
+                cwd and project and cwd != project.path
             )
-        )
-        task.status = "done" if job_status == "done" else "failed"
-        task.phase = "done" if job_status == "done" else "failed"
-        if task.status == "failed":
-            task.last_failed_at = datetime.now(timezone.utc)
-        if (
-            task.status == "done"
-            and not task.synthetic
-            and task.mode in ("plan_then_execute", "execute_only")
-        ):
-            task.integration_status = "pending"
-        s.flush()
-        transitions = _reevaluate_downstream(s, task.id)
-        event = "task_done" if task.status == "done" else "task_failed"
-        pending_events.append(
-            (event, {"project_id": project_id, "task_id": task.id, "job_id": job.id})
-        )
-        for tid, pid in transitions:
-            pending_events.append(("task_ready", {"project_id": pid, "task_id": tid}))
-            ds = s.get(models.Task, tid)
-            # Planner-sourced tasks auto-run as soon as deps land. Synthetic
-            # integrate tasks the planner emitted are included so the wave
-            # shape flows without manual clicks. Manual tasks are not.
-            if ds is not None and ds.source == "planner":
-                autorun_ids.append(tid)
+            if job_status == "done" and in_worktree and not task.synthetic:
+                commit_msg = (task.title or "agent commit")[:72]
+                _commit_dirty_worktree(cwd, commit_msg)
+            sha, branch = (_git_head(cwd) if cwd else (None, None))
+            outcome_status = "success" if job_status == "done" else "failed"
+            s.add(
+                models.Outcome(
+                    task_id=task.id,
+                    job_id=job.id,
+                    commit_sha=sha,
+                    branch=branch,
+                    summary=summary,
+                    status=outcome_status,
+                    kind="execute",
+                )
+            )
+            task.status = "done" if job_status == "done" else "failed"
+            task.phase = "done" if job_status == "done" else "failed"
+            if task.status == "failed":
+                task.last_failed_at = datetime.now(timezone.utc)
+            if (
+                task.status == "done"
+                and not task.synthetic
+                and task.mode in ("plan_then_execute", "execute_only")
+            ):
+                task.integration_status = "pending"
+            s.flush()
+            transitions = _reevaluate_downstream(s, task.id)
+            event = "task_done" if task.status == "done" else "task_failed"
+            pending_events.append(
+                (event, {"project_id": project_id, "task_id": task.id, "job_id": job.id})
+            )
+            for tid, pid in transitions:
+                pending_events.append(("task_ready", {"project_id": pid, "task_id": tid}))
+                ds = s.get(models.Task, tid)
+                # Planner-sourced tasks auto-run as soon as deps land.
+                # Synthetic integrate tasks the planner emitted are included
+                # so the wave shape flows without manual clicks. Manual
+                # tasks are not.
+                if ds is not None and ds.source == "planner":
+                    autorun_ids.append(tid)
+    # Outer session committed. Emit driver events and consider autodisable.
     _emit_after(bus, pending_events)
-    # After all the finalize bookkeeping is committed, see if the project
-    # ran dry. Conservative: only flips autopilot off when there's nothing
-    # the driver could do — no pending, ready, running, or failed tasks.
+    # Conservative: only flips autopilot off when nothing the driver could
+    # do remains — no pending, ready, running, or failed tasks.
     try:
         try_autodisable_autopilot(project_id)
     except Exception:  # noqa: BLE001
