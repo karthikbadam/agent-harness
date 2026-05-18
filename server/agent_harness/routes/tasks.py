@@ -213,6 +213,15 @@ def list_tasks(project_id: str, s: Session = Depends(get_session)) -> list[TaskO
     return [_to_out(s, t) for t in rows]
 
 
+@router.get("/api/tasks", response_model=list[TaskOut])
+def list_all_tasks(s: Session = Depends(get_session)) -> list[TaskOut]:
+    """All tasks across all projects, newest first. Used by the Projects
+    page to show per-project task counts without N+1 fetches.
+    """
+    rows = s.query(models.Task).order_by(models.Task.created_at.desc()).all()
+    return [_to_out(s, t) for t in rows]
+
+
 # ----------------------------- task-scoped ------------------------------ #
 
 

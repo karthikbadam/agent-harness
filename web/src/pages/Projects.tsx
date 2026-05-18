@@ -24,15 +24,20 @@ import {
   useProjects,
 } from "../hooks/useProjects";
 import { useJobs } from "../hooks/useJobs";
-import type { JobOut, ProjectOut } from "../types";
+import { useAllTasks } from "../hooks/useTasks";
+import type { JobOut, ProjectOut, TaskOut } from "../types";
 
 export function ProjectsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: projects, isLoading } = useProjects();
   const { data: jobs } = useJobs();
+  const { data: tasks } = useAllTasks();
   const sorted = useMemo(() => sortProjects(projects ?? []), [projects]);
-  const stats = useMemo(() => indexStats(jobs ?? []), [jobs]);
+  const stats = useMemo(
+    () => indexStats(jobs ?? [], tasks ?? []),
+    [jobs, tasks],
+  );
 
   const handleDelete = async (p: ProjectOut) => {
     try {
@@ -65,7 +70,14 @@ export function ProjectsPage() {
             >
               <ProjectRow
                 project={p}
-                stats={stats[p.id] ?? { total: 0, running: 0 }}
+                stats={
+                  stats[p.id] ?? {
+                    jobs: 0,
+                    jobsRunning: 0,
+                    tasksActive: 0,
+                    tasksTotal: 0,
+                  }
+                }
                 onClick={() => navigate(`/projects/${p.id}`)}
               />
             </SwipeableRow>
@@ -79,18 +91,39 @@ export function ProjectsPage() {
   );
 }
 
-interface JobStats {
-  total: number;
-  running: number;
+interface ProjectStats {
+  jobs: number;
+  jobsRunning: number;
+  tasksActive: number;
+  tasksTotal: number;
 }
 
-function indexStats(jobs: JobOut[]): Record<string, JobStats> {
-  const m: Record<string, JobStats> = {};
+function indexStats(
+  jobs: JobOut[],
+  tasks: TaskOut[],
+): Record<string, ProjectStats> {
+  const m: Record<string, ProjectStats> = {};
   for (const j of jobs) {
-    const s = m[j.project_id] ?? { total: 0, running: 0 };
-    s.total += 1;
-    if (j.status === "running" || j.status === "queued") s.running += 1;
+    const s =
+      m[j.project_id] ??
+      { jobs: 0, jobsRunning: 0, tasksActive: 0, tasksTotal: 0 };
+    s.jobs += 1;
+    if (j.status === "running" || j.status === "queued") s.jobsRunning += 1;
     m[j.project_id] = s;
+  }
+  for (const t of tasks) {
+    const s =
+      m[t.project_id] ??
+      { jobs: 0, jobsRunning: 0, tasksActive: 0, tasksTotal: 0 };
+    s.tasksTotal += 1;
+    if (
+      t.status === "pending" ||
+      t.status === "ready" ||
+      t.status === "running"
+    ) {
+      s.tasksActive += 1;
+    }
+    m[t.project_id] = s;
   }
   return m;
 }
@@ -116,7 +149,7 @@ function ProjectRow({
   onClick,
 }: {
   project: ProjectOut;
-  stats: JobStats;
+  stats: ProjectStats;
   onClick: () => void;
 }) {
   return (
@@ -168,14 +201,21 @@ function ProjectRow({
         </Text>
       </Stack>
       <HStack gap={3} fontSize="xs" color="fg.muted" flexShrink={0}>
-        {stats.running > 0 && (
+        {stats.jobsRunning > 0 && (
           <HStack gap={1.5}>
             <Box boxSize="2" rounded="full" bg="blue.solid" />
-            <Text>{stats.running} running</Text>
+            <Text>{stats.jobsRunning} running</Text>
           </HStack>
         )}
-        {stats.total > 0 && stats.running === 0 && (
-          <Text>{stats.total} jobs</Text>
+        {stats.tasksTotal > 0 && (
+          <Text>
+            {stats.tasksActive > 0
+              ? `${stats.tasksActive}/${stats.tasksTotal} tasks`
+              : `${stats.tasksTotal} tasks`}
+          </Text>
+        )}
+        {stats.jobs > 0 && stats.jobsRunning === 0 && (
+          <Text>{stats.jobs} jobs</Text>
         )}
         <Box color="fg.subtle" lineHeight="0">
           <LuChevronRight />
