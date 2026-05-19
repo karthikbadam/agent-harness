@@ -189,6 +189,15 @@ Environment overrides (`AH_*` prefix): `AH_HOME`, `AH_AUTH_TOKEN`,
 # Open http://localhost:8765
 ```
 
+To restart a detached server (picks up code changes without holding a
+terminal open):
+
+```bash
+./scripts/restart.sh
+# Logs at ~/.agent-harness/logs/server.{out,err}.log
+#                       and ~/.agent-harness/logs/vite.{out,err}.log
+```
+
 Hard-refresh the browser to pick up frontend changes (the bundle hash changes
 on each rebuild, so it busts the cache).
 
