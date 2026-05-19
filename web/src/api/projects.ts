@@ -1,5 +1,10 @@
 import { api } from "./client";
-import type { ProjectCreate, ProjectOut, ProjectUpdate } from "../types";
+import type {
+  PathSuggestion,
+  ProjectCreate,
+  ProjectOut,
+  ProjectUpdate,
+} from "../types";
 
 export const projectsApi = {
   list: () => api.get<ProjectOut[]>("/api/projects"),
@@ -7,4 +12,6 @@ export const projectsApi = {
   update: (id: string, body: ProjectUpdate) =>
     api.patch<ProjectOut>(`/api/projects/${id}`, body),
   remove: (id: string) => api.del(`/api/projects/${id}`),
+  pathSuggestions: () =>
+    api.get<PathSuggestion[]>("/api/projects/path-suggestions"),
 };

@@ -56,6 +56,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/path-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Path Suggestions
+         * @description List candidate project directories the user can pick from when
+         *     creating a project. Scans immediate subdirectories of common code roots
+         *     (``~/Code``, ``~/code``, ``~/src``, ``~/projects``; override with
+         *     ``AH_CODE_ROOTS``). Hidden directories (``.foo``) are skipped.
+         */
+        get: operations["path_suggestions_api_projects_path_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}": {
         parameters: {
             query?: never;
@@ -73,6 +96,53 @@ export interface paths {
         head?: never;
         /** Update Project */
         patch: operations["update_project_api_projects__project_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/worktrees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Project Worktrees
+         * @description List outstanding ``git worktree list`` entries for the project.
+         *
+         *     Each entry includes the on-disk ``task_id`` if the worktree's path matches
+         *     a task this harness knows about — useful for spotting orphans left by a
+         *     killed server or a failed cleanup.
+         */
+        get: operations["list_project_worktrees_api_projects__project_id__worktrees_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/integrate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Integration
+         * @description Create a synthetic 'merge these branches' task and return it.
+         *
+         *     The caller is responsible for running the returned task via the usual
+         *     ``POST /api/tasks/{id}/run`` flow.
+         */
+        post: operations["create_integration_api_projects__project_id__integrate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/jobs": {
@@ -120,7 +190,16 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Followup Job */
+        /**
+         * Followup Job
+         * @description Send a follow-up turn to an existing Job (same conversation, new turn).
+         *
+         *     Followups stay on the same Job (same cwd, same session). To advance a
+         *     plan-then-execute Task from awaiting_ack to executing — which spawns a
+         *     NEW Execute Job in the worktree — call ``POST /api/tasks/{id}/ack``
+         *     instead. For backward compatibility, a followup on a Plan Job that's
+         *     bound to a Task at ``phase=awaiting_ack`` is routed to the ack flow.
+         */
         post: operations["followup_job_api_jobs__job_id__followup_post"];
         delete?: never;
         options?: never;
@@ -216,6 +295,275 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tasks */
+        get: operations["list_tasks_api_projects__project_id__tasks_get"];
+        put?: never;
+        /**
+         * Create Task
+         * @description Create a manual Task. Pass ``?run=true`` to immediately spawn its first
+         *     Job if the task is ``ready`` after creation (i.e. has no unsatisfied deps).
+         *     ``mode`` defaults to ``plan_then_execute`` if omitted; pass ``"one_shot"``
+         *     for ad-hoc tasks that should skip the planning gate.
+         */
+        post: operations["create_task_api_projects__project_id__tasks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Task */
+        get: operations["get_task_api_tasks__task_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Task */
+        delete: operations["delete_task_api_tasks__task_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Task */
+        patch: operations["update_task_api_tasks__task_id__patch"];
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Task
+         * @description Kick a ready Task. Spawns the first phase's Job:
+         *     - plan_then_execute → Plan Job (kind=plan, cwd=project.path)
+         *     - one_shot non-synthetic → Execute Job (kind=execute, cwd=project.path)
+         *     - synthetic (integration) → Integrate Job (kind=integrate, cwd=project.path)
+         */
+        post: operations["run_task_api_tasks__task_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ack Task
+         * @description Advance a Task from ``awaiting_ack`` to ``executing``.
+         *
+         *     Creates the per-task git worktree (if not already present), flips
+         *     ``task.phase='executing'``, and spawns a NEW Execute Job in the worktree.
+         *     The Plan Job stays as historical record of the planning conversation.
+         *     Optional addendum can be sent via ``?notes=...`` (or just hit without one
+         *     for a bare ack).
+         */
+        post: operations["ack_task_api_tasks__task_id__ack_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/split": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Split Task
+         * @description Replace ``task_id`` with N new tasks. Pure DAG surgery — no jobs touched.
+         *
+         *     Allowed only when the task is ``pending`` or ``ready``. If
+         *     ``inherit_deps_in``, the first new task picks up the original's incoming
+         *     deps. If ``link_in_series``, the new tasks form a chain. The original
+         *     task's outgoing dependents are rewired to depend on the last new task.
+         *     The original task row is deleted.
+         */
+        post: operations["split_task_api_tasks__task_id__split_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge Tasks
+         * @description Collapse N tasks into one. Pure DAG surgery — no jobs touched.
+         *
+         *     All inputs must be ``pending`` and in the same project. The merged task
+         *     inherits the union of inputs' incoming deps; downstream tasks of any
+         *     input are rewired to depend on the merged task. Inputs are deleted.
+         *     Rejected if any input lies on a path through the input set (would
+         *     collapse a real dependency).
+         */
+        post: operations["merge_tasks_api_tasks_merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Task
+         * @description Retry a failed Task. Replays from the failed phase, not from scratch.
+         *
+         *     Behavior depends on the failing phase:
+         *     - ``phase=planning``/``awaiting_ack`` (or task never ran): start over —
+         *       drop worktree (if any), reset to ready, spawn fresh Plan Job.
+         *     - ``phase=executing``: the worktree carries the partial work; keep it,
+         *       flip the Task back to ``awaiting_ack``, and spawn a fresh Execute Job
+         *       via the ack path. (Re-plans only when explicit via /restart.)
+         *     - ``phase=integrating``: drop the Task's own state and re-run as a fresh
+         *       Integrate Job; input task branches are not touched.
+         *
+         *     To wipe everything and replay from pending, use ``POST /tasks/{id}/restart``.
+         */
+        post: operations["retry_task_api_tasks__task_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restart Task
+         * @description Full reset: stop any running Job, drop the worktree, clear phase, set
+         *     status back to ``pending`` (or ``ready`` if deps are satisfied). Old Jobs
+         *     and Outcomes are kept as history; the next ``POST /run`` will start fresh.
+         */
+        post: operations["restart_task_api_tasks__task_id__restart_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Task */
+        post: operations["cancel_task_api_tasks__task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Task Outcomes */
+        get: operations["list_task_outcomes_api_tasks__task_id__outcomes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Project Outcomes */
+        get: operations["list_project_outcomes_api_projects__project_id__outcomes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Last Plan
+         * @description Return the most recent planner run for this project, if any.
+         */
+        get: operations["last_plan_api_projects__project_id__plan_get"];
+        put?: never;
+        /** Plan Project */
+        post: operations["plan_project_api_projects__project_id__plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}/stream": {
         parameters: {
             query?: never;
@@ -242,6 +590,133 @@ export interface paths {
         };
         /** Stream Event Schema */
         get: operations["stream_event_schema_api__codegen_stream_event_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/driver": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Driver State */
+        get: operations["get_driver_state_api_projects__project_id__driver_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set Driver Mode */
+        patch: operations["set_driver_mode_api_projects__project_id__driver_patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/driver/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Suggestions */
+        get: operations["list_suggestions_api_projects__project_id__driver_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/driver/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Project Notes */
+        get: operations["list_project_notes_api_projects__project_id__driver_notes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/driver/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Note */
+        post: operations["create_note_api_driver_notes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/driver/notes/{note_id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge Note */
+        post: operations["acknowledge_note_api_driver_notes__note_id__acknowledge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/driver/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Driver Status */
+        get: operations["driver_status_api_driver_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/driver/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Driver Events
+         * @description Long-lived SSE: events emitted by the bus, gated by autopilot_mode.
+         *
+         *     At most one active subscriber — second connect gets 409. On subscribe,
+         *     we send one ``reconcile_now`` event per project currently in mode=on
+         *     so the driver can sweep state before listening for changes.
+         */
+        get: operations["driver_events_api_driver_events_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -310,15 +785,107 @@ export interface components {
              */
             ok: boolean;
         };
+        /** DriverGlobalStatus */
+        DriverGlobalStatus: {
+            /** Connected */
+            connected: boolean;
+            /** Last Seen */
+            last_seen?: string | null;
+            /** Mode On Projects */
+            mode_on_projects?: string[];
+        };
+        /** DriverModeUpdate */
+        DriverModeUpdate: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "off" | "on";
+        };
+        /** DriverNoteCreate */
+        DriverNoteCreate: {
+            /** Project Id */
+            project_id: string;
+            /**
+             * Severity
+             * @default info
+             * @enum {string}
+             */
+            severity: "info" | "warn" | "escalate";
+            /** Kind */
+            kind: string;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /** Action Url */
+            action_url?: string | null;
+            /** Task Id */
+            task_id?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+        };
+        /** DriverNoteOut */
+        DriverNoteOut: {
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Task Id */
+            task_id?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warn" | "escalate";
+            /** Kind */
+            kind: string;
+            /** Message */
+            message: string;
+            /** Action Url */
+            action_url?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Acknowledged At */
+            acknowledged_at?: string | null;
+        };
+        /** DriverStateOut */
+        DriverStateOut: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "off" | "on";
+            /** Has Connected Driver */
+            has_connected_driver: boolean;
+            /** Open Notes */
+            open_notes: number;
+        };
         /** FollowupCreate */
         FollowupCreate: {
-            /** Prompt */
+            /**
+             * Prompt
+             * @default
+             */
             prompt: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** IntegrateIn */
+        IntegrateIn: {
+            /** Task Ids */
+            task_ids: string[];
+            /** Target Branch */
+            target_branch?: string | null;
         };
         /** JobCreate */
         JobCreate: {
@@ -343,6 +910,18 @@ export interface components {
             session_id?: string | null;
             /** Schedule Id */
             schedule_id?: string | null;
+            /** Task Id */
+            task_id?: string | null;
+            /**
+             * Kind
+             * @default ad_hoc
+             */
+            kind: string;
+            /**
+             * Cwd
+             * @default
+             */
+            cwd: string;
             /**
              * Created At
              * Format: date-time
@@ -380,6 +959,95 @@ export interface components {
              */
             status: "queued" | "running" | "done" | "failed" | "stopped";
         };
+        /**
+         * LastPlanOut
+         * @description Most recent planner run for a project — used by the UI's "view plan"
+         *     affordance on the project detail page.
+         */
+        LastPlanOut: {
+            /** Job Id */
+            job_id: string;
+            /** Ask */
+            ask: string;
+            /** Raw */
+            raw: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Task Ids */
+            task_ids?: string[];
+        };
+        /** MergeIn */
+        MergeIn: {
+            /** Task Ids */
+            task_ids: string[];
+            /** Title */
+            title: string;
+            /** Prompt */
+            prompt: string;
+        };
+        /** OutcomeOut */
+        OutcomeOut: {
+            /** Id */
+            id: string;
+            /** Task Id */
+            task_id: string;
+            /** Job Id */
+            job_id: string;
+            /** Commit Sha */
+            commit_sha: string | null;
+            /** Branch */
+            branch: string | null;
+            /** Summary */
+            summary: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Kind
+             * @default execute
+             */
+            kind: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * PathSuggestion
+         * @description A candidate project path the FE can offer in its dropdown.
+         *
+         *     `path` is the absolute filesystem path; `name` is the basename used as a
+         *     default project name; `is_git` is true iff the directory contains a
+         *     `.git` folder. `already_registered` is true iff a project already points
+         *     at this path, so the UI can dim or hide it.
+         */
+        PathSuggestion: {
+            /** Path */
+            path: string;
+            /** Name */
+            name: string;
+            /** Is Git */
+            is_git: boolean;
+            /** Already Registered */
+            already_registered: boolean;
+        };
+        /** PlanCreate */
+        PlanCreate: {
+            /** Ask */
+            ask: string;
+        };
+        /** PlanOut */
+        PlanOut: {
+            /** Task Ids */
+            task_ids: string[];
+            /** Raw */
+            raw?: string | null;
+            /** Error */
+            error?: string | null;
+        };
         /** ProjectCreate */
         ProjectCreate: {
             /** Name */
@@ -406,6 +1074,12 @@ export interface components {
              * @default false
              */
             is_default: boolean;
+            /** Instructions */
+            instructions?: string | null;
+            /** Skills */
+            skills?: string[];
+            /** Context Paths */
+            context_paths?: string[];
         };
         /** ProjectOut */
         ProjectOut: {
@@ -428,6 +1102,12 @@ export interface components {
              * @default false
              */
             is_default: boolean;
+            /** Instructions */
+            instructions?: string | null;
+            /** Skills */
+            skills?: string[];
+            /** Context Paths */
+            context_paths?: string[];
             /**
              * Created At
              * Format: date-time
@@ -450,6 +1130,12 @@ export interface components {
             idle_timeout_seconds?: number | null;
             /** Is Default */
             is_default?: boolean | null;
+            /** Instructions */
+            instructions?: string | null;
+            /** Skills */
+            skills?: string[] | null;
+            /** Context Paths */
+            context_paths?: string[] | null;
         };
         /** ScheduleCreate */
         ScheduleCreate: {
@@ -497,6 +1183,133 @@ export interface components {
             prompt?: string | null;
             /** Enabled */
             enabled?: boolean | null;
+        };
+        /** SplitIn */
+        SplitIn: {
+            /** New Tasks */
+            new_tasks: components["schemas"]["SplitTaskItem"][];
+            /**
+             * Inherit Deps In
+             * @default true
+             */
+            inherit_deps_in: boolean;
+            /**
+             * Link In Series
+             * @default true
+             */
+            link_in_series: boolean;
+        };
+        /** SplitTaskItem */
+        SplitTaskItem: {
+            /** Title */
+            title: string;
+            /** Prompt */
+            prompt: string;
+        };
+        /** SuggestedAction */
+        SuggestedAction: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "ack" | "retry" | "integrate" | "run";
+            /** Project Id */
+            project_id: string;
+            /** Task Id */
+            task_id?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /** Rest Verb */
+            rest_verb: string;
+            /** Rest Path */
+            rest_path: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** TaskCreate */
+        TaskCreate: {
+            /** Title */
+            title: string;
+            /** Prompt */
+            prompt: string;
+            /** Depends On */
+            depends_on?: string[];
+            /**
+             * Order Idx
+             * @default 0
+             */
+            order_idx: number;
+            /** Mode */
+            mode?: ("plan_then_execute" | "one_shot") | null;
+        };
+        /** TaskOut */
+        TaskOut: {
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Title */
+            title: string;
+            /** Prompt */
+            prompt: string;
+            /** Status */
+            status: string;
+            /** Phase */
+            phase?: string | null;
+            /** Source */
+            source: string;
+            /** Order Idx */
+            order_idx: number;
+            /**
+             * Mode
+             * @default plan_then_execute
+             */
+            mode: string;
+            /** Worktree Path */
+            worktree_path?: string | null;
+            /** Worktree Branch */
+            worktree_branch?: string | null;
+            /** Integration Status */
+            integration_status?: string | null;
+            /**
+             * Synthetic
+             * @default false
+             */
+            synthetic: boolean;
+            /** Depends On */
+            depends_on?: string[];
+            /** Latest Outcome Id */
+            latest_outcome_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** TaskUpdate */
+        TaskUpdate: {
+            /** Title */
+            title?: string | null;
+            /** Prompt */
+            prompt?: string | null;
+            /** Depends On */
+            depends_on?: string[] | null;
+            /** Order Idx */
+            order_idx?: number | null;
+            /** Mode */
+            mode?: ("plan_then_execute" | "one_shot") | null;
         };
         /** ToolResultEvent */
         ToolResultEvent: {
@@ -614,6 +1427,22 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WorktreeOut */
+        WorktreeOut: {
+            /** Path */
+            path: string;
+            /** Branch */
+            branch?: string | null;
+            /** Head */
+            head?: string | null;
+            /**
+             * Detached
+             * @default false
+             */
+            detached: boolean;
+            /** Task Id */
+            task_id?: string | null;
         };
     };
     responses: never;
@@ -749,6 +1578,39 @@ export interface operations {
             };
         };
     };
+    path_suggestions_api_projects_path_suggestions_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PathSuggestion"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_project_api_projects__project_id__get: {
         parameters: {
             query?: {
@@ -843,6 +1705,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_worktrees_api_projects__project_id__worktrees_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorktreeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_integration_api_projects__project_id__integrate_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntegrateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
                 };
             };
             /** @description Validation Error */
@@ -1314,6 +2250,583 @@ export interface operations {
             };
         };
     };
+    list_tasks_api_projects__project_id__tasks_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_task_api_projects__project_id__tasks_post: {
+        parameters: {
+            query?: {
+                run?: boolean;
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_task_api_tasks__task_id__get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_task_api_tasks__task_id__delete: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_task_api_tasks__task_id__patch: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_task_api_tasks__task_id__run_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ack_task_api_tasks__task_id__ack_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    split_task_api_tasks__task_id__split_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SplitIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_tasks_api_tasks_merge_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_task_api_tasks__task_id__retry_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restart_task_api_tasks__task_id__restart_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_task_api_tasks__task_id__cancel_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_task_outcomes_api_tasks__task_id__outcomes_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_outcomes_api_projects__project_id__outcomes_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    last_plan_api_projects__project_id__plan_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LastPlanOut"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_project_api_projects__project_id__plan_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stream_job_api_jobs__job_id__stream_get: {
         parameters: {
             query?: {
@@ -1366,6 +2879,291 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ToolUseEvent"] | components["schemas"]["ToolResultEvent"] | components["schemas"]["AssistantTextEvent"] | components["schemas"]["TurnDoneEvent"] | components["schemas"]["JobStatusEvent"];
+                };
+            };
+        };
+    };
+    get_driver_state_api_projects__project_id__driver_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriverStateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_driver_mode_api_projects__project_id__driver_patch: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DriverModeUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriverStateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_suggestions_api_projects__project_id__driver_suggestions_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestedAction"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_notes_api_projects__project_id__driver_notes_get: {
+        parameters: {
+            query?: {
+                severity?: string | null;
+                acknowledged?: boolean | null;
+                limit?: number;
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriverNoteOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_note_api_driver_notes_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DriverNoteCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriverNoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledge_note_api_driver_notes__note_id__acknowledge_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriverNoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    driver_status_api_driver_status_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriverGlobalStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    driver_events_api_driver_events_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

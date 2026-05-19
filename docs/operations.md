@@ -352,6 +352,158 @@ land in the OpenAPI components.
 
 ---
 
+## 4a. v2: worktrees, planning gates, integration
+
+v2 tasks run in two phases by default (`mode=plan_then_execute`). The plan
+turn runs in `project.path`; the execute turn runs in a per-task worktree
+under `~/.agent-harness/worktrees/<task_id>` on branch `task/<task_id>`.
+
+### List outstanding worktrees
+
+```bash
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/projects/$PID/worktrees" | jq .
+# [{"path":"/Users/me/.agent-harness/worktrees/abc","branch":"refs/heads/task/abc",
+#   "head":"…","detached":false,"task_id":"abc"}, …]
+```
+
+`task_id=null` rows are **orphans** — worktrees the harness has no record
+of (server killed mid-execute, or pre-existing manual worktrees).
+
+### Clean up an orphan manually
+
+The harness does **not** auto-delete unknown worktrees. From the project's
+working dir:
+
+```bash
+PROJECT_PATH=$(curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/api/projects/$PID" | jq -r .path)
+
+# Remove the worktree directory + git's internal record.
+git -C "$PROJECT_PATH" worktree remove --force /path/to/worktree
+
+# Delete the branch left behind, if any.
+git -C "$PROJECT_PATH" branch -D task/<task_id>
+```
+
+`git worktree prune` is also safe if a worktree directory has been deleted
+out from under git but the bookkeeping entry remains.
+
+### Stuck integration job
+
+An integration job whose merge conflicts the agent can't resolve stays at
+`phase=integrating`. Followup turns on the same job can fix it:
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "$BASE/api/jobs/$JID/followup" \
+  -d '{"prompt":"the conflict in src/auth.py was a comment-only divergence; keep main"}'
+```
+
+If you give up, `POST /api/jobs/$JID/stop` then `POST /api/tasks/$INT_TASK/cancel`.
+The input tasks stay at `integration_status=conflict`; you can recreate
+the integration task with a fresh `POST /api/projects/$PID/integrate`.
+
+---
+
+## 4b. Driver: autopilot + copilot
+
+The driver is a separate process (`agent-harness-driver`) that listens to
+the harness's event stream and dispatches actions (ack plans, run tasks,
+integrate waves, retry failures) when a project's `autopilot_mode` is on.
+When mode is off, the driver is uninvolved and the harness UI shows
+copilot suggestions inline. See [docs/driver-design.md](./driver-design.md)
+for the full design.
+
+### Toggle autopilot
+
+```bash
+PID="$1"
+
+# Turn on (auto-spawns the driver if not already connected; 409 if it can't).
+curl -sS -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "$BASE/api/projects/$PID/driver" -d '{"mode":"on"}'
+
+# Turn off
+curl -sS -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "$BASE/api/projects/$PID/driver" -d '{"mode":"off"}'
+
+# Status (per-project mode + driver connectivity + open warn/escalate notes)
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/api/projects/$PID/driver" | jq .
+
+# Global driver status (which projects are on; is a driver connected)
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/api/driver/status" | jq .
+```
+
+### Run the driver manually
+
+If you prefer to manage the driver yourself (or run it on a different
+machine / under launchd), just start the binary — it'll connect to the
+harness and idle until any project flips to `mode=on`.
+
+```bash
+# Same config.toml + AH_HOME the harness uses.
+agent-harness-driver
+```
+
+Env overrides: `AGENT_HARNESS_URL` (default `http://127.0.0.1:8765`),
+`AGENT_HARNESS_TOKEN` (defaults to the token in config.toml),
+`AGENT_HARNESS_DRIVER_LOG` (default `INFO`).
+
+Only one driver can be connected at a time — the second `agent-harness-driver`
+to attach gets 409 and backs off in a reconnect loop.
+
+### Driver logs
+
+When the harness auto-spawns the driver, stdout/stderr land at
+`~/.agent-harness/logs/driver.log`. When you start the driver manually,
+logs go to your terminal (or wherever you redirect them).
+
+### Driver notes
+
+Every action the driver takes (or every escalation it surfaces) is
+recorded in the `driver_notes` table.
+
+```bash
+# All notes for a project (newest first; limit 100)
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/projects/$PID/driver/notes" | jq .
+
+# Only un-acked escalations
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/projects/$PID/driver/notes?severity=escalate&acknowledged=false" | jq .
+
+# Dismiss
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/driver/notes/$NID/acknowledge"
+```
+
+Notes older than 7 days that are already acknowledged are pruned lazily
+on each `POST /api/driver/notes`.
+
+### Stopping a stuck autopilot
+
+If you're not sure what the driver is doing, flip mode off — the
+harness stops emitting signals for that project at the source.
+In-flight HTTP calls the driver already started complete normally, but
+no new actions are dispatched.
+
+```bash
+curl -sS -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "$BASE/api/projects/$PID/driver" -d '{"mode":"off"}'
+```
+
+If you want to fully kill the driver process (e.g., the harness-spawned
+one shouldn't be sticking around because something is wrong), find it:
+
+```bash
+ps aux | grep agent-harness-driver
+kill <pid>
+```
+
+The harness will not respawn it until you flip `mode=on` again.
+
+---
+
 ## 5. Service ops
 
 ```bash

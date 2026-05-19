@@ -10,7 +10,7 @@ export function ToolUseEventCard({ event }: { event: TU }) {
   const layout = layoutFor(event.tool, input);
 
   return (
-    <Box borderWidth="1px" borderRadius="md" p={3} bg="bg.subtle">
+    <Box borderWidth="1px" borderRadius="md" p={3} bg="bg">
       <Stack gap={2}>
         <HStack gap={2} align="center" wrap="wrap">
           <Badge colorPalette="purple" variant="subtle">

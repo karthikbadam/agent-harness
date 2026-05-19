@@ -27,6 +27,7 @@ def _to_out(o: models.Outcome) -> OutcomeOut:
         branch=o.branch,
         summary=o.summary,
         status=o.status,
+        kind=o.kind,
         created_at=o.created_at,
     )
 

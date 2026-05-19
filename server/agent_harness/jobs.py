@@ -36,11 +36,79 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _gather_allowlist(project_id: str) -> list[str]:
+_PLANNING_PREFIX = (
+    "You are in the PLANNING phase. Do not modify files. Read what you need, "
+    "then produce a numbered plan of the changes you will make as your final "
+    "assistant message. A separate execute turn will run after a human "
+    "acknowledges this plan."
+)
+
+_EXECUTE_PREFIX_TEMPLATE = (
+    "You are in the EXECUTE phase. The previously approved plan was:\n\n"
+    "{plan}\n\n"
+    "Implement it now in this working directory. Commit your changes when "
+    "complete."
+)
+
+
+def _last_plan_summary(s, task_id: str | None) -> str | None:
+    if not task_id:
+        return None
+    row = s.execute(
+        select(models.Outcome.summary)
+        .where(models.Outcome.task_id == task_id, models.Outcome.kind == "plan")
+        .order_by(models.Outcome.created_at.desc())
+    ).first()
+    return row[0] if row is not None else None
+
+
+def _augment_prompt_for_kind(s, job: "models.Job", prompt: str) -> str:
+    """Prepend a kind-specific instruction to the user's prompt.
+
+    Plan Jobs get a read-only contract. Execute Jobs get the prior plan
+    summary so the agent has continuity in the fresh worktree session.
+    Integrate Jobs and ad-hoc Jobs pass through unchanged (the integrate
+    prompt is already built by ``integration.build_synthetic_task_prompt``).
+    """
+    if job.kind == "plan":
+        return f"{_PLANNING_PREFIX}\n\n{prompt}"
+    if job.kind == "execute":
+        plan = _last_plan_summary(s, job.task_id)
+        return _EXECUTE_PREFIX_TEMPLATE.format(plan=plan or "(plan not recorded)") + "\n\n" + prompt
+    return prompt
+
+
+# Rules auto-granted by job phase. Without these the agent loops on
+# permission-denied for git operations the phase prompt explicitly asks for
+# (commit during execute; checkout/switch/merge during integrate).
+_EXECUTE_PHASE_RULES = ("Bash(git add:*)", "Bash(git commit:*)")
+_INTEGRATING_PHASE_RULES = (
+    "Bash(git checkout:*)",
+    "Bash(git switch:*)",
+    "Bash(git merge:*)",
+    "Bash(git branch:*)",
+    "Bash(git fetch:*)",
+    "Bash(git add:*)",
+    "Bash(git commit:*)",
+)
+
+
+def _kind_rules(kind: str | None) -> tuple[str, ...]:
+    if kind == "execute":
+        return _EXECUTE_PHASE_RULES
+    if kind == "integrate":
+        return _INTEGRATING_PHASE_RULES
+    return ()
+
+
+def _gather_allowlist(project_id: str, kind: str | None = None) -> list[str]:
     """Return the merged allowlist for a job: global + project rules + Skill().
 
     Project `skills` are auto-allowed (`Skill(<name>)`) without the user
-    having to add them as explicit rules.
+    having to add them as explicit rules. When ``kind`` matches a Job kind
+    that needs phase-specific git operations (``'execute'``, ``'integrate'``),
+    the rules needed to satisfy that kind's prompt instructions are
+    auto-included.
     """
     with session_scope() as s:
         rule_rows = s.execute(
@@ -53,10 +121,11 @@ def _gather_allowlist(project_id: str) -> list[str]:
         skills = list(proj.skills or []) if proj is not None else []
     rules = [r[0] for r in rule_rows]
     skill_rules = [f"Skill({name})" for name in skills if isinstance(name, str) and name]
-    # Dedupe but preserve order: rules first, then skill rules.
+    kind_rules = list(_kind_rules(kind))
+    # Dedupe but preserve order: rules first, then skill rules, then kind rules.
     seen: set[str] = set()
     out: list[str] = []
-    for r in rules + skill_rules:
+    for r in rules + skill_rules + kind_rules:
         if r in seen:
             continue
         seen.add(r)
@@ -91,18 +160,43 @@ class JobManager:
         title: str = "",
         schedule_id: str | None = None,
         task_id: str | None = None,
+        kind: str | None = None,
+        cwd: str | None = None,
     ) -> str:
-        """Create Job + first Turn rows. Return job_id. Does not start running."""
+        """Create Job + first Turn rows. Return job_id. Does not start running.
+
+        ``kind`` defaults based on ``task_id`` + the task's mode: standalone
+        jobs are ``ad_hoc``; plan_then_execute tasks get a ``plan`` Job first;
+        synthetic integration tasks get an ``integrate`` Job. Callers
+        spawning a follow-on phase (e.g. ``execute`` after ack) pass ``kind``
+        explicitly. ``cwd`` defaults to the project path; the execute phase
+        passes the worktree path.
+        """
         with session_scope() as s:
             proj = s.get(models.Project, project_id)
             if proj is None:
                 raise ValueError(f"unknown project {project_id}")
+            resolved_kind = kind
+            if resolved_kind is None:
+                if task_id is None:
+                    resolved_kind = "ad_hoc"
+                else:
+                    task = s.get(models.Task, task_id)
+                    if task is None or task.synthetic:
+                        resolved_kind = "integrate"
+                    elif task.mode == "plan_then_execute":
+                        resolved_kind = "plan"
+                    else:
+                        resolved_kind = "execute"
+            resolved_cwd = cwd if cwd is not None else proj.path
             job = models.Job(
                 project_id=project_id,
                 title=title or prompt[:80],
                 status="queued",
                 schedule_id=schedule_id,
                 task_id=task_id,
+                kind=resolved_kind,
+                cwd=resolved_cwd,
             )
             s.add(job)
             s.flush()
@@ -188,12 +282,13 @@ class JobManager:
             ).scalar_one()
             project = s.get(models.Project, job.project_id)
             assert project is not None
-            cwd = project.path
-            prompt = turn.prompt
+            cwd = job.cwd or project.path
+            prompt = _augment_prompt_for_kind(s, job, turn.prompt)
             permission_mode = project.permission_mode
             dangerously_skip = project.dangerously_skip
             resume_session_id = job.session_id  # set after first turn
             project_id = project.id
+            kind = job.kind
             project_extra = list(project.extra_claude_args or [])
             idle_timeout = (
                 project.idle_timeout_seconds
@@ -201,7 +296,7 @@ class JobManager:
                 else self.default_idle_timeout_seconds
             )
 
-        allowed = _gather_allowlist(project_id)
+        allowed = _gather_allowlist(project_id, kind=kind)
         broadcaster.start_turn(turn_idx)
         await broadcaster.publish(make_status_event(job_id, turn_idx, "running"))
 
@@ -334,11 +429,23 @@ class JobManager:
         _ = cost
 
         # Record an outcome + propagate task status if this job belongs to a task.
+        autorun_ids: list[str] = []
         try:
             from .services import task_runner
 
-            task_runner.on_job_finalized(
+            autorun_ids = task_runner.on_job_finalized(
                 job_id, status, log_dir=broadcaster.log_dir
             )
         except Exception:  # noqa: BLE001
             log.exception("task_runner.on_job_finalized failed for %s", job_id)
+
+        # Auto-kick planner-sourced tasks that just became ready. Manual-source
+        # tasks are left for the user to ``POST /run`` (or kicked via
+        # ``?run=true`` at creation).
+        for tid in autorun_ids:
+            try:
+                from .services import task_runner as _tr
+
+                await _tr.kickoff_first_phase(tid, self)
+            except Exception:  # noqa: BLE001
+                log.exception("autorun kickoff failed for task %s", tid)

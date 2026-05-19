@@ -132,6 +132,8 @@ class JobOut(BaseModel):
     session_id: str | None = None
     schedule_id: str | None = None
     task_id: str | None = None
+    kind: str = "ad_hoc"  # ad_hoc|plan|execute|integrate
+    cwd: str = ""
     created_at: datetime
     ended_at: datetime | None = None
     turns: list[TurnOut] = Field(default_factory=list)
@@ -144,7 +146,8 @@ class JobCreate(BaseModel):
 
 
 class FollowupCreate(BaseModel):
-    prompt: str
+    # Optional so an ack on an awaiting_ack job can omit it.
+    prompt: str = ""
 
 
 class ScheduleCreate(BaseModel):
@@ -189,6 +192,10 @@ class TaskCreate(BaseModel):
     prompt: str
     depends_on: list[str] = Field(default_factory=list)
     order_idx: int = 0
+    # Lifecycle mode. Omit (or None) to keep the model default
+    # (``plan_then_execute``). Set ``one_shot`` for ad-hoc tasks you typed
+    # yourself and don't want the planner gate for.
+    mode: Literal["plan_then_execute", "one_shot"] | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -196,6 +203,7 @@ class TaskUpdate(BaseModel):
     prompt: str | None = None
     depends_on: list[str] | None = None
     order_idx: int | None = None
+    mode: Literal["plan_then_execute", "one_shot"] | None = None
 
 
 class TaskOut(BaseModel):
@@ -204,8 +212,14 @@ class TaskOut(BaseModel):
     title: str
     prompt: str
     status: str
+    phase: str | None = None  # planning|awaiting_ack|executing|integrating|done|failed
     source: str
     order_idx: int
+    mode: str = "plan_then_execute"
+    worktree_path: str | None = None
+    worktree_branch: str | None = None
+    integration_status: str | None = None
+    synthetic: bool = False
     depends_on: list[str] = Field(default_factory=list)
     latest_outcome_id: str | None = None
     created_at: datetime
@@ -220,7 +234,88 @@ class OutcomeOut(BaseModel):
     branch: str | None
     summary: str | None
     status: str
+    kind: str = "execute"
     created_at: datetime
+
+
+class SplitTaskItem(BaseModel):
+    title: str
+    prompt: str
+
+
+class SplitIn(BaseModel):
+    new_tasks: list[SplitTaskItem]
+    inherit_deps_in: bool = True
+    link_in_series: bool = True
+
+
+class MergeIn(BaseModel):
+    task_ids: list[str]
+    title: str
+    prompt: str
+
+
+class IntegrateIn(BaseModel):
+    task_ids: list[str]
+    target_branch: str | None = None
+
+
+class WorktreeOut(BaseModel):
+    path: str
+    branch: str | None = None
+    head: str | None = None
+    detached: bool = False
+    task_id: str | None = None  # filled in when the worktree path matches a task
+
+
+class DriverNoteOut(BaseModel):
+    id: str
+    project_id: str
+    task_id: str | None = None
+    job_id: str | None = None
+    severity: Literal["info", "warn", "escalate"]
+    kind: str
+    message: str
+    action_url: str | None = None
+    created_at: datetime
+    acknowledged_at: datetime | None = None
+
+
+class DriverNoteCreate(BaseModel):
+    project_id: str
+    severity: Literal["info", "warn", "escalate"] = "info"
+    kind: str
+    message: str = ""
+    action_url: str | None = None
+    task_id: str | None = None
+    job_id: str | None = None
+
+
+class DriverModeUpdate(BaseModel):
+    mode: Literal["off", "on"]
+
+
+class DriverStateOut(BaseModel):
+    mode: Literal["off", "on"]
+    has_connected_driver: bool
+    open_notes: int  # unacknowledged warn+escalate
+
+
+class DriverGlobalStatus(BaseModel):
+    connected: bool
+    last_seen: datetime | None = None
+    mode_on_projects: list[str] = Field(default_factory=list)
+
+
+class SuggestedAction(BaseModel):
+    kind: Literal["ack", "retry", "integrate", "run"]
+    project_id: str
+    task_id: str | None = None
+    job_id: str | None = None
+    reason: str = ""
+    rest_verb: str  # GET|POST|PATCH
+    rest_path: str
+    payload: dict[str, object] | None = None
 
 
 class PlanCreate(BaseModel):
@@ -231,6 +326,33 @@ class PlanOut(BaseModel):
     task_ids: list[str]
     raw: str | None = None  # raw model output when parsing failed
     error: str | None = None
+
+
+class LastPlanOut(BaseModel):
+    """Most recent planner run for a project — used by the UI's "view plan"
+    affordance on the project detail page.
+    """
+
+    job_id: str
+    ask: str
+    raw: str
+    created_at: datetime
+    task_ids: list[str] = Field(default_factory=list)
+
+
+class PathSuggestion(BaseModel):
+    """A candidate project path the FE can offer in its dropdown.
+
+    `path` is the absolute filesystem path; `name` is the basename used as a
+    default project name; `is_git` is true iff the directory contains a
+    `.git` folder. `already_registered` is true iff a project already points
+    at this path, so the UI can dim or hide it.
+    """
+
+    path: str
+    name: str
+    is_git: bool
+    already_registered: bool
 
 
 class AuthInfo(BaseModel):

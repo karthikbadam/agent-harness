@@ -51,6 +51,7 @@ class Project(Base):
     instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     skills: Mapped[list[str]] = mapped_column(JSON, default=list)
     context_paths: Mapped[list[str]] = mapped_column(JSON, default=list)
+    autopilot_mode: Mapped[str] = mapped_column(String(8), default="off")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -60,6 +61,16 @@ class Project(Base):
 
 
 class Job(Base):
+    """One Claude conversation: one cwd, one session, N turns.
+
+    A Job is either standalone (``task_id`` NULL, ``kind='ad_hoc'``) — the v1
+    primitive for small changes — or owned by a Task. A Task-owned Job
+    represents one phase of that Task's lifecycle (planning, executing,
+    integrating); the Task spawns a new Job at each phase transition rather
+    than pivoting an existing Job's cwd mid-stream. Follow-up turns within a
+    phase stay on the same Job (same conversation, same session_id).
+    """
+
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
@@ -69,6 +80,10 @@ class Job(Base):
     session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     schedule_id: Mapped[Optional[str]] = mapped_column(ForeignKey("schedules.id"), nullable=True)
     task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(
+        String(12), default="ad_hoc"
+    )  # ad_hoc|plan|execute|integrate
+    cwd: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
@@ -132,6 +147,16 @@ class Setting(Base):
 
 
 class Task(Base):
+    """A multi-phase unit of intent that owns 0..N Jobs.
+
+    ``status`` is the overall task lifecycle (pending → ready → running → done
+    / failed / canceled). ``phase`` is the sub-state within ``running`` for
+    plan-then-execute tasks: planning → awaiting_ack → executing → integrating
+    → done. Each phase corresponds to a separate Job (its own conversation,
+    cwd, session). The Task spawns the next phase's Job when the current
+    phase's Job finishes; the Task never re-uses a Job across phases.
+    """
+
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
@@ -141,8 +166,22 @@ class Task(Base):
     status: Mapped[str] = mapped_column(
         String(16), default="pending"
     )  # pending|ready|running|done|failed|canceled
+    phase: Mapped[Optional[str]] = mapped_column(
+        String(16), nullable=True
+    )  # planning|awaiting_ack|executing|integrating|done; null until first run
     source: Mapped[str] = mapped_column(String(16), default="manual")  # manual|planner
     order_idx: Mapped[int] = mapped_column(Integer, default=0)
+    mode: Mapped[str] = mapped_column(
+        String(24), default="plan_then_execute"
+    )  # plan_then_execute|one_shot
+    worktree_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    worktree_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    integration_status: Mapped[Optional[str]] = mapped_column(
+        String(16), nullable=True
+    )  # pending|integrated|conflict; null for one_shot and synthetic tasks
+    synthetic: Mapped[bool] = mapped_column(default=False)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    last_failed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
@@ -158,6 +197,23 @@ class TaskDependency(Base):
     )
 
 
+class DriverNote(Base):
+    """Audit + escalation surface for the driver (autopilot + copilot)."""
+
+    __tablename__ = "driver_notes"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    job_id: Mapped[Optional[str]] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    severity: Mapped[str] = mapped_column(String(8), default="info")  # info|warn|escalate
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    message: Mapped[str] = mapped_column(Text, default="")
+    action_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+
 class Outcome(Base):
     __tablename__ = "outcomes"
 
@@ -168,4 +224,5 @@ class Outcome(Base):
     branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="success")  # success|failed
+    kind: Mapped[str] = mapped_column(String(16), default="execute")  # plan|execute|integrate
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

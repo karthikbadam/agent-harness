@@ -267,6 +267,138 @@ curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/projects/$PID/outcom
 
 Each row is a git checkpoint produced when a task-bound job finished.
 
+### Plan-then-execute, ack a plan, integrate a wave (v2)
+
+Tasks now default to `mode=plan_then_execute`. Running one spawns a planning
+turn first; the job parks at `phase=awaiting_ack` with an `Outcome(kind=plan)`
+holding the plan text. Sending a followup on the same job acks the plan,
+creates a per-task `git worktree` under `~/.agent-harness/worktrees/<task_id>`
+on branch `task/<task_id>`, and kicks the execute turn there.
+
+```bash
+# Run a task — first turn is the plan.
+JID=$(curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/tasks/$TID/run" | jq -r .id)
+
+# Wait for the plan.
+while [[ "$(curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/jobs/$JID" | jq -r .phase)" != "awaiting_ack" ]]; do sleep 3; done
+
+# Inspect the plan.
+curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/tasks/$TID/outcomes" \
+  | jq '[.[] | select(.kind=="plan") | .summary] | .[0]'
+
+# Ack with optional guidance — empty body == bare ack.
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/jobs/$JID/followup" -d '{"prompt":""}'
+```
+
+When a wave of executes is done (`integration_status=pending` on each task),
+hand them to an integration task that merges back into the target branch:
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/projects/$PID/integrate" \
+  -d '{"task_ids":["'"$T1"'","'"$T2"'"],"target_branch":"main"}' | jq .
+
+# Returned synthetic task is in status=ready — run it.
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/tasks/$INT_ID/run"
+```
+
+On success the input tasks' worktrees + branches are cleaned up and their
+`integration_status` flips to `integrated`. On conflict the integration job
+stays open at `phase=integrating`; a followup turn can resolve.
+
+### Reshape the DAG (split/merge)
+
+```bash
+# Split a pending/ready task into two chained subtasks.
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/tasks/$TID/split" \
+  -d '{"new_tasks":[{"title":"a","prompt":"x"},{"title":"b","prompt":"y"}],
+       "inherit_deps_in":true,"link_in_series":true}'
+
+# Collapse two pending tasks into one.
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/tasks/merge" \
+  -d '{"task_ids":["'"$T1"'","'"$T2"'"],"title":"combined","prompt":"do both"}'
+```
+
+### List outstanding worktrees
+
+```bash
+curl -sS -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/projects/$PID/worktrees" | jq .
+```
+
+Entries with `task_id=null` are orphans (server killed mid-execute or a
+manual mess). Use `git worktree remove --force <path>` and
+`git branch -D <branch>` from inside `project.path` to clean them up.
+
+### Drive the loop from a separate Claude session via MCP
+
+The orchestrator surface is also exposed as a typed MCP tool set. It is
+**not** auto-attached to harness jobs — connect a *separate* Claude Code
+session to it from outside the harness.
+
+Streamable HTTP transport (the harness mounts it at `/mcp`):
+
+```bash
+claude mcp add agent-harness \
+  --transport http \
+  "$AH_BASE/mcp" \
+  --header "Authorization: Bearer $AH_TOKEN"
+```
+
+Or stdio (proxies to the same running harness over HTTP):
+
+```bash
+claude mcp add agent-harness agent-harness-mcp
+```
+
+The new session sees typed tools: `list_projects`, `plan_ask`, `list_tasks`,
+`split_task`, `merge_tasks`, `run_task`, `ack_plan`, `integrate`,
+`list_outcomes`, `list_worktrees`, `tail_job`, etc. — no freeform
+"orchestrate this" prompts are involved.
+
+### Drive a 12-hour project unattended (autopilot)
+
+`agent-harness-driver` is a separate process that reacts to harness events
+and dispatches actions (ack, run, integrate, retry) when a project is in
+`autopilot_mode=on`. When off, the same decision logic powers `GET
+/driver/suggestions` for the UI.
+
+```bash
+PID="$1"
+
+# (optional) start the driver yourself in a terminal; otherwise the harness
+# auto-spawns it when you flip on (and 409s if it can't).
+agent-harness-driver &
+
+# enable autopilot
+curl -sS -X PATCH -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/projects/$PID/driver" -d '{"mode":"on"}'
+
+# check status
+curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/driver/status" | jq .
+
+# what would the driver do next? (same data even when mode=off)
+curl -sS -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/projects/$PID/driver/suggestions" | jq .
+
+# audit / escalations
+curl -sS -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/projects/$PID/driver/notes?severity=escalate&acknowledged=false" | jq .
+
+# take back the wheel
+curl -sS -X PATCH -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/projects/$PID/driver" -d '{"mode":"off"}'
+```
+
+The driver retries each failed task up to 2 times with exponential backoff
+(60s, 180s); after that it logs an `escalate` note and leaves the task
+failed for human review. Integration conflicts are NOT auto-resolved —
+they're logged for inspection.
+
 ### Allow a tool rule and retry a blocked job
 
 ```bash
