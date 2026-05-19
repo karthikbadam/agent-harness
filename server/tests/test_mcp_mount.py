@@ -10,14 +10,19 @@ from agent_harness.main import create_app
 
 
 @pytest.fixture
-async def app_client(initdb: Path):
+async def app_client(initdb: Path, monkeypatch: pytest.MonkeyPatch):
     config.write_toml({"auth_token": "test-token"})
     config.reset_settings_cache()
+    # Enable MCP mount for this test file (conftest disables it globally).
+    monkeypatch.delenv("AH_DISABLE_MCP", raising=False)
     app = create_app()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-        async with app.router.lifespan_context(app):
-            yield c
+        # We don't run the FastAPI lifespan here — the bearer-guard tests
+        # only need to exercise the auth middleware, not the inner MCP
+        # session manager. Skipping the lifespan avoids the anyio
+        # cross-task cancel-scope issue during teardown.
+        yield c
 
 
 async def test_mcp_mount_rejects_missing_token(app_client) -> None:

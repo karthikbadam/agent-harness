@@ -11,7 +11,7 @@ Wires:
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -80,17 +80,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     schedules = ScheduleService(manager)
     schedules.start()
     app.state.schedules = schedules
-    try:
-        yield
-    finally:
-        schedules.shutdown()
-        # Kill any drivers we spawned so they don't outlive us.
-        for proc in list(app.state.owned_drivers.values()):
-            try:
-                proc.terminate()
-            except Exception:  # noqa: BLE001
-                pass
-        app.state.owned_drivers.clear()
+    # The mounted MCP streamable-http app has its own session manager that
+    # only initializes inside its lifespan. Mounting the app alone doesn't
+    # run that lifespan, so MCP requests would crash with "Task group is not
+    # initialized". Chain its lifespan into ours via an AsyncExitStack so
+    # entry/exit happen in the same task (anyio's cancel scopes require it).
+    async with AsyncExitStack() as stack:
+        mcp_app = getattr(app.state, "mcp_http_app", None)
+        if mcp_app is not None:
+            await stack.enter_async_context(
+                mcp_app.router.lifespan_context(mcp_app)
+            )
+        try:
+            yield
+        finally:
+            schedules.shutdown()
+            # Kill any drivers we spawned so they don't outlive us.
+            for proc in list(app.state.owned_drivers.values()):
+                try:
+                    proc.terminate()
+                except Exception:  # noqa: BLE001
+                    pass
+            app.state.owned_drivers.clear()
 
 
 def create_app() -> FastAPI:
@@ -123,9 +134,21 @@ def create_app() -> FastAPI:
 
     # Mount the orchestrator MCP at /mcp with the same bearer-token guard as
     # /api/*. External Claude sessions (or curl) connect here; tools are 1:1
-    # with REST routes so the API stays the source of truth.
-    mcp = orchestrator_mcp.build_mcp()
-    app.mount("/mcp", _BearerGuard(mcp.streamable_http_app()))
+    # with REST routes so the API stays the source of truth. We stash the
+    # MCP app on app.state so the parent lifespan can chain its lifespan in
+    # — without that, the streamable-http session manager isn't initialized
+    # and every request 500s with "Task group is not initialized".
+    #
+    # Skipped under AH_DISABLE_MCP=1 (set by the test suite) because MCP's
+    # anyio task groups don't survive httpx.ASGITransport's task topology
+    # during fixture teardown.
+    import os as _os
+
+    if not _os.environ.get("AH_DISABLE_MCP"):
+        mcp = orchestrator_mcp.build_mcp()
+        mcp_http_app = mcp.streamable_http_app()
+        app.state.mcp_http_app = mcp_http_app
+        app.mount("/mcp", _BearerGuard(mcp_http_app))
 
     dist = _web_dist_dir()
     if dist is not None:

@@ -70,11 +70,11 @@ async def test_react_dispatches_run_for_ready_task(live_client: httpx.AsyncClien
     assert any(n["kind"] == "ran" for n in r.json())
 
 
-async def test_react_dispatches_ack_for_awaiting_ack_job(
+async def test_react_dispatches_ack_for_awaiting_ack_task(
     live_client: httpx.AsyncClient,
 ) -> None:
-    # Set up a job at awaiting_ack with a real (but small) git worktree path
-    # so on_ack can succeed.
+    # Set up a Task at phase=awaiting_ack with a real (small) git repo so
+    # advance_to_executing can create the worktree.
     import subprocess
 
     from agent_harness.config import ah_home
@@ -104,23 +104,18 @@ async def test_react_dispatches_ack_for_awaiting_ack_job(
         s.flush()
         t = models.Task(
             id="tb1", project_id="pb", title="t", prompt="do",
-            status="running", mode="plan_then_execute",
+            status="running", phase="awaiting_ack", mode="plan_then_execute",
         )
         s.add(t)
-        s.flush()
-        j = models.Job(
-            id="jb1", project_id="pb", task_id="tb1", phase="awaiting_ack",
-        )
-        s.add(j)
 
     runtime = driver_runtime.DriverRuntime(base_url="http://test", token="test-token")
-    with patch.object(JobManager, "followup", _noop_start):
+    with patch.object(JobManager, "start", _noop_start):
         await runtime._react(live_client, "pb")
 
     with session_scope() as s:
-        j = s.get(models.Job, "jb1")
-        assert j.phase == "executing"
-        assert j.cwd_override is not None
+        t = s.get(models.Task, "tb1")
+        assert t.phase == "executing"
+        assert t.worktree_path is not None
 
 
 async def test_dispatch_409_is_silent(live_client: httpx.AsyncClient) -> None:

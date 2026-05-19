@@ -66,7 +66,10 @@ POST /tasks/{synth}/run
 ```
 
 Per-task opt-out: `mode='one_shot'` skips planning — a single turn runs in
-a worktree (unless `synthetic=true`, in which case it runs in `project.path`).
+`project.path` directly, with no worktree and no ack gate. Don't fan out
+parallel one-shots against the same project; they'll fight over the shared
+git index. Synthetic (integration) tasks are also `mode='one_shot'` and run
+in `project.path` to perform the merge.
 
 **Where the driver fits.** Each `⬅` step above is either the human clicking
 a button (copilot) or `agent-harness-driver` reacting to an event

@@ -45,6 +45,54 @@ def test_allowlist_rule_global_and_project(initdb: Path) -> None:
         assert {r.rule for r in rules} == {"Bash(npm test:*)", "Edit(**/*.py)"}
 
 
+def test_gather_allowlist_adds_git_rules_for_execute_kind(initdb: Path) -> None:
+    from agent_harness.jobs import _gather_allowlist
+
+    with session_scope() as s:
+        proj = models.Project(name="r", path="/tmp/r", skills=["init"])
+        s.add(proj)
+        s.flush()
+        s.add(models.AllowlistRule(project_id=proj.id, rule="Bash(npm test:*)"))
+        s.flush()
+        pid = proj.id
+
+    base = _gather_allowlist(pid)
+    assert "Bash(npm test:*)" in base
+    assert "Skill(init)" in base
+    assert "Bash(git add:*)" not in base
+    assert "Bash(git commit:*)" not in base
+
+    executing = _gather_allowlist(pid, kind="execute")
+    assert "Bash(git add:*)" in executing
+    assert "Bash(git commit:*)" in executing
+    # Original rules still present and not duplicated.
+    assert executing.count("Bash(npm test:*)") == 1
+
+
+def test_gather_allowlist_adds_merge_rules_for_integrate_kind(initdb: Path) -> None:
+    """The integrate Job's prompt instructs the agent to checkout/merge/commit
+    on the target branch. Without these rules the agent stalls on permission
+    denials and silently fails to merge."""
+    from agent_harness.jobs import _gather_allowlist
+
+    with session_scope() as s:
+        proj = models.Project(name="r", path="/tmp/r")
+        s.add(proj)
+        s.flush()
+        pid = proj.id
+
+    integrating = _gather_allowlist(pid, kind="integrate")
+    for needed in (
+        "Bash(git checkout:*)",
+        "Bash(git switch:*)",
+        "Bash(git merge:*)",
+        "Bash(git branch:*)",
+        "Bash(git add:*)",
+        "Bash(git commit:*)",
+    ):
+        assert needed in integrating, f"missing {needed} for integrate kind"
+
+
 def test_task_and_outcome_models(initdb: Path) -> None:
     with session_scope() as s:
         proj = models.Project(name="book", path="/tmp/book")

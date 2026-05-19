@@ -132,7 +132,8 @@ class JobOut(BaseModel):
     session_id: str | None = None
     schedule_id: str | None = None
     task_id: str | None = None
-    phase: str | None = None
+    kind: str = "ad_hoc"  # ad_hoc|plan|execute|integrate
+    cwd: str = ""
     created_at: datetime
     ended_at: datetime | None = None
     turns: list[TurnOut] = Field(default_factory=list)
@@ -191,6 +192,10 @@ class TaskCreate(BaseModel):
     prompt: str
     depends_on: list[str] = Field(default_factory=list)
     order_idx: int = 0
+    # Lifecycle mode. Omit (or None) to keep the model default
+    # (``plan_then_execute``). Set ``one_shot`` for ad-hoc tasks you typed
+    # yourself and don't want the planner gate for.
+    mode: Literal["plan_then_execute", "one_shot"] | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -198,6 +203,7 @@ class TaskUpdate(BaseModel):
     prompt: str | None = None
     depends_on: list[str] | None = None
     order_idx: int | None = None
+    mode: Literal["plan_then_execute", "one_shot"] | None = None
 
 
 class TaskOut(BaseModel):
@@ -206,6 +212,7 @@ class TaskOut(BaseModel):
     title: str
     prompt: str
     status: str
+    phase: str | None = None  # planning|awaiting_ack|executing|integrating|done|failed
     source: str
     order_idx: int
     mode: str = "plan_then_execute"
@@ -319,6 +326,33 @@ class PlanOut(BaseModel):
     task_ids: list[str]
     raw: str | None = None  # raw model output when parsing failed
     error: str | None = None
+
+
+class LastPlanOut(BaseModel):
+    """Most recent planner run for a project — used by the UI's "view plan"
+    affordance on the project detail page.
+    """
+
+    job_id: str
+    ask: str
+    raw: str
+    created_at: datetime
+    task_ids: list[str] = Field(default_factory=list)
+
+
+class PathSuggestion(BaseModel):
+    """A candidate project path the FE can offer in its dropdown.
+
+    `path` is the absolute filesystem path; `name` is the basename used as a
+    default project name; `is_git` is true iff the directory contains a
+    `.git` folder. `already_registered` is true iff a project already points
+    at this path, so the UI can dim or hide it.
+    """
+
+    path: str
+    name: str
+    is_git: bool
+    already_registered: bool
 
 
 class AuthInfo(BaseModel):

@@ -47,8 +47,8 @@ def _dep(s, task_id: str, depends_on: str) -> None:
     s.flush()
 
 
-def _job(s, project_id: str, task_id: str, phase: str | None = None) -> str:
-    j = models.Job(project_id=project_id, task_id=task_id, phase=phase)
+def _job(s, project_id: str, task_id: str, kind: str = "ad_hoc") -> str:
+    j = models.Job(project_id=project_id, task_id=task_id, kind=kind)
     s.add(j)
     s.flush()
     return j.id
@@ -57,12 +57,15 @@ def _job(s, project_id: str, task_id: str, phase: str | None = None) -> str:
 def test_ack_prioritized_over_run(initdb: Path) -> None:
     with session_scope() as s:
         pid = _proj(s)
-        t_run = _task(s, pid, "t_run", status="ready")
+        _ = _task(s, pid, "t_run", status="ready")
         t_ack = _task(s, pid, "t_ack", status="running")
-        jid = _job(s, pid, t_ack, phase="awaiting_ack")
+        # Mark the awaiting-ack Task directly (phase now lives on Task).
+        s.get(models.Task, t_ack).phase = "awaiting_ack"
+        s.flush()
         actions = driver_policy.next_actions(s, pid)
     assert [a.kind for a in actions] == ["ack", "run"]
-    assert actions[0].job_id == jid
+    assert actions[0].task_id == t_ack
+    assert actions[0].rest_path == f"/api/tasks/{t_ack}/ack"
 
 
 def test_retry_respects_backoff(initdb: Path) -> None:
@@ -134,6 +137,23 @@ def test_no_integrate_while_one_is_running(initdb: Path) -> None:
         _task(s, pid, "t1", status="done", integration_status="pending")
         actions = driver_policy.next_actions(s, pid)
     assert not [a for a in actions if a.kind == "integrate"]
+
+
+def test_no_integrate_while_one_is_ready(initdb: Path) -> None:
+    """Regression for the duplicate-integrate race: a synthetic task in
+    ``ready`` (created via /integrate but not yet kicked) must also suppress
+    further integrate actions. Without this, the driver polls in the brief
+    create→start window and fires a second integrate for the same wave.
+    Synthetic tasks start in ``ready``, so this is the actual race we hit."""
+    for status in ("pending", "ready"):
+        with session_scope() as s:
+            pid = _proj(s)
+            _task(s, pid, "int", status=status, synthetic=True, mode="one_shot")
+            _task(s, pid, "t1", status="done", integration_status="pending")
+            actions = driver_policy.next_actions(s, pid)
+        assert not [a for a in actions if a.kind == "integrate"], (
+            f"unexpected integrate when synthetic task is in status={status!r}"
+        )
 
 
 def test_run_bounded_by_parallel_cap(initdb: Path) -> None:

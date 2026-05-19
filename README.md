@@ -103,8 +103,10 @@ pending → ready → running (planning) → awaiting_ack → running (executing
   separate Claude Code session to it from outside the harness — jobs spawned
   by the harness do **not** have the orchestrator tools auto-injected.
 
-Opt out per task with `mode=one_shot` (skip planning, go straight to a
-worktree execute).
+Opt out per task with `mode=one_shot` — skip planning, run a single turn
+directly in `project.path` (no worktree, no ack gate). Useful for trivial
+edits that don't need isolation; concurrent one-shot tasks share the
+project's git index, so don't fan them out in parallel.
 
 ### Autopilot driver
 
@@ -182,9 +184,13 @@ Environment overrides (`AH_*` prefix): `AH_HOME`, `AH_AUTH_TOKEN`,
 
 ```bash
 ./scripts/dev.sh
-# Backend on :8765 (uvicorn --reload)
-# Frontend on :5173 (vite, proxies /api to :8765)
+# Backend on :8765 (uvicorn --reload, also serves the built SPA at /)
+# Vite runs `build --watch` into web/dist/ — no separate dev port.
+# Open http://localhost:8765
 ```
+
+Hard-refresh the browser to pick up frontend changes (the bundle hash changes
+on each rebuild, so it busts the cache).
 
 Run tests:
 

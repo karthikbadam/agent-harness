@@ -170,12 +170,26 @@ def _spawn_driver_subprocess(request: Request):
     """Spawn agent-harness-driver as a subprocess, log to AH_HOME/logs/driver.log."""
     import shutil
     import subprocess
+    import sys
+    from pathlib import Path
 
     from ..config import get_settings
 
+    # Look on PATH first, then fall back to the same bin/ dir as the running
+    # Python interpreter — console scripts are installed there alongside the
+    # `agent-harness` server binary, so when launchd/the user starts the
+    # server with `.venv/bin/agent-harness` we can locate its sibling driver
+    # script without requiring `.venv/bin` on PATH.
     binary = shutil.which("agent-harness-driver")
     if binary is None:
-        log.warning("agent-harness-driver binary not found on PATH")
+        candidate = Path(sys.executable).parent / "agent-harness-driver"
+        if candidate.is_file():
+            binary = str(candidate)
+    if binary is None:
+        log.warning(
+            "agent-harness-driver binary not found (PATH or %s)",
+            Path(sys.executable).parent,
+        )
         return None
     settings = get_settings()
     assert settings.logs_dir is not None

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import update
 from sqlalchemy.orm import Session
@@ -9,6 +11,7 @@ from ..auth import require_auth
 from ..db import get_session
 from ..schemas import (
     IntegrateIn,
+    PathSuggestion,
     ProjectCreate,
     ProjectOut,
     ProjectUpdate,
@@ -19,6 +22,12 @@ from ..services import claude_md, integration, worktrees
 from ..routes.tasks import _to_out as _task_to_out
 
 router = APIRouter(prefix="/api/projects", tags=["projects"], dependencies=[Depends(require_auth)])
+
+
+def _expand_path(p: str) -> str:
+    """Resolve ``~`` and ``~user`` in paths supplied by the FE composer. The
+    UI doesn't know the user's home dir, so we expand server-side."""
+    return os.path.expanduser(p) if p else p
 
 
 def _to_out(p: models.Project) -> ProjectOut:
@@ -51,11 +60,87 @@ def list_projects(s: Session = Depends(get_session)) -> list[ProjectOut]:
     return [_to_out(p) for p in s.query(models.Project).order_by(models.Project.created_at).all()]
 
 
+# Common roots we'll scan for candidate project directories. macOS users
+# typically use ``~/Code`` (capital C); ``~/code`` and ``~/src``/``~/projects``
+# are common alternatives. Override via the ``AH_CODE_ROOTS`` env var
+# (colon-separated list of paths) for non-standard setups.
+def _resolve_code_roots() -> list[str]:
+    """Return distinct, existing code-root directories to scan.
+
+    Default is just ``~/Code`` — the standard macOS convention. Override
+    with the ``AH_CODE_ROOTS`` env var (colon-separated absolute paths).
+    Directories that resolve to the same inode are deduped so case-variant
+    paths on APFS don't produce duplicate entries.
+    """
+    raw = os.environ.get("AH_CODE_ROOTS")
+    candidates = (
+        [r for r in raw.split(":") if r.strip()] if raw else ["~/Code"]
+    )
+    seen_keys: set[tuple[int, int]] = set()
+    out: list[str] = []
+    for r in candidates:
+        path = os.path.expanduser(r)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        key = (st.st_dev, st.st_ino)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        out.append(path)
+    return out
+
+
+@router.get("/path-suggestions", response_model=list[PathSuggestion])
+def path_suggestions(s: Session = Depends(get_session)) -> list[PathSuggestion]:
+    """List candidate project directories the user can pick from when
+    creating a project. Scans immediate subdirectories of common code roots
+    (``~/Code``, ``~/code``, ``~/src``, ``~/projects``; override with
+    ``AH_CODE_ROOTS``). Hidden directories (``.foo``) are skipped.
+    """
+    existing_paths = {
+        os.path.realpath(p.path)
+        for p in s.query(models.Project.path)
+        .filter(models.Project.path.isnot(None))
+        .all()
+    }
+    out: list[PathSuggestion] = []
+    seen: set[str] = set()
+    for root in _resolve_code_roots():
+        root_abs = os.path.expanduser(root)
+        if not os.path.isdir(root_abs):
+            continue
+        for entry in os.listdir(root_abs):
+            if entry.startswith("."):
+                continue
+            child = os.path.join(root_abs, entry)
+            if not os.path.isdir(child):
+                continue
+            real = os.path.realpath(child)
+            if real in seen:
+                continue
+            seen.add(real)
+            is_git = os.path.isdir(os.path.join(child, ".git"))
+            out.append(
+                PathSuggestion(
+                    path=child,
+                    name=entry,
+                    is_git=is_git,
+                    already_registered=real in existing_paths,
+                )
+            )
+    # Sort case-insensitive by name. Git repos come first within the same
+    # bucket so the things the user is more likely to want are at the top.
+    out.sort(key=lambda s: (0 if s.is_git else 1, s.name.casefold()))
+    return out
+
+
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(body: ProjectCreate, s: Session = Depends(get_session)) -> ProjectOut:
     p = models.Project(
         name=body.name,
-        path=body.path,
+        path=_expand_path(body.path),
         permission_mode=body.permission_mode,
         dangerously_skip=body.dangerously_skip,
         extra_claude_args=list(body.extra_claude_args),
@@ -123,10 +208,89 @@ def update_project(
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(project_id: str, s: Session = Depends(get_session)) -> None:
+    """Delete a project and all its dependent rows.
+
+    The schema wasn't built with ``ondelete=CASCADE`` on every reference, so
+    naive ``s.delete(project)`` fails with FOREIGN KEY constraints. Tear down
+    in dependency order so each DELETE sees only orphans:
+
+      outcomes ──┐
+                 ├──> tasks  ──> (TaskDependency cascades on its own)
+      turns ─────┤
+                 ├──> jobs
+      driver_notes ──> (project + tasks + jobs)
+      schedules  ──> (project)
+      allowlist  ──> (handled by Project.rules SQLA cascade)
+      project
+    """
+    from sqlalchemy import or_, select as sa_select
+
     p = s.get(models.Project, project_id)
     if p is None:
         raise HTTPException(404, "not found")
-    s.delete(p)
+    if p.is_default:
+        raise HTTPException(409, "cannot delete the default project")
+
+    job_ids = [
+        r[0]
+        for r in s.execute(
+            sa_select(models.Job.id).where(models.Job.project_id == project_id)
+        ).all()
+    ]
+    task_ids = [
+        r[0]
+        for r in s.execute(
+            sa_select(models.Task.id).where(models.Task.project_id == project_id)
+        ).all()
+    ]
+
+    if job_ids or task_ids:
+        s.execute(
+            models.Outcome.__table__.delete().where(
+                or_(
+                    models.Outcome.job_id.in_(job_ids or [""]),
+                    models.Outcome.task_id.in_(task_ids or [""]),
+                )
+            )
+        )
+    s.execute(
+        models.DriverNote.__table__.delete().where(
+            or_(
+                models.DriverNote.project_id == project_id,
+                models.DriverNote.job_id.in_(job_ids or [""]),
+                models.DriverNote.task_id.in_(task_ids or [""]),
+            )
+        )
+    )
+    if job_ids:
+        # Turn rows are cascade-deleted via Job.turns SQLA relationship when
+        # we delete each Job, but the bulk SQL DELETE below bypasses that.
+        # Wipe turns directly first.
+        s.execute(
+            models.Turn.__table__.delete().where(models.Turn.job_id.in_(job_ids))
+        )
+        s.execute(
+            models.Job.__table__.delete().where(models.Job.id.in_(job_ids))
+        )
+    if task_ids:
+        s.execute(
+            models.Task.__table__.delete().where(models.Task.id.in_(task_ids))
+        )
+    s.execute(
+        models.Schedule.__table__.delete().where(
+            models.Schedule.project_id == project_id
+        )
+    )
+    s.execute(
+        models.AllowlistRule.__table__.delete().where(
+            models.AllowlistRule.project_id == project_id
+        )
+    )
+    # Project itself last. The SQLA relationships from Project to jobs/rules
+    # would normally cascade, but we've already drained those.
+    s.execute(
+        models.Project.__table__.delete().where(models.Project.id == project_id)
+    )
     s.commit()
 
 

@@ -53,6 +53,105 @@ def _git_head(project_path: str) -> tuple[str | None, str | None]:
     return sha, branch
 
 
+def _branch_tip(project_path: str, branch: str) -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", project_path, "rev-parse", branch],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode().strip()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _commit_reachable_from_other_branch(
+    project_path: str, sha: str, exclude_branch: str
+) -> bool:
+    """Return True iff ``sha`` is reachable from some local branch other than
+    ``exclude_branch``. Used to verify an integration actually moved each input
+    task's work somewhere persistent before we delete its task branch."""
+    try:
+        names = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                project_path,
+                "branch",
+                "--contains",
+                sha,
+                "--format=%(refname:short)",
+            ],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode().splitlines()
+    except Exception:  # noqa: BLE001
+        return False
+    return any(n.strip() and n.strip() != exclude_branch for n in names)
+
+
+def _integration_actually_landed(project_path: str, input_tasks) -> bool:
+    """Defensive check at integration finalize: for every input task whose
+    worktree branch carries commits past the base, those commits must now be
+    reachable from another local branch (the merge target). If any task's tip
+    is only reachable via its own task/<id> branch, the integration didn't
+    actually merge — the agent gave up or hit a permission wall. We refuse to
+    declare success and wipe the input branches in that case."""
+    if not project_path:
+        return False
+    for dep in input_tasks:
+        branch = dep.worktree_branch
+        if not branch:
+            continue
+        tip = _branch_tip(project_path, branch)
+        if tip is None:
+            continue
+        if not _commit_reachable_from_other_branch(project_path, tip, branch):
+            return False
+    return True
+
+
+def _commit_dirty_worktree(cwd: str, message: str) -> bool:
+    """If ``cwd`` is a git worktree with uncommitted changes, stage and commit
+    them with ``message``. Returns True if a commit was created. Used as a
+    backstop after the execute turn so the worktree branch always carries the
+    agent's work — even if the agent forgot to commit or got stuck on
+    permission gates.
+    """
+    pdir = Path(cwd)
+    if not pdir.is_dir() or not (pdir / ".git").exists():
+        return False
+    try:
+        status = subprocess.check_output(
+            ["git", "-C", str(pdir), "status", "--porcelain"],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode()
+    except Exception:  # noqa: BLE001
+        return False
+    if not status.strip():
+        return False
+    try:
+        subprocess.run(
+            ["git", "-C", str(pdir), "add", "-A"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+        subprocess.run(
+            ["git", "-C", str(pdir), "commit", "-m", message],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("auto-commit failed in %s: %s", cwd, e)
+        return False
+    log.info("auto-committed dirty worktree at %s", cwd)
+    return True
+
+
 def _last_assistant_text(log_dir: Path) -> str | None:
     """Scan turn-*.jsonl for the most recent assistant_text payload."""
     import json
@@ -128,63 +227,109 @@ def on_job_finalized(
     job_id: str,
     job_status: str,
     log_dir: Path | None = None,
-) -> None:
-    """Record an Outcome and propagate task status. Safe to call always.
+) -> list[str]:
+    """Record an Outcome and advance the owning Task's phase.
 
-    No-op if the job has no ``task_id``. Branches on ``job.phase``:
+    Returns the list of task IDs that just transitioned to ``ready`` and are
+    eligible for auto-kickoff (planner-sourced, non-synthetic). The caller is
+    responsible for actually awaiting :func:`kickoff_first_phase` on each.
 
-    - ``awaiting_ack`` (planning turn just finished): write
-      ``Outcome(kind='plan')`` capturing the plan text; do NOT mark the task
-      ``done`` — it stays ``running`` while the user/agent reviews. Downstream
-      tasks are NOT re-evaluated; the execute turn hasn't happened yet.
-    - ``done`` after ``executing`` or ad-hoc (``phase`` was NULL): existing v1
-      behavior — write ``Outcome(kind='execute')``, flip the task to ``done``
-      or ``failed``, and propagate readiness to dependents. For plan-then-
-      execute tasks the worktree branch is recorded so integration can find it.
+    No-op if the job has no ``task_id``. The Job's ``kind`` selects the path:
+
+    - ``kind='plan'``: on clean exit, park the Task at ``phase='awaiting_ack'``
+      with an ``Outcome(kind='plan')``; on failure flip the Task to ``failed``.
+      Downstream tasks are NOT re-evaluated (execute hasn't happened yet).
+    - ``kind='execute'``: backstop-commit any leftover dirty state in the
+      worktree, record ``Outcome(kind='execute')``, flip the Task to
+      ``done``/``failed`` and propagate readiness to dependents. For
+      plan_then_execute Tasks the worktree carries the work for integration.
+    - ``kind='integrate'`` (synthetic Task): verify the input branches'
+      tips are reachable from another branch; on success cleanup input
+      worktrees and mark them ``integrated``; on failure leave them and
+      mark ``conflict``.
     """
     bus = driver_bus.get_bus()
     pending_events: list[tuple[str, dict]] = []  # collected, emitted after commit
+    autorun_ids: list[str] = []
     with session_scope() as s:
         job = s.get(models.Job, job_id)
         if job is None or job.task_id is None:
-            return
+            return autorun_ids
         task = s.get(models.Task, job.task_id)
         if task is None:
             log.warning("task %s missing for job %s; outcome skipped", job.task_id, job_id)
-            return
+            return autorun_ids
         project = s.get(models.Project, job.project_id)
         project_id = job.project_id
 
-        if job.phase == "awaiting_ack":
-            # Planning turn just finished cleanly. Capture the plan text; keep
-            # the task in 'running' so the orchestrator/human still sees it as
-            # an in-flight commitment, just paused for ack.
+        if job.kind == "plan":
             summary = _last_assistant_text(log_dir) if log_dir is not None else None
-            s.add(
-                models.Outcome(
-                    task_id=task.id,
-                    job_id=job.id,
-                    commit_sha=None,
-                    branch=None,
-                    summary=summary,
-                    status="success",
-                    kind="plan",
+            if job_status == "done":
+                # Plan ran cleanly. Park the Task at awaiting_ack; the user
+                # (or driver) calls /tasks/{id}/ack to advance to execute.
+                task.phase = "awaiting_ack"
+                s.add(
+                    models.Outcome(
+                        task_id=task.id,
+                        job_id=job.id,
+                        commit_sha=None,
+                        branch=None,
+                        summary=summary,
+                        status="success",
+                        kind="plan",
+                    )
                 )
-            )
-            pending_events.append(
-                ("plan_ready", {"project_id": project_id, "task_id": task.id, "job_id": job.id})
-            )
+                pending_events.append(
+                    (
+                        "plan_ready",
+                        {"project_id": project_id, "task_id": task.id, "job_id": job.id},
+                    )
+                )
+            else:
+                task.phase = "failed"
+                task.status = "failed"
+                task.last_failed_at = datetime.now(timezone.utc)
+                s.add(
+                    models.Outcome(
+                        task_id=task.id,
+                        job_id=job.id,
+                        commit_sha=None,
+                        branch=None,
+                        summary=summary,
+                        status="failed",
+                        kind="plan",
+                    )
+                )
+                pending_events.append(
+                    (
+                        "task_failed",
+                        {"project_id": project_id, "task_id": task.id, "job_id": job.id},
+                    )
+                )
             _emit_after(bus, pending_events)
-            return
+            return autorun_ids
 
-        if task.synthetic:
-            # Integration task. Outcome.kind='integrate', clean up the input
-            # tasks' worktrees on success, mark them integrated. On failure,
-            # mark inputs as 'conflict' so the orchestrator/human can followup.
-            cwd = project.path if project else None
+        if job.kind == "integrate":
+            cwd = job.cwd or (project.path if project else None)
             sha, branch = (_git_head(cwd) if cwd else (None, None))
             summary = _last_assistant_text(log_dir) if log_dir is not None else None
-            outcome_status = "success" if job_status == "done" else "failed"
+            dep_rows = s.execute(
+                select(models.TaskDependency.depends_on_id).where(
+                    models.TaskDependency.task_id == task.id
+                )
+            ).all()
+            input_tasks = [s.get(models.Task, dep_id) for (dep_id,) in dep_rows]
+            input_tasks = [t for t in input_tasks if t is not None]
+            merge_landed = job_status == "done" and _integration_actually_landed(
+                cwd or "", input_tasks
+            )
+            outcome_status = "success" if merge_landed else "failed"
+            if job_status == "done" and not merge_landed:
+                log.warning(
+                    "integration job %s exited clean but no input branch was merged; "
+                    "marking outcome failed and preserving task branches",
+                    job.id,
+                )
             s.add(
                 models.Outcome(
                     task_id=task.id,
@@ -196,19 +341,12 @@ def on_job_finalized(
                     kind="integrate",
                 )
             )
-            task.status = "done" if job_status == "done" else "failed"
-            if task.status == "failed":
+            task.phase = "done" if merge_landed else "failed"
+            task.status = "done" if merge_landed else "failed"
+            if not merge_landed:
                 task.last_failed_at = datetime.now(timezone.utc)
-            dep_rows = s.execute(
-                select(models.TaskDependency.depends_on_id).where(
-                    models.TaskDependency.task_id == task.id
-                )
-            ).all()
-            for (dep_id,) in dep_rows:
-                dep = s.get(models.Task, dep_id)
-                if dep is None:
-                    continue
-                if job_status == "done":
+            for dep in input_tasks:
+                if merge_landed:
                     if project is not None and (dep.worktree_path or dep.worktree_branch):
                         worktrees.remove(project, dep)
                         dep.worktree_path = None
@@ -218,19 +356,34 @@ def on_job_finalized(
                     dep.integration_status = "conflict"
             s.flush()
             transitions = _reevaluate_downstream(s, task.id)
-            event = "integration_done" if job_status == "done" else "integration_conflict"
+            event = "integration_done" if merge_landed else "integration_conflict"
             pending_events.append(
                 (event, {"project_id": project_id, "task_id": task.id, "job_id": job.id})
             )
             for tid, pid in transitions:
                 pending_events.append(("task_ready", {"project_id": pid, "task_id": tid}))
+                ds = s.get(models.Task, tid)
+                if ds is not None and ds.source == "planner" and not ds.synthetic:
+                    autorun_ids.append(tid)
             _emit_after(bus, pending_events)
-            return
+            try:
+                try_autodisable_autopilot(project_id)
+            except Exception:  # noqa: BLE001
+                log.exception("autodisable autopilot failed for %s", project_id)
+            return autorun_ids
 
-        # Execute / one-shot / ad-hoc path.
-        cwd = job.cwd_override or (project.path if project else None)
-        sha, branch = (_git_head(cwd) if cwd else (None, None))
+        # Execute / one-shot / ad-hoc (kind='execute' or 'ad_hoc'). The job's
+        # cwd is the worktree path for plan-then-execute tasks; project.path
+        # for one-shot tasks; whatever the caller specified for ad-hoc.
+        cwd = job.cwd or (project.path if project else None)
         summary = _last_assistant_text(log_dir) if log_dir is not None else None
+        in_worktree = bool(
+            cwd and project and cwd != project.path
+        )
+        if job_status == "done" and in_worktree and not task.synthetic:
+            commit_msg = (task.title or "agent commit")[:72]
+            _commit_dirty_worktree(cwd, commit_msg)
+        sha, branch = (_git_head(cwd) if cwd else (None, None))
         outcome_status = "success" if job_status == "done" else "failed"
         s.add(
             models.Outcome(
@@ -244,6 +397,7 @@ def on_job_finalized(
             )
         )
         task.status = "done" if job_status == "done" else "failed"
+        task.phase = "done" if job_status == "done" else "failed"
         if task.status == "failed":
             task.last_failed_at = datetime.now(timezone.utc)
         if task.status == "done" and task.mode == "plan_then_execute" and not task.synthetic:
@@ -256,7 +410,55 @@ def on_job_finalized(
         )
         for tid, pid in transitions:
             pending_events.append(("task_ready", {"project_id": pid, "task_id": tid}))
+            ds = s.get(models.Task, tid)
+            if ds is not None and ds.source == "planner" and not ds.synthetic:
+                autorun_ids.append(tid)
     _emit_after(bus, pending_events)
+    # After all the finalize bookkeeping is committed, see if the project
+    # ran dry. Conservative: only flips autopilot off when there's nothing
+    # the driver could do — no pending, ready, running, or failed tasks.
+    try:
+        try_autodisable_autopilot(project_id)
+    except Exception:  # noqa: BLE001
+        log.exception("autodisable autopilot failed for %s", project_id)
+    return autorun_ids
+
+
+async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
+    """Spawn the first-phase Job for a ``ready`` task.
+
+    Idempotent: returns ``None`` if the task is missing, not ready, or its
+    project no longer exists. Callers — the planner's autorun loop, the
+    task_ready autorun hook, and the manual ``run_task`` route — converge
+    here so that every "start the work" path uses the same phase/kind/cwd
+    rules.
+    """
+    with session_scope() as s:
+        t = s.get(models.Task, task_id)
+        if t is None or t.status != "ready":
+            return None
+        project = s.get(models.Project, t.project_id)
+        if project is None:
+            return None
+        if t.synthetic:
+            phase, kind = "integrating", "integrate"
+        elif t.mode == "plan_then_execute":
+            phase, kind = "planning", "plan"
+        else:
+            phase, kind = "executing", "execute"
+        t.status = "running"
+        t.phase = phase
+        s.commit()
+        project_id = t.project_id
+        prompt = t.prompt
+        title = f"[task] {t.title}"[:256]
+        cwd = project.path
+    jid = job_manager.create_job(
+        project_id, prompt, title=title, task_id=task_id,
+        kind=kind, cwd=cwd,
+    )
+    await job_manager.start(jid)
+    return jid
 
 
 def _emit_after(bus: "driver_bus.DriverEventBus", events: list[tuple[str, dict]]) -> None:
@@ -264,40 +466,103 @@ def _emit_after(bus: "driver_bus.DriverEventBus", events: list[tuple[str, dict]]
         bus.emit(event, **kw)
 
 
-def on_ack(job_id: str, prompt_addendum: str = "") -> str:
-    """Transition an ``awaiting_ack`` job into ``executing``.
+def try_autodisable_autopilot(project_id: str) -> bool:
+    """Flip ``project.autopilot_mode`` to ``off`` when the project has no
+    actionable work left. Returns True if a flip happened.
+
+    "Actionable" means anything the driver could legitimately do something
+    with: a task in ``pending``/``ready``/``running``, or a ``failed`` task
+    that the retry policy might still re-fire. When the project is purely
+    ``done`` / ``canceled``, autopilot would just sit there — turn it off so
+    it doesn't appear as if the agent is still working.
+    """
+    bus = driver_bus.get_bus()
+    with session_scope() as s:
+        p = s.get(models.Project, project_id)
+        if p is None or p.autopilot_mode != "on":
+            return False
+        leftover = s.execute(
+            select(models.Task.id).where(
+                models.Task.project_id == project_id,
+                models.Task.status.in_(
+                    ["pending", "ready", "running", "failed"]
+                ),
+            )
+        ).first()
+        if leftover:
+            return False
+        p.autopilot_mode = "off"
+    # Wake the driver one last time with the mode_off signal so it stops
+    # polling this project. The driver process itself stays alive — killing
+    # it requires app.state access from the route layer. If you want the
+    # process gone, toggle autopilot off from the UI on any remaining
+    # project (or restart the harness).
+    bus.emit("mode_off", project_id, force=True)
+    return True
+
+
+class ExecuteSpawn:
+    """Inputs ``JobManager.create_job`` needs to spawn the execute Job after
+    a plan was acked. ``advance_to_executing`` returns this rather than
+    spawning the Job itself, so the route layer keeps the manager dependency.
+    """
+
+    __slots__ = ("task_id", "project_id", "prompt", "cwd", "title")
+
+    def __init__(
+        self,
+        task_id: str,
+        project_id: str,
+        prompt: str,
+        cwd: str,
+        title: str,
+    ) -> None:
+        self.task_id = task_id
+        self.project_id = project_id
+        self.prompt = prompt
+        self.cwd = cwd
+        self.title = title
+
+
+def advance_to_executing(task_id: str, prompt_addendum: str = "") -> ExecuteSpawn:
+    """Transition a Task from ``awaiting_ack`` to ``executing``.
 
     Creates the per-task git worktree, records its path + branch on the task,
-    points the job's ``cwd_override`` at the worktree, and flips
-    ``job.phase='executing'``. Returns the prompt the caller should pass to
-    ``JobManager.followup`` for the execute turn (the original task prompt
-    plus any optional addendum). The caller is responsible for actually
-    enqueueing the followup; this function only handles DB state and worktree
-    setup so it's safely callable from sync contexts (routes, MCP tools).
+    flips ``task.phase='executing'``. Returns an :class:`ExecuteSpawn` the
+    route layer feeds into ``JobManager.create_job`` to start the execute
+    Job (its own conversation, born at the worktree cwd — no resume from the
+    plan Job).
     """
     with session_scope() as s:
-        job = s.get(models.Job, job_id)
-        if job is None:
-            raise ValueError(f"unknown job {job_id}")
-        if job.phase != "awaiting_ack":
-            raise ValueError(
-                f"job {job_id} is not awaiting ack (phase={job.phase!r})"
-            )
-        if job.task_id is None:
-            raise ValueError(f"job {job_id} has no bound task")
-        task = s.get(models.Task, job.task_id)
+        task = s.get(models.Task, task_id)
         if task is None:
-            raise ValueError(f"task {job.task_id} for job {job_id} not found")
-        project = s.get(models.Project, job.project_id)
+            raise ValueError(f"unknown task {task_id}")
+        if task.phase != "awaiting_ack":
+            raise ValueError(
+                f"task {task_id} is not awaiting ack (phase={task.phase!r})"
+            )
+        project = s.get(models.Project, task.project_id)
         if project is None:
-            raise ValueError(f"project {job.project_id} for job {job_id} not found")
-        path, branch = worktrees.create(project, task)
-        task.worktree_path = path
-        task.worktree_branch = branch
-        job.cwd_override = path
-        job.phase = "executing"
+            raise ValueError(f"project {task.project_id} for task {task_id} not found")
+        if task.worktree_path and task.worktree_branch:
+            # A previous ack already created the worktree (e.g. retry of just
+            # the execute Job). Reuse it.
+            path, branch = task.worktree_path, task.worktree_branch
+        else:
+            path, branch = worktrees.create(project, task)
+            task.worktree_path = path
+            task.worktree_branch = branch
+        task.phase = "executing"
         base = task.prompt
-    return f"{base}\n\n{prompt_addendum}" if prompt_addendum else base
+        full_prompt = f"{base}\n\n{prompt_addendum}" if prompt_addendum else base
+        title = f"[task] {task.title}"[:256]
+        return ExecuteSpawn(
+            task_id=task_id,
+            project_id=project.id,
+            prompt=full_prompt,
+            cwd=path,
+            title=title,
+        )
 
 
 def reconcile_on_startup() -> None:

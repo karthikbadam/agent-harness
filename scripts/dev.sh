@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Dev mode: uvicorn --reload on :8765 + vite on :5173, parallel. Ctrl+C kills both.
-# Open http://localhost:5173 — vite proxies /api to :8765.
+# Dev mode: uvicorn --reload on :8765 + vite build --watch into web/dist/.
+# The harness serves the built SPA from web/dist at the same port, so the
+# whole app is at http://localhost:8765. Ctrl+C kills both.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -22,12 +23,14 @@ pids=()
 cleanup() { for p in "${pids[@]:-}"; do kill "$p" 2>/dev/null || true; done; wait 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
-echo "==> Backend on :8765"
-(cd "$REPO" && "$VENV_BIN/python" -m uvicorn agent_harness.main:app --reload --port 8765 --app-dir server) &
+echo "==> Backend on :8765 (also serves web/dist/)"
+# Bind 0.0.0.0 so phones on the same LAN can hit http://<mac-ip>:8765.
+(cd "$REPO" && "$VENV_BIN/python" -m uvicorn agent_harness.main:app --reload --host 0.0.0.0 --port 8765 --app-dir server) &
 pids+=("$!")
 
-echo "==> Vite on :5173"
-(cd "$REPO/web" && npm run dev -- --host) &
+echo "==> Vite build --watch → web/dist/"
+(cd "$REPO/web" && npm run build -- --watch) &
 pids+=("$!")
 
+echo "==> Open http://localhost:8765"
 wait

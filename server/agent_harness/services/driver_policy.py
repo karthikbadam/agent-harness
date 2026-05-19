@@ -62,13 +62,20 @@ def _running_count(s: Session, project_id: str) -> int:
     )
 
 
-def _integration_running(s: Session, project_id: str) -> bool:
+def _integration_in_flight(s: Session, project_id: str) -> bool:
+    """True iff there's a synthetic integration task in a non-terminal status.
+
+    Suppresses duplicate integrate actions during the small window between
+    ``POST /integrate`` (which creates the synthetic task in ``status='ready'``)
+    and ``POST /run`` (which flips it to ``running``). Without this, the driver
+    polls in that window and fires a second integrate for the same wave.
+    """
     return bool(
         s.execute(
             select(models.Task.id).where(
                 models.Task.project_id == project_id,
                 models.Task.synthetic.is_(True),
-                models.Task.status == "running",
+                models.Task.status.in_(["pending", "ready", "running"]),
             )
         ).first()
     )
@@ -134,27 +141,27 @@ def next_actions(
     def _full() -> bool:
         return len(actions) >= max_actions
 
-    # 1. ack
-    jobs = (
+    # 1. ack — Tasks parked at awaiting_ack waiting for the execute Job to spawn
+    tasks_awaiting = (
         s.execute(
-            select(models.Job).where(
-                models.Job.project_id == project_id,
-                models.Job.phase == "awaiting_ack",
+            select(models.Task).where(
+                models.Task.project_id == project_id,
+                models.Task.phase == "awaiting_ack",
             )
         )
         .scalars()
         .all()
     )
-    for job in jobs:
+    for task in tasks_awaiting:
         actions.append(
             Action(
                 kind="ack",
                 project_id=project_id,
-                task_id=job.task_id,
-                job_id=job.id,
-                reason=f"plan ready for ack on job {job.id}",
-                rest_path=f"/api/jobs/{job.id}/followup",
-                payload={"prompt": ""},
+                task_id=task.id,
+                job_id=None,
+                reason=f"plan ready for ack on task {task.id}",
+                rest_path=f"/api/tasks/{task.id}/ack",
+                payload={},
             )
         )
         if _full():
@@ -194,7 +201,7 @@ def next_actions(
             return actions
 
     # 3. integrate
-    if not _integration_running(s, project_id):
+    if not _integration_in_flight(s, project_id):
         wave = _wave(s, project_id)
         if wave:
             actions.append(

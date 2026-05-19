@@ -61,6 +61,16 @@ class Project(Base):
 
 
 class Job(Base):
+    """One Claude conversation: one cwd, one session, N turns.
+
+    A Job is either standalone (``task_id`` NULL, ``kind='ad_hoc'``) — the v1
+    primitive for small changes — or owned by a Task. A Task-owned Job
+    represents one phase of that Task's lifecycle (planning, executing,
+    integrating); the Task spawns a new Job at each phase transition rather
+    than pivoting an existing Job's cwd mid-stream. Follow-up turns within a
+    phase stay on the same Job (same conversation, same session_id).
+    """
+
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
@@ -70,8 +80,10 @@ class Job(Base):
     session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     schedule_id: Mapped[Optional[str]] = mapped_column(ForeignKey("schedules.id"), nullable=True)
     task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
-    phase: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    cwd_override: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(
+        String(12), default="ad_hoc"
+    )  # ad_hoc|plan|execute|integrate
+    cwd: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
@@ -135,6 +147,16 @@ class Setting(Base):
 
 
 class Task(Base):
+    """A multi-phase unit of intent that owns 0..N Jobs.
+
+    ``status`` is the overall task lifecycle (pending → ready → running → done
+    / failed / canceled). ``phase`` is the sub-state within ``running`` for
+    plan-then-execute tasks: planning → awaiting_ack → executing → integrating
+    → done. Each phase corresponds to a separate Job (its own conversation,
+    cwd, session). The Task spawns the next phase's Job when the current
+    phase's Job finishes; the Task never re-uses a Job across phases.
+    """
+
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
@@ -144,6 +166,9 @@ class Task(Base):
     status: Mapped[str] = mapped_column(
         String(16), default="pending"
     )  # pending|ready|running|done|failed|canceled
+    phase: Mapped[Optional[str]] = mapped_column(
+        String(16), nullable=True
+    )  # planning|awaiting_ack|executing|integrating|done; null until first run
     source: Mapped[str] = mapped_column(String(16), default="manual")  # manual|planner
     order_idx: Mapped[int] = mapped_column(Integer, default=0)
     mode: Mapped[str] = mapped_column(

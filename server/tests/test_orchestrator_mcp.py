@@ -136,9 +136,17 @@ def test_integrate_calls_project_integrate_route() -> None:
     ]
 
 
-def test_ack_plan_uses_followup_route() -> None:
-    stub = _StubClient(canned={("POST", "/api/jobs/jx/followup"): {"id": "jx"}})
+def test_ack_plan_uses_task_ack_route() -> None:
+    stub = _StubClient(canned={("POST", "/api/tasks/tx/ack?notes=go"): {"id": "jx"}})
     mcp = orchestrator_mcp.build_mcp()
     with patch.object(orchestrator_mcp, "_client", lambda: stub):
-        asyncio.run(mcp.call_tool("ack_plan", {"job_id": "jx", "notes": "go"}))
-    assert stub.calls == [("POST", "/api/jobs/jx/followup", {"prompt": "go"})]
+        asyncio.run(mcp.call_tool("ack_plan", {"task_id": "tx", "notes": "go"}))
+    assert stub.calls == [("POST", "/api/tasks/tx/ack?notes=go", None)]
+
+
+def test_ack_plan_bare_uses_clean_path() -> None:
+    stub = _StubClient(canned={("POST", "/api/tasks/tx/ack"): {"id": "jx"}})
+    mcp = orchestrator_mcp.build_mcp()
+    with patch.object(orchestrator_mcp, "_client", lambda: stub):
+        asyncio.run(mcp.call_tool("ack_plan", {"task_id": "tx"}))
+    assert stub.calls == [("POST", "/api/tasks/tx/ack", None)]
