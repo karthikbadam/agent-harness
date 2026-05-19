@@ -56,6 +56,68 @@ iPhone (same WiFi) and you're in. That's the whole iPhone setup.
 10. Reboot the Mac → launchd brings the service back → any
     `running` job in the DB is reconciled to `stopped`.
 
+### Projects · Tasks · Outcomes
+
+Beyond one-shot jobs, projects can carry shared context and be driven as
+multi-step plans:
+
+- **Project context** (`instructions`, `skills`, `context_paths`) is synced
+  into a managed block in `<path>/CLAUDE.md`, so every job inherits it
+  natively. Skills are also merged into the allowlist as `Skill(<name>)`.
+- **Tasks** decompose a complex ask into smaller units with DAG dependencies.
+  Status flow: `pending → ready → running → done | failed | canceled`.
+  Tasks do **not** auto-run when their dependencies satisfy — you kick each
+  ready task with `POST /api/tasks/{id}/run`.
+- **Planner**: `POST /api/projects/{id}/plan {ask}` runs a one-off claude
+  job that drafts a task list (status `pending`, source `planner`) for you
+  to edit and confirm.
+- **Outcomes** are checkpoints recorded when a task-bound job finalizes:
+  `commit_sha`, `branch`, the assistant's closing summary, and
+  `success | failed`. List with `GET /api/projects/{id}/outcomes`.
+
+See the [agent-harness skill](.claude/skills/agent-harness/SKILL.md) for curl
+recipes covering each of these.
+
+### v2: plan-then-execute, parallel worktrees, orchestrator MCP
+
+The default task lifecycle now gates on a planning turn:
+
+```
+pending → ready → running (planning) → awaiting_ack → running (executing) → done
+```
+
+- **Plan turn 0** runs in `project.path` (read-only by convention) and ends
+  parked at `phase=awaiting_ack` with an `Outcome(kind=plan)` containing the
+  plan text. A followup on that job acks the plan.
+- **Execute turn 1** runs in a per-task git worktree at
+  `~/.agent-harness/worktrees/<task_id>` on branch `task/<task_id>` so
+  concurrent executes don't fight over the project's git index.
+- **Integration** is itself a synthetic agent task: `POST /api/projects/{id}/integrate
+  {task_ids,target_branch?}` creates a one-shot task whose prompt merges
+  the listed worktree branches into `target_branch`. On success the input
+  worktrees + branches are cleaned up.
+- **Structural ops**: `POST /api/tasks/{id}/split` and
+  `POST /api/tasks/merge` reshape the DAG before any run.
+- **Orchestrator MCP**: the same surface is exposed as a typed MCP tool set
+  at `/mcp` (HTTP) and as a stdio binary `agent-harness-mcp`. Connect a
+  separate Claude Code session to it from outside the harness — jobs spawned
+  by the harness do **not** have the orchestrator tools auto-injected.
+
+Opt out per task with `mode=one_shot` — skip planning, run a single turn
+directly in `project.path` (no worktree, no ack gate). Useful for trivial
+edits that don't need isolation; concurrent one-shot tasks share the
+project's git index, so don't fan them out in parallel.
+
+### Autopilot driver
+
+For unattended multi-hour runs, set `Project.autopilot_mode='on'` and the
+external `agent-harness-driver` process (auto-spawned by default) reacts to
+harness events and dispatches ack / run / integrate / retry actions without
+human input. Same decision logic powers `GET /api/projects/{id}/driver/
+suggestions` in copilot mode — surfacing one-tap next actions in the UI.
+Every action lands as a `DriverNote` for audit + escalation. Details in
+`docs/driver-design.md`.
+
 ## How it works
 
 ### Stream-json parser
@@ -110,6 +172,9 @@ Per-project overrides (set via the API or Settings UI):
 - `permission_mode`: `acceptEdits` (default), `plan`, `default`.
 - `dangerously_skip`: bool.
 - `idle_timeout_seconds`: int | null (null = use global).
+- `instructions`: free-text rules synced into `<path>/CLAUDE.md`.
+- `skills`: list of skill names auto-allowed (`Skill(<name>)`).
+- `context_paths`: extra reference paths surfaced in the CLAUDE.md block.
 
 Environment overrides (`AH_*` prefix): `AH_HOME`, `AH_AUTH_TOKEN`,
 `AH_CLAUDE_PATH`, `AH_IDLE_TIMEOUT_SECONDS`, `AH_PORT`, `AH_HOST`,
@@ -119,9 +184,13 @@ Environment overrides (`AH_*` prefix): `AH_HOME`, `AH_AUTH_TOKEN`,
 
 ```bash
 ./scripts/dev.sh
-# Backend on :8765 (uvicorn --reload)
-# Frontend on :5173 (vite, proxies /api to :8765)
+# Backend on :8765 (uvicorn --reload, also serves the built SPA at /)
+# Vite runs `build --watch` into web/dist/ — no separate dev port.
+# Open http://localhost:8765
 ```
+
+Hard-refresh the browser to pick up frontend changes (the bundle hash changes
+on each rebuild, so it busts the cache).
 
 Run tests:
 

@@ -45,6 +45,89 @@ def test_allowlist_rule_global_and_project(initdb: Path) -> None:
         assert {r.rule for r in rules} == {"Bash(npm test:*)", "Edit(**/*.py)"}
 
 
+def test_gather_allowlist_adds_git_rules_for_execute_kind(initdb: Path) -> None:
+    from agent_harness.jobs import _gather_allowlist
+
+    with session_scope() as s:
+        proj = models.Project(name="r", path="/tmp/r", skills=["init"])
+        s.add(proj)
+        s.flush()
+        s.add(models.AllowlistRule(project_id=proj.id, rule="Bash(npm test:*)"))
+        s.flush()
+        pid = proj.id
+
+    base = _gather_allowlist(pid)
+    assert "Bash(npm test:*)" in base
+    assert "Skill(init)" in base
+    assert "Bash(git add:*)" not in base
+    assert "Bash(git commit:*)" not in base
+
+    executing = _gather_allowlist(pid, kind="execute")
+    assert "Bash(git add:*)" in executing
+    assert "Bash(git commit:*)" in executing
+    # Original rules still present and not duplicated.
+    assert executing.count("Bash(npm test:*)") == 1
+
+
+def test_gather_allowlist_adds_merge_rules_for_integrate_kind(initdb: Path) -> None:
+    """The integrate Job's prompt instructs the agent to checkout/merge/commit
+    on the target branch. Without these rules the agent stalls on permission
+    denials and silently fails to merge."""
+    from agent_harness.jobs import _gather_allowlist
+
+    with session_scope() as s:
+        proj = models.Project(name="r", path="/tmp/r")
+        s.add(proj)
+        s.flush()
+        pid = proj.id
+
+    integrating = _gather_allowlist(pid, kind="integrate")
+    for needed in (
+        "Bash(git checkout:*)",
+        "Bash(git switch:*)",
+        "Bash(git merge:*)",
+        "Bash(git branch:*)",
+        "Bash(git add:*)",
+        "Bash(git commit:*)",
+    ):
+        assert needed in integrating, f"missing {needed} for integrate kind"
+
+
+def test_task_and_outcome_models(initdb: Path) -> None:
+    with session_scope() as s:
+        proj = models.Project(name="book", path="/tmp/book")
+        s.add(proj)
+        s.flush()
+        t1 = models.Task(project_id=proj.id, title="t1", prompt="do thing 1")
+        t2 = models.Task(project_id=proj.id, title="t2", prompt="do thing 2")
+        s.add_all([t1, t2])
+        s.flush()
+        s.add(models.TaskDependency(task_id=t2.id, depends_on_id=t1.id))
+        s.flush()
+        job = models.Job(project_id=proj.id, title="run t1", task_id=t1.id)
+        s.add(job)
+        s.flush()
+        s.add(
+            models.Outcome(
+                task_id=t1.id,
+                job_id=job.id,
+                commit_sha="abc123",
+                branch="main",
+                summary="ok",
+                status="success",
+            )
+        )
+        s.flush()
+
+        deps = s.query(models.TaskDependency).all()
+        assert len(deps) == 1
+        assert deps[0].task_id == t2.id and deps[0].depends_on_id == t1.id
+        outcomes = s.query(models.Outcome).all()
+        assert len(outcomes) == 1
+        assert outcomes[0].commit_sha == "abc123"
+        assert s.get(models.Job, job.id).task_id == t1.id
+
+
 def test_schedule_inserts(initdb: Path) -> None:
     with session_scope() as s:
         proj = models.Project(name="book", path="/tmp/book")

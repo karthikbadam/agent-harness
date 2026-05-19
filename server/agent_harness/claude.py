@@ -290,7 +290,16 @@ class ClaudeRunner:
 
     async def run(self) -> AsyncIterator[StreamEvent]:
         argv = self.build_argv()
-        log.info("spawning claude: %s (cwd=%s)", argv[:2] + ["…"], self.cwd)
+        log.info(
+            "spawning claude job=%s turn=%d cwd=%s resume=%s perm=%s tools=%d skip=%s",
+            self.job_id,
+            self.turn,
+            self.cwd,
+            self.resume_session_id or "-",
+            self.permission_mode or "-",
+            len(self.allowed_tools),
+            self.dangerously_skip,
+        )
         merged_env = {**os.environ, **(self.env or {})}
         self._proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -317,14 +326,29 @@ class ClaudeRunner:
         proc = self._proc
         if proc is None:
             return
+        err_text = ""
         if proc.stderr is not None:
             try:
                 err = await proc.stderr.read()
                 if err:
-                    log.debug("claude stderr: %.500s", err.decode("utf-8", "replace"))
+                    err_text = err.decode("utf-8", "replace")
             except Exception:
                 pass
         await proc.wait()
+        if not err_text:
+            return
+        # Nonzero exits without a user-initiated stop are bugs — surface stderr
+        # at WARNING so it shows up without needing DEBUG logging configured.
+        if proc.returncode not in (0, None) and not self._stop_requested:
+            log.warning(
+                "claude exited %d job=%s turn=%d stderr: %.500s",
+                proc.returncode,
+                self.job_id,
+                self.turn,
+                err_text,
+            )
+        else:
+            log.debug("claude stderr job=%s turn=%d: %.500s", self.job_id, self.turn, err_text)
 
     @property
     def returncode(self) -> int | None:

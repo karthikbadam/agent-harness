@@ -26,6 +26,9 @@ def _to_out(j: models.Job) -> JobOut:
         status=j.status,
         session_id=j.session_id,
         schedule_id=j.schedule_id,
+        task_id=j.task_id,
+        kind=j.kind,
+        cwd=j.cwd,
         created_at=j.created_at,
         ended_at=j.ended_at,
         turns=[
@@ -100,10 +103,47 @@ async def followup_job(
     request: Request,
     s: Session = Depends(get_session),
 ) -> JobOut:
+    """Send a follow-up turn to an existing Job (same conversation, new turn).
+
+    Followups stay on the same Job (same cwd, same session). To advance a
+    plan-then-execute Task from awaiting_ack to executing — which spawns a
+    NEW Execute Job in the worktree — call ``POST /api/tasks/{id}/ack``
+    instead. For backward compatibility, a followup on a Plan Job that's
+    bound to a Task at ``phase=awaiting_ack`` is routed to the ack flow.
+    """
     mgr = _manager(request)
     j = s.get(models.Job, job_id)
     if j is None:
         raise HTTPException(404, "not found")
+    # Back-compat: a followup on a Plan Job whose Task is parked at
+    # awaiting_ack means "ack the plan". Forward to the Task-level ack path.
+    if j.kind == "plan" and j.task_id is not None:
+        task = s.get(models.Task, j.task_id)
+        if task is not None and task.phase == "awaiting_ack":
+            from ..services import task_runner
+
+            try:
+                spawn = task_runner.advance_to_executing(
+                    j.task_id, prompt_addendum=body.prompt or ""
+                )
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            try:
+                new_jid = mgr.create_job(
+                    project_id=spawn.project_id,
+                    prompt=spawn.prompt,
+                    title=spawn.title,
+                    task_id=spawn.task_id,
+                    kind="execute",
+                    cwd=spawn.cwd,
+                )
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            await mgr.start(new_jid)
+            s.expire_all()
+            new_job = s.get(models.Job, new_jid)
+            assert new_job is not None
+            return _to_out(new_job)
     try:
         await mgr.followup(job_id, body.prompt)
     except ValueError as e:

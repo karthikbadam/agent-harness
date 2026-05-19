@@ -4,9 +4,19 @@ import { projectsApi } from "../api/projects";
 import type { ProjectCreate, ProjectUpdate } from "../types";
 
 export const projectsKey = ["projects"] as const;
+export const pathSuggestionsKey = ["path-suggestions"] as const;
 
 export function useProjects() {
   return useQuery({ queryKey: projectsKey, queryFn: projectsApi.list });
+}
+
+export function usePathSuggestions(enabled: boolean) {
+  return useQuery({
+    queryKey: pathSuggestionsKey,
+    queryFn: () => projectsApi.pathSuggestions(),
+    enabled,
+    staleTime: 60_000,
+  });
 }
 
 export function useCreateProject() {

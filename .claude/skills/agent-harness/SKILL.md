@@ -1,6 +1,6 @@
 ---
 name: agent-harness
-description: Drive a locally running agent-harness server (the self-hosted Claude Code mobile harness on macOS) from Claude Code. Use when the user wants to submit a job to agent-harness, follow up on a job, stop a job, check job/turn status, tail a stream, list/create projects or schedules, manage the tool allowlist, or run service-lifecycle commands (init, gen-token, gen-openapi, serve, launchctl). The harness exposes /api/* on http://127.0.0.1:8765 with a bearer token stored in ~/.agent-harness/config.toml.
+description: Drive a locally running agent-harness server (the self-hosted Claude Code mobile harness on macOS) from Claude Code. Use when the user wants to submit a job, follow up, stop, check status, tail a stream, list/create projects or schedules, manage the tool allowlist, decompose an ask into tasks via the planner, run a task, list outcomes (git checkpoints), or run service-lifecycle commands (init, gen-token, gen-openapi, serve, launchctl). The harness exposes /api/* on http://127.0.0.1:8765 with a bearer token stored in ~/.agent-harness/config.toml.
 ---
 
 # agent-harness skill
@@ -16,6 +16,8 @@ documented API or CLI.
 | ------------------------------------------ | ----------- |
 | Submit/list/stop jobs, follow up, stream   | HTTP API    |
 | Manage projects, schedules, allowlist      | HTTP API    |
+| Define tasks, run tasks, list outcomes     | HTTP API    |
+| Decompose an ask into draft tasks (planner) | HTTP API   |
 | Inspect a turn's transcript jsonl          | Filesystem  |
 | First-time install, rotate token, regen OpenAPI | CLI    |
 | Start/stop the launchd service             | `launchctl` |
@@ -49,12 +51,20 @@ All endpoints below are JSON in / JSON out unless noted. Base path `/api`.
 | Verb | Path | Body / Notes |
 | --- | --- | --- |
 | GET    | `/projects`              | list |
-| POST   | `/projects`              | `{name, path, permission_mode?, dangerously_skip?, extra_claude_args?, idle_timeout_seconds?}` |
+| POST   | `/projects`              | `{name, path, permission_mode?, dangerously_skip?, extra_claude_args?, idle_timeout_seconds?, instructions?, skills?, context_paths?}` |
 | GET    | `/projects/{id}`         | |
 | PATCH  | `/projects/{id}`         | any subset of the create fields |
 | DELETE | `/projects/{id}`         | cascades to jobs/rules |
 
 `permission_mode` ∈ `acceptEdits` (default) | `plan` | `default`.
+
+**Shared context fields** (additive; jobs in the project inherit them):
+- `instructions`: free-text rules synced into a managed block of
+  `<path>/CLAUDE.md` — Claude Code reads it natively.
+- `skills`: list of skill names auto-allowed for this project (each becomes
+  `Skill(<name>)` in the allowlist, no permission prompt).
+- `context_paths`: extra reference paths listed in the managed CLAUDE.md
+  block.
 
 ### Jobs
 
@@ -88,7 +98,53 @@ mirrors plus exit_code/cost_usd when terminal.
 | DELETE | `/allowlist/{id}`        | |
 
 Rule syntax matches Claude Code's allowlist: `Bash(pytest:*)`,
-`Edit(**/*.py)`, `WebFetch(*)`, etc.
+`Edit(**/*.py)`, `WebFetch(*)`, etc. A project's `skills` are merged in as
+`Skill(<name>)` automatically — no need to add them here.
+
+### Tasks
+
+A task is a unit of work in a project with optional deps on other tasks.
+Status flow:
+
+```
+pending  ──(all deps done)──▶  ready  ──(POST /run)──▶  running
+running  ──(job finalize)──▶  done | failed
+any      ──(POST /cancel)──▶  canceled
+```
+
+Tasks **do not auto-run** when deps satisfy — you kick them with `POST /run`.
+
+| Verb | Path | Body / Notes |
+| --- | --- | --- |
+| POST   | `/projects/{pid}/tasks`     | `{title, prompt, depends_on?: [task_id], order_idx?}` |
+| GET    | `/projects/{pid}/tasks`     | list with `status`, `depends_on`, `latest_outcome_id` |
+| GET    | `/tasks/{tid}`              | one task |
+| PATCH  | `/tasks/{tid}`              | edit `title`/`prompt`/`depends_on`/`order_idx`; confirms a planner draft (`pending` → `ready` if deps allow) |
+| DELETE | `/tasks/{tid}`              | only when no jobs reference it (409 → use cancel) |
+| POST   | `/tasks/{tid}/run`          | requires status `ready`; creates a job with `task_id` set |
+| POST   | `/tasks/{tid}/cancel`       | stops the running job (if any) and marks the task canceled |
+
+Task `source` is `manual` (created via POST) or `planner` (drafted by `/plan`).
+
+### Planner
+
+| Verb | Path | Body / Notes |
+| --- | --- | --- |
+| POST   | `/projects/{pid}/plan`     | `{ask}` — runs a one-off claude job that emits a JSON task array; inserts drafts with `status=pending`, `source=planner`. Returns `{task_ids[], raw?, error?}`. |
+
+The planning conversation is itself a regular job (visible under `/api/jobs`,
+streamed via SSE) — the endpoint returns once the job finishes.
+
+### Outcomes
+
+Checkpoints recorded after a task-bound job finalizes: commit sha, branch
+(`git -C <project.path> rev-parse HEAD`), the assistant's last
+`assistant_text` as `summary`, and `status` ∈ `success | failed`.
+
+| Verb | Path | Body / Notes |
+| --- | --- | --- |
+| GET | `/tasks/{tid}/outcomes`        | per-task history, newest first |
+| GET | `/projects/{pid}/outcomes`     | project-wide checkpoint log |
 
 ### Misc
 
@@ -140,6 +196,208 @@ tail -F "$HOME/.agent-harness/logs/jobs/$JID/turn-$N.jsonl"
 ```
 
 Each line is one `StreamEvent` (see `server/agent_harness/schemas.py`).
+
+### Configure a project's shared context
+
+```bash
+PID="$1"
+
+curl -sS -X PATCH "$AH_BASE/api/projects/$PID" \
+  -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  -d '{
+        "instructions": "Use snake_case. Run pytest before committing.",
+        "skills": ["init", "review"],
+        "context_paths": ["~/notes/style-guide.md"]
+      }'
+```
+
+The server writes a managed block into `<project.path>/CLAUDE.md` so Claude
+Code reads it natively; existing user content in CLAUDE.md outside the
+fence is preserved.
+
+### Decompose an ask into draft tasks
+
+```bash
+PID="$1"
+ASK="Add a /jobs/retry endpoint with tests and docs."
+
+curl -sS -X POST "$AH_BASE/api/projects/$PID/plan" \
+  -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg a "$ASK" '{ask:$a}')" \
+  | jq '.'
+# → {"task_ids":["...","..."],"raw":"...","error":null}
+```
+
+Drafts land as `status=pending`, `source=planner`. Review and confirm them
+by either editing (`PATCH /tasks/{tid}`) or running directly once their deps
+are satisfied.
+
+### Run a task DAG end to end
+
+```bash
+PID="$1"
+
+# 1. Create a chain: t1 → t2 → t3
+T1=$(curl -sS -X POST "$AH_BASE/api/projects/$PID/tasks" \
+  -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"t1","prompt":"scaffold module"}' | jq -r .id)
+
+T2=$(curl -sS -X POST "$AH_BASE/api/projects/$PID/tasks" \
+  -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg d "$T1" '{title:"t2",prompt:"add tests",depends_on:[$d]}')" | jq -r .id)
+
+T3=$(curl -sS -X POST "$AH_BASE/api/projects/$PID/tasks" \
+  -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg d "$T2" '{title:"t3",prompt:"write docs",depends_on:[$d]}')" | jq -r .id)
+
+# 2. Kick t1 — t2 only becomes 'ready' after t1 is 'done'.
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/tasks/$T1/run"
+
+# 3. Wait, then kick t2; repeat for t3.
+while [[ "$(curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/tasks/$T2" | jq -r .status)" != "ready" ]]; do sleep 5; done
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/tasks/$T2/run"
+```
+
+### Inspect outcomes (checkpoints)
+
+```bash
+curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/projects/$PID/outcomes" \
+  | jq '[.[] | {task_id, commit_sha, branch, status, created_at}]'
+```
+
+Each row is a git checkpoint produced when a task-bound job finished.
+
+### Plan-then-execute, ack a plan, integrate a wave (v2)
+
+Tasks now default to `mode=plan_then_execute`. Running one spawns a planning
+turn first; the job parks at `phase=awaiting_ack` with an `Outcome(kind=plan)`
+holding the plan text. Sending a followup on the same job acks the plan,
+creates a per-task `git worktree` under `~/.agent-harness/worktrees/<task_id>`
+on branch `task/<task_id>`, and kicks the execute turn there.
+
+```bash
+# Run a task — first turn is the plan.
+JID=$(curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/tasks/$TID/run" | jq -r .id)
+
+# Wait for the plan.
+while [[ "$(curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/jobs/$JID" | jq -r .phase)" != "awaiting_ack" ]]; do sleep 3; done
+
+# Inspect the plan.
+curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/tasks/$TID/outcomes" \
+  | jq '[.[] | select(.kind=="plan") | .summary] | .[0]'
+
+# Ack with optional guidance — empty body == bare ack.
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/jobs/$JID/followup" -d '{"prompt":""}'
+```
+
+When a wave of executes is done (`integration_status=pending` on each task),
+hand them to an integration task that merges back into the target branch:
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/projects/$PID/integrate" \
+  -d '{"task_ids":["'"$T1"'","'"$T2"'"],"target_branch":"main"}' | jq .
+
+# Returned synthetic task is in status=ready — run it.
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/tasks/$INT_ID/run"
+```
+
+On success the input tasks' worktrees + branches are cleaned up and their
+`integration_status` flips to `integrated`. On conflict the integration job
+stays open at `phase=integrating`; a followup turn can resolve.
+
+### Reshape the DAG (split/merge)
+
+```bash
+# Split a pending/ready task into two chained subtasks.
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/tasks/$TID/split" \
+  -d '{"new_tasks":[{"title":"a","prompt":"x"},{"title":"b","prompt":"y"}],
+       "inherit_deps_in":true,"link_in_series":true}'
+
+# Collapse two pending tasks into one.
+curl -sS -X POST -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/tasks/merge" \
+  -d '{"task_ids":["'"$T1"'","'"$T2"'"],"title":"combined","prompt":"do both"}'
+```
+
+### List outstanding worktrees
+
+```bash
+curl -sS -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/projects/$PID/worktrees" | jq .
+```
+
+Entries with `task_id=null` are orphans (server killed mid-execute or a
+manual mess). Use `git worktree remove --force <path>` and
+`git branch -D <branch>` from inside `project.path` to clean them up.
+
+### Drive the loop from a separate Claude session via MCP
+
+The orchestrator surface is also exposed as a typed MCP tool set. It is
+**not** auto-attached to harness jobs — connect a *separate* Claude Code
+session to it from outside the harness.
+
+Streamable HTTP transport (the harness mounts it at `/mcp`):
+
+```bash
+claude mcp add agent-harness \
+  --transport http \
+  "$AH_BASE/mcp" \
+  --header "Authorization: Bearer $AH_TOKEN"
+```
+
+Or stdio (proxies to the same running harness over HTTP):
+
+```bash
+claude mcp add agent-harness agent-harness-mcp
+```
+
+The new session sees typed tools: `list_projects`, `plan_ask`, `list_tasks`,
+`split_task`, `merge_tasks`, `run_task`, `ack_plan`, `integrate`,
+`list_outcomes`, `list_worktrees`, `tail_job`, etc. — no freeform
+"orchestrate this" prompts are involved.
+
+### Drive a 12-hour project unattended (autopilot)
+
+`agent-harness-driver` is a separate process that reacts to harness events
+and dispatches actions (ack, run, integrate, retry) when a project is in
+`autopilot_mode=on`. When off, the same decision logic powers `GET
+/driver/suggestions` for the UI.
+
+```bash
+PID="$1"
+
+# (optional) start the driver yourself in a terminal; otherwise the harness
+# auto-spawns it when you flip on (and 409s if it can't).
+agent-harness-driver &
+
+# enable autopilot
+curl -sS -X PATCH -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/projects/$PID/driver" -d '{"mode":"on"}'
+
+# check status
+curl -sS -H "Authorization: Bearer $AH_TOKEN" "$AH_BASE/api/driver/status" | jq .
+
+# what would the driver do next? (same data even when mode=off)
+curl -sS -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/projects/$PID/driver/suggestions" | jq .
+
+# audit / escalations
+curl -sS -H "Authorization: Bearer $AH_TOKEN" \
+  "$AH_BASE/api/projects/$PID/driver/notes?severity=escalate&acknowledged=false" | jq .
+
+# take back the wheel
+curl -sS -X PATCH -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \
+  "$AH_BASE/api/projects/$PID/driver" -d '{"mode":"off"}'
+```
+
+The driver retries each failed task up to 2 times with exponential backoff
+(60s, 180s); after that it logs an `escalate` note and leaves the task
+failed for human review. Integration conflicts are NOT auto-resolved —
+they're logged for inspection.
 
 ### Allow a tool rule and retry a blocked job
 
