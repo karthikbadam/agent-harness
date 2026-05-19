@@ -36,7 +36,9 @@ def _current_branch(repo: str) -> str | None:
 
 
 def _build_prompt(
-    branches: list[tuple[str, str | None]], target_branch: str
+    branches: list[tuple[str, str | None]],
+    target_branch: str,
+    create_target: bool = False,
 ) -> str:
     lines = [
         f"Integrate the following task branches into '{target_branch}':",
@@ -47,10 +49,22 @@ def _build_prompt(
         if summary:
             for s in summary.splitlines()[:3]:
                 lines.append(f"    {s}")
+    if create_target:
+        lines += [
+            "",
+            "Steps:",
+            f"1. Create branch '{target_branch}' from the current branch if it "
+            "doesn't already exist, then switch to it: "
+            f"`git switch -c {target_branch}` (or `git switch {target_branch}` "
+            "if it already exists).",
+        ]
+    else:
+        lines += [
+            "",
+            "Steps:",
+            f"1. Ensure you are on '{target_branch}'.",
+        ]
     lines += [
-        "",
-        "Steps:",
-        f"1. Ensure you are on '{target_branch}'.",
         f"2. Merge each branch listed above into '{target_branch}'. Use "
         "`git merge` or `git rebase` as appropriate. Resolve conflicts inline.",
         "3. Commit the merge(s).",
@@ -58,6 +72,23 @@ def _build_prompt(
         "Do not delete branches.",
     ]
     return "\n".join(lines)
+
+
+def build_planner_integrate_prompt(
+    dep_branch_names: list[str],
+    target_branch: str,
+    create_target: bool = True,
+) -> str:
+    """Public helper for the planner: build an integrate prompt against
+    deterministic ``task/<id>`` branch names that haven't been created yet at
+    planning time. By default, instructs the agent to create the target
+    branch (planner-emitted integrates usually target a new feature branch).
+    """
+    return _build_prompt(
+        [(b, None) for b in dep_branch_names],
+        target_branch,
+        create_target=create_target,
+    )
 
 
 def create_integration_task(

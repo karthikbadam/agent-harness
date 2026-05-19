@@ -89,45 +89,43 @@ export function Shell({
       borderBottomWidth="1px"
       borderColor="border.subtle"
     >
-      <Container maxW={CONTENT_MAX_W} px={{ base: 4, md: 6 }} py={2}>
-        <Flex align="center" gap={6}>
-          <Text fontWeight="semibold" fontSize="sm" color="fg.muted">
-            agent-harness
-          </Text>
-          <HStack gap={1} flex="1">
-            {NAV.map((n) => {
-              const current = isCurrent(location.pathname, n.to);
-              return (
-                <Flex
-                  as={RouterLink}
-                  key={n.to}
-                  // @ts-expect-error chakra/router prop interop
-                  to={n.to}
-                  align="center"
-                  px={3}
-                  py={1.5}
-                  rounded="md"
-                  fontSize="sm"
-                  fontWeight={current ? "medium" : "normal"}
-                  color={current ? "fg" : "fg.muted"}
-                  bg={current ? "bg" : "transparent"}
-                  _hover={{ bg: "bg", color: "fg" }}
-                >
-                  {n.label}
-                </Flex>
-              );
-            })}
-          </HStack>
-          <IconButton
-            aria-label="Settings"
-            variant="ghost"
-            size="sm"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <LuSettings />
-          </IconButton>
-        </Flex>
-      </Container>
+      <Flex align="center" gap={6} px={{ base: 4, md: 6 }} py={2}>
+        <Text fontWeight="semibold" fontSize="sm" color="fg.muted">
+          agent-harness
+        </Text>
+        <HStack gap={1} flex="1">
+          {NAV.map((n) => {
+            const current = isCurrent(location.pathname, n.to);
+            return (
+              <Flex
+                as={RouterLink}
+                key={n.to}
+                // @ts-expect-error chakra/router prop interop
+                to={n.to}
+                align="center"
+                px={3}
+                py={1.5}
+                rounded="md"
+                fontSize="sm"
+                fontWeight={current ? "medium" : "normal"}
+                color={current ? "fg" : "fg.muted"}
+                bg={current ? "bg" : "transparent"}
+                _hover={{ bg: "bg", color: "fg" }}
+              >
+                {n.label}
+              </Flex>
+            );
+          })}
+        </HStack>
+        <IconButton
+          aria-label="Settings"
+          variant="ghost"
+          size="sm"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <LuSettings />
+        </IconButton>
+      </Flex>
     </Box>
   );
 

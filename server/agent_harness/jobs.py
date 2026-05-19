@@ -78,19 +78,15 @@ def _augment_prompt_for_kind(s, job: "models.Job", prompt: str) -> str:
     return prompt
 
 
-# Rules auto-granted by job phase. Without these the agent loops on
-# permission-denied for git operations the phase prompt explicitly asks for
-# (commit during execute; checkout/switch/merge during integrate).
-_EXECUTE_PHASE_RULES = ("Bash(git add:*)", "Bash(git commit:*)")
-_INTEGRATING_PHASE_RULES = (
-    "Bash(git checkout:*)",
-    "Bash(git switch:*)",
-    "Bash(git merge:*)",
-    "Bash(git branch:*)",
-    "Bash(git fetch:*)",
-    "Bash(git add:*)",
-    "Bash(git commit:*)",
-)
+# Rules auto-granted by job phase. The execute and integrate phases run
+# inside an isolated git worktree, so we give the agent full Bash access
+# there — anything narrower means it loops on permission denied for the
+# language toolchain (`npm`, `pytest`, `cargo`, etc.) or for git operations
+# the phase prompt explicitly asks for. Surfacing approval prompts to a
+# non-interactive job just deadlocks it; broad Bash inside a worktree is
+# the right blast radius for this harness.
+_EXECUTE_PHASE_RULES = ("Bash(*)",)
+_INTEGRATING_PHASE_RULES = ("Bash(*)",)
 
 
 def _kind_rules(kind: str | None) -> tuple[str, ...]:

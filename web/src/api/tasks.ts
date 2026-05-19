@@ -9,6 +9,7 @@ import type {
 } from "../types";
 
 export const tasksApi = {
+  listAll: () => api.get<TaskOut[]>(`/api/tasks`),
   listForProject: (projectId: string) =>
     api.get<TaskOut[]>(`/api/projects/${projectId}/tasks`),
   get: (id: string) => api.get<TaskOut>(`/api/tasks/${id}`),
