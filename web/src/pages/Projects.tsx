@@ -70,14 +70,7 @@ export function ProjectsPage() {
             >
               <ProjectRow
                 project={p}
-                stats={
-                  stats[p.id] ?? {
-                    jobs: 0,
-                    jobsRunning: 0,
-                    tasksActive: 0,
-                    tasksTotal: 0,
-                  }
-                }
+                stats={stats[p.id] ?? emptyStats()}
                 onClick={() => navigate(`/projects/${p.id}`)}
               />
             </SwipeableRow>
@@ -94,9 +87,16 @@ export function ProjectsPage() {
 interface ProjectStats {
   jobs: number;
   jobsRunning: number;
-  tasksActive: number;
+  tasksDone: number;
   tasksTotal: number;
 }
+
+const emptyStats = (): ProjectStats => ({
+  jobs: 0,
+  jobsRunning: 0,
+  tasksDone: 0,
+  tasksTotal: 0,
+});
 
 function indexStats(
   jobs: JobOut[],
@@ -104,25 +104,15 @@ function indexStats(
 ): Record<string, ProjectStats> {
   const m: Record<string, ProjectStats> = {};
   for (const j of jobs) {
-    const s =
-      m[j.project_id] ??
-      { jobs: 0, jobsRunning: 0, tasksActive: 0, tasksTotal: 0 };
+    const s = m[j.project_id] ?? emptyStats();
     s.jobs += 1;
     if (j.status === "running" || j.status === "queued") s.jobsRunning += 1;
     m[j.project_id] = s;
   }
   for (const t of tasks) {
-    const s =
-      m[t.project_id] ??
-      { jobs: 0, jobsRunning: 0, tasksActive: 0, tasksTotal: 0 };
+    const s = m[t.project_id] ?? emptyStats();
     s.tasksTotal += 1;
-    if (
-      t.status === "pending" ||
-      t.status === "ready" ||
-      t.status === "running"
-    ) {
-      s.tasksActive += 1;
-    }
+    if (t.status === "done") s.tasksDone += 1;
     m[t.project_id] = s;
   }
   return m;
@@ -209,9 +199,9 @@ function ProjectRow({
         )}
         {stats.tasksTotal > 0 && (
           <Text>
-            {stats.tasksActive > 0
-              ? `${stats.tasksActive}/${stats.tasksTotal} tasks`
-              : `${stats.tasksTotal} tasks`}
+            {stats.tasksDone === stats.tasksTotal
+              ? `${stats.tasksTotal} tasks`
+              : `${stats.tasksDone}/${stats.tasksTotal} tasks`}
           </Text>
         )}
         {stats.jobs > 0 && stats.jobsRunning === 0 && (
