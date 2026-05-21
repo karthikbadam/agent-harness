@@ -1,13 +1,15 @@
-"""Planner: turn a high-level ask into a list of draft tasks.
+"""Planner: turn a high-level ask into a list of child tasks.
 
-Implementation strategy: spawn a one-off job in the project using `JobManager`,
-prompt claude to emit a strict JSON task list, then parse the assistant_text
-events from the resulting log. Tasks are inserted with `source='planner'` and
-`status='pending'` so the user can edit/confirm them before running.
+The planner runs as a first-class Task (``mode='plan'``) — created by
+``POST /api/projects/{id}/plan`` and kicked via ``task_runner.kickoff_first_phase``.
+Its job spawns a Claude conversation with :data:`PLANNER_INSTRUCTIONS` prepended;
+when that job finishes, ``task_runner.on_job_finalized`` calls
+:func:`parse_and_insert_from_log_dir` here to read the assistant_text events,
+parse the JSON task array, and insert the child tasks.
 
-We piggy-back on the regular job machinery so the planning conversation is
-visible in the Jobs UI (and is captured under `~/.agent-harness/logs/jobs/<id>/`
-just like any other job).
+This module owns the prompt and the parsing/insert helpers. The orchestration
+lives in ``task_runner`` so plan tasks share the same lifecycle plumbing as
+every other task (status, phase, outcomes, autorun, driver events).
 """
 
 from __future__ import annotations
@@ -21,48 +23,72 @@ from pathlib import Path
 
 from .. import models
 from ..db import session_scope
-from ..jobs import JobManager
 
 log = logging.getLogger(__name__)
 
 
 PLANNER_INSTRUCTIONS = """\
-You are a planning assistant for a software repo. The user will describe a
-high-level ask; your job is to produce a concrete, parallel-friendly task
-list — but FIRST you must understand the codebase enough to plan against
-reality, not guesses.
+You decompose a user's ask into a parallel-friendly task list.
 
-## Phase 1 — Audit (do this before drafting tasks)
+Each task you emit runs as its own Claude session, in its own git worktree on
+a `task/<id>` branch. Tasks with `mode: "plan_then_execute"` get a planning
+turn first — that's where the agent audits its area of the codebase before
+editing. Your scopes need to be crisp, but you don't need to audit the repo
+here; each task will look into the files it needs.
 
-Use your read-only tools (Glob, Grep, Read) to:
-1. Locate the files, components, or modules the ask touches.
-2. Note shared wrappers / utilities / patterns that multiple files use.
-3. Identify which files are truly independent (no shared edits) and which
-   share a contract (e.g. a wrapper component used by many call sites).
-4. Spot existing tests, type checks, or build scripts that should pass
-   afterwards.
+## Output contract
 
-Do not modify anything in this phase. The planner job is read-only.
+Write a brief findings paragraph (3–10 lines) naming WHAT each task should
+investigate or change (not the answers). Then emit a strict JSON array
+(Markdown fence allowed but not required):
 
-## How the harness runs your plan (read this before drafting tasks)
+  [
+    {
+      "title": "<imperative title, <= 80 chars>",
+      "prompt": "<the exact prompt the agent will run when this task executes — name specific files and the concrete change>",
+      "depends_on_titles": ["<earlier task title>", ...],
+      "kind": "task" | "integrate",                                    // optional, default "task"
+      "mode": "plan_then_execute" | "execute_only" | "research"        // optional, default "plan_then_execute"
+    },
+    ...
+  ]
 
-Each task you emit runs as its own git worktree under a `task/<id>` branch.
-The starting tree for a task depends on its dependencies:
+## Modes
 
-- A task with **no dependencies** branches from the project's main HEAD —
-  it sees the repo as it is today.
-- A task whose dependency is an **integrate** task (see below) branches
-  from the integrate's target branch — it sees all the merged work.
-- A task with **a single regular dependency** branches from that dep's
-  `task/<id>` tip — it sees that one task's files.
-- A task with **multiple regular dependencies** branches from main —
-  the harness can't safely auto-merge multiple `task/<id>` branches for
-  you, so the dependent task won't see its predecessors' files. Don't
-  rely on this shape.
+- `plan_then_execute` (default) — the agent does a read-only planning turn
+  first, writes a mini-plan, and waits for the user to ack before editing.
+  The execute turn then runs in a fresh worktree on a `task/<id>` branch and
+  commits the work. Use this for non-trivial code changes where a quick
+  review of the agent's intent before files change is worth the extra step.
+- `execute_only` — same worktree + branch model, but skip the plan/ack
+  handshake. Good when the task is narrow and well-specified enough that a
+  planning turn would just be ceremony — "Add a `hubbleTime(H0)` helper in
+  src/physics/cosmology.ts", "Rename FooBar → FizzBuzz across src/components".
+- `research` — answer-only task. Runs at the project root with no worktree
+  and makes no commits — the final assistant message is the deliverable shown
+  to the user as the answer. Use when the ask is a question, an explanation,
+  or any non-code investigation. Anything the agent writes to disk in a
+  research task is lost; the answer must live in the message.
 
-Because each task lives on its own branch, sibling tasks (run in
-parallel) don't see each other's files. If multiple downstream tasks
-need to build on the same foundation, plan the *wave shape*:
+## Question-shaped asks
+
+If the user's ask is a question or research request (e.g. "what does this
+repo do?", "explain how X works"), the right shape is exactly one `research`
+task whose prompt is the question itself. One task owns the answer; the user
+clicks into it to read the reply.
+
+## Always emit at least one task
+
+The project page expects a task to track every ask, so the user has a
+visible row to follow and a place where the result will land. If you cannot
+decompose further, emit one task whose prompt is the user's ask verbatim
+rather than returning an empty list.
+
+## Wave shape (when many tasks share a foundation)
+
+Each task lives on its own branch, so sibling tasks (run in parallel) don't
+see each other's files. If multiple downstream tasks need to build on the
+same foundation, plan a wave:
 
 ```
 [T1, T2, T3]   ← siblings, foundation work (no deps)
@@ -70,96 +96,57 @@ need to build on the same foundation, plan the *wave shape*:
  [Integrate]   ← kind: "integrate", merges T1+T2+T3 into a shared branch
      ↓
 [T4, T5, T6]   ← siblings, build on integrated foundation
-     ↓
- [Integrate]   ← optional final integrate, if you want one branch out
 ```
 
-Use this only when it's actually needed. If the ask is small and
-localized, one task is enough. If tasks are truly independent, sibling
-shape with no deps is best — the harness will run them in parallel.
+An integrate entry needs `title`, `kind: "integrate"`, `depends_on_titles`
+(every task whose work should be merged), and `target_branch` (a fresh
+branch name like `feat/<slug>-foundation`). The harness builds the merge
+prompt automatically — leave `prompt` off integrate entries; it's ignored.
+Downstream tasks that depend on this integrate task will start their
+worktrees from `target_branch`, so they see all the merged work.
 
-## Phase 2 — Output: a short audit summary, then the JSON task list
-
-First, write a brief (3–10 line) findings paragraph in prose. This is the
-plan the user reads in the UI to understand WHY you decomposed the way you
-did — name the files you found, the shared pieces, and the parallel
-structure you chose.
-
-Then emit the task list as a strict JSON array (Markdown fence allowed but
-not required), with these fields:
-
-  [
-    {
-      "title": "<short imperative title, <= 80 chars>",
-      "prompt": "<the exact prompt that should be sent to claude when this task runs — name specific files and the concrete change>",
-      "depends_on_titles": ["<title of an earlier task>", ...],
-      "kind": "task" | "integrate",       // optional, defaults to "task"
-      "mode": "plan_then_execute" | "execute_only"  // optional, defaults to "plan_then_execute"
-    },
-    ...
-  ]
-
-### Mode selection
-
-Default `plan_then_execute` runs a read-only planning turn before the
-agent edits files. The planning turn writes a mini-plan; the execute
-turn then runs in a fresh worktree on a `task/<id>` branch and commits
-the work. Use it for non-trivial tasks where the agent benefits from
-articulating its approach before touching files.
-
-Use `"mode": "execute_only"` for narrow, well-specified tasks where a
-planning turn would just be ceremony. The task still gets its own
-worktree + branch (so it can be integrated), the agent just skips the
-plan/ack handshake. Good candidates:
-
-- "Add a `hubbleTime(H0)` helper in src/physics/cosmology.ts" — narrow,
-  one or two files, prompt describes the change exactly.
-- "Rename FooBar → FizzBuzz across src/components" — mechanical.
-- A single-step change you can describe in one sentence.
-
-When in doubt, default `plan_then_execute`.
-
-### Integrate tasks
-
-An entry with `"kind": "integrate"` is a merge step the harness runs for
-you. The harness builds the prompt automatically from the dependencies;
-you do not write a prompt for it. Required fields:
-
-  {
-    "title": "Integrate foundation",
-    "kind": "integrate",
-    "depends_on_titles": [<every task whose work should be merged>],
-    "target_branch": "<branch name to create and merge into>"
-  }
-
-- `target_branch` MUST be a fresh branch name like
-  `feat/<short-slug>-foundation` — the integrate task creates it from
-  the current HEAD and merges every dep's `task/<id>` branch into it.
-- Downstream tasks depending on this integrate task will start their
-  worktrees from `target_branch`, so they see all the merged work.
-- Do not include `prompt` on integrate entries; it's ignored.
+Use waves only when the foundation is actually shared. If the ask is small
+or the tasks are truly independent (disjoint files), one or a few siblings
+with no deps is best — the harness will run them in parallel, which is
+faster than serializing through a wave you didn't need.
 
 ## Task-shaping rules
 
-- 1 to 16 tasks. Concrete and parallel beats long and serial.
-- **Maximize parallelism**: tasks that touch disjoint files MUST have empty
-  `depends_on_titles`. Only add a dep when the later task genuinely cannot
-  succeed before the earlier one lands (e.g. it consumes a function the
-  earlier task introduces).
-- If many files share one foundation change, plan: foundation task(s) →
-  integrate → dependent tasks. The integrate makes the foundation visible
-  to the dependents.
-- Each `prompt` must name specific files/paths and the concrete change.
-  "Update PlotSection.tsx to render plot and controls in a responsive
-  Stack (column on base, row on md+)" — not "implement the layout".
-- Do not include a separate "audit" task. Your Phase 1 above replaces that;
-  the agent that runs each task already has read access to the repo.
-- Do not include a final "verify" or "run tests" task. The harness checks
-  on integration. (Exception: if the ask itself is a test/verify task.)
-- Tasks should each be small enough to checkpoint with one git commit.
+- **1 to 16 tasks.** A handful of concrete, parallel tasks lands faster and
+  is easier to review than a long serial chain. If you find yourself drafting
+  more than ~16, the scopes are probably too small — collapse related ones.
+- **Maximize parallelism.** Tasks that touch disjoint files MUST have empty
+  `depends_on_titles` so the harness can run them concurrently. Only add a
+  dep when the later task genuinely cannot succeed before the earlier one
+  lands — e.g. it imports a function the earlier task introduces. A spurious
+  dep serializes work that could have run in parallel.
+- **If many files share one foundation change, plan a wave.** Foundation
+  task(s) → integrate → dependent tasks. The integrate merges the foundation
+  into a shared branch so the dependents actually see it; without it,
+  sibling branches are invisible to each other.
+- **Each `prompt` names specific files/paths and the concrete change.**
+  "Update PlotSection.tsx to render plot and controls in a responsive Stack
+  (column on base, row on md+)" gives the agent enough to execute against;
+  "implement the layout" is a goal, not a task — the agent will guess at
+  the scope and likely drift.
+- **No separate "audit" task.** Each task's own session reads the files it
+  needs before editing; an upfront audit task just duplicates that work and
+  doesn't share its findings with the siblings anyway (different branches).
+- **No final "verify" or "run tests" task.** The harness runs verification
+  on integration, and most tasks should commit a passing change anyway.
+  Exception: if the ask itself is to add tests or verify something, that's
+  the task — not an extra step bolted onto another task.
+- **Each task should be small enough to checkpoint with one git commit.**
+  That's the unit the harness records as an outcome and what makes a failed
+  task safe to retry. A task that needs three commits is two tasks too few.
 
 The user's ask follows.
 """
+
+
+# Modes the planner is allowed to emit on child tasks. "plan" is excluded —
+# nested plans don't make sense; the top-level planner already owns this run.
+_ALLOWED_CHILD_MODES = ("plan_then_execute", "execute_only", "one_shot", "research")
 
 
 def _extract_json_array(text: str) -> list[dict] | None:
@@ -215,58 +202,59 @@ def _all_assistant_text(log_dir: Path) -> str:
     return "\n".join(pieces)
 
 
-async def plan(
-    project_id: str,
-    ask: str,
-    job_manager: JobManager,
-    log_root: Path,
-) -> tuple[list[str], str | None, str | None]:
-    """Run the planner, insert draft tasks, and auto-kick any that landed
-    ``ready`` (i.e. have no unsatisfied deps).
+def parse_and_insert_from_log_dir(
+    project_id: str, plan_task_id: str, log_dir: Path, ask: str
+) -> list[str]:
+    """Read assistant_text from ``log_dir``, parse the JSON task array, and
+    insert child tasks.
 
-    Returns (task_ids, raw_output_or_None, error_or_None). On JSON parse
-    failure the raw output is returned so the caller can show it to the user;
-    no tasks are inserted in that case.
+    Always returns the ids of the inserted child tasks. If the planner output
+    can't be parsed into a non-empty task array, inserts a single fallback
+    ``research`` task whose prompt is the original ask — the "always emit at
+    least one task" contract — so the project page never ends up empty after
+    a plan run.
     """
-    prompt = PLANNER_INSTRUCTIONS + "\n\nAsk:\n" + ask
-    title = f"[plan] {ask[:60]}"
-    try:
-        jid = job_manager.create_job(project_id, prompt, title=title)
-    except ValueError as e:
-        return [], None, f"could not create planner job: {e}"
-    await job_manager.start(jid)
-    await job_manager.wait(jid)
-
-    log_dir = log_root / "jobs" / jid
     raw = _all_assistant_text(log_dir)
     parsed = _extract_json_array(raw)
-    if parsed is None:
-        return [], raw, "could not parse a JSON task array from planner output"
+    if parsed and isinstance(parsed, list):
+        ids = _insert_drafts(project_id, parsed)
+        if ids:
+            return ids
+    log.info(
+        "planner emitted no usable tasks for %s; inserting fallback research task",
+        plan_task_id,
+    )
+    return _insert_fallback_research(project_id, ask)
 
-    task_ids = _insert_drafts(project_id, parsed)
 
-    # Auto-kick: planner drafts that landed ``ready`` (no deps) run immediately.
-    # The user already approved the ask by submitting it; gating each task on
-    # a manual Run click adds friction without value. Tasks still in ``pending``
-    # (waiting on a predecessor) auto-kick later via on_job_finalized.
-    from . import task_runner
+def _insert_fallback_research(project_id: str, ask: str) -> list[str]:
+    """Insert a single ``research`` task carrying the original ask.
 
-    for tid in task_ids:
-        try:
-            await task_runner.kickoff_first_phase(tid, job_manager)
-        except Exception:  # noqa: BLE001
-            log.exception("planner autorun failed for task %s", tid)
-
-    return task_ids, raw, None
+    Used when the planner failed to produce a task array. Lands ``ready`` so
+    the autorun path picks it up immediately.
+    """
+    title = (ask.strip().splitlines()[0] if ask.strip() else "Research")[:80]
+    with session_scope() as s:
+        t = models.Task(
+            project_id=project_id,
+            title=title or "Research",
+            prompt=ask,
+            status="ready",
+            source="planner",
+            order_idx=0,
+            mode="research",
+        )
+        s.add(t)
+        s.flush()
+        return [t.id]
 
 
 def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
     """Insert planner-drafted tasks, resolving depends_on_titles to ids.
 
     Drafts land as ``source='planner'``. Tasks with no deps are inserted as
-    ``ready`` so the user can run them immediately; tasks with deps stay
-    ``pending`` until their predecessors finish. Skips entries missing a
-    title or prompt.
+    ``ready`` so they auto-run; tasks with deps stay ``pending`` until their
+    predecessors finish. Skips entries missing a title or prompt.
 
     Entries with ``kind: "integrate"`` are created as synthetic, one-shot
     integrate tasks. Their prompt is auto-built from the dep ``task/<id>``
@@ -317,7 +305,7 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
             if not isinstance(prompt, str):
                 continue
             mode = item.get("mode")
-            if mode not in ("plan_then_execute", "execute_only", "one_shot"):
+            if mode not in _ALLOWED_CHILD_MODES:
                 mode = "plan_then_execute"
             t = models.Task(
                 project_id=project_id,
@@ -388,7 +376,7 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
             )
 
         # Promote drafts whose deps are already done (or absent) to 'ready' so
-        # the user doesn't have to PATCH each one to confirm.
+        # autorun picks them up without a manual click.
         for tid in created_ids:
             t = s.get(models.Task, tid)
             if t is None:

@@ -21,6 +21,29 @@ Mac:  ~/Library/LaunchAgents/com.you.agent-harness.plist
                      └── per-turn jsonl in ~/.agent-harness/logs/jobs/<id>/
 ```
 
+## Prerequisites
+
+The harness shells out to a `claude` CLI that speaks
+`claude -p --output-format stream-json`. Install it once before running
+`./scripts/install.sh`:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude --version    # confirm it's on PATH
+```
+
+Then pick a backend:
+
+- **Anthropic API** (default): run `claude` once and follow the interactive
+  sign-in, or set `ANTHROPIC_API_KEY` in the environment.
+- **Ollama** (open-source, local models): follow Ollama's Claude Code
+  integration guide at
+  <https://docs.ollama.com/integrations/claude-code> — same `claude` binary,
+  pointed at a local Ollama server instead of the Anthropic API.
+
+If `claude` isn't on PATH after install, set `claude_path` in
+`~/.agent-harness/config.toml` or `AH_CLAUDE_PATH` (see Configuration below).
+
 ## Quick start
 
 ```bash

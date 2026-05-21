@@ -48,7 +48,7 @@ async def app_client(initdb: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 async def test_plan_endpoint_inserts_drafts_and_auto_kicks_root(app_client) -> None:
-    client, _ = app_client
+    client, app = app_client
     auth = {"Authorization": "Bearer test-token"}
     r = await client.post(
         "/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth
@@ -62,15 +62,30 @@ async def test_plan_endpoint_inserts_drafts_and_auto_kicks_root(app_client) -> N
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["error"] is None
-    assert len(body["task_ids"]) == 2
+    # POST returns the plan task id immediately; the planner job runs
+    # asynchronously and inserts child tasks on completion.
+    assert len(body["task_ids"]) == 1
+    plan_task_id = body["task_ids"][0]
+
+    # Wait for the planner job (the only running job at this point) to finish.
+    r = await client.get("/api/jobs", headers=auth)
+    plan_jobs = [j for j in r.json() if j.get("task_id") == plan_task_id]
+    assert len(plan_jobs) == 1
+    await app.state.job_manager.wait(plan_jobs[0]["id"])
 
     r = await client.get(f"/api/projects/{pid}/tasks", headers=auth)
-    by_title = {t["title"]: t for t in r.json()}
+    tasks = r.json()
+    by_title = {t["title"]: t for t in tasks}
+    # The plan task itself + the two children the fake planner emits.
     assert {"scaffold module", "add tests"} <= set(by_title)
-    assert all(t["source"] == "planner" for t in r.json())
-    # The root draft (no deps) auto-kicks — landing in running/queued/done
-    # depending on how far the fake runner has advanced. The dependent draft
-    # stays pending until its predecessor completes.
+    plan_task = next(t for t in tasks if t["id"] == plan_task_id)
+    assert plan_task["mode"] == "plan"
+    assert plan_task["status"] == "done"
+    children = [t for t in tasks if t["source"] == "planner"]
+    assert len(children) == 2
+    # The root child (no deps) auto-kicks — landing in running/queued/done
+    # depending on how far the fake runner has advanced. The dependent
+    # child stays pending until its predecessor completes.
     assert by_title["scaffold module"]["status"] in {"running", "queued", "done"}
     assert by_title["add tests"]["status"] == "pending"
     assert by_title["add tests"]["depends_on"] == [by_title["scaffold module"]["id"]]

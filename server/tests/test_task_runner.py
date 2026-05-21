@@ -161,6 +161,162 @@ def test_no_git_records_null_sha(initdb: Path, tmp_path: Path) -> None:
         assert o.status == "success"
 
 
+def test_plan_mode_inserts_children_and_marks_self_done(
+    initdb: Path, tmp_path: Path
+) -> None:
+    """A top-level planner task (mode='plan') parses its job's JSON output
+    into child tasks and flips itself to done. The plan task is NOT parked
+    at awaiting_ack — that's only for per-task plan_then_execute planning.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        t = models.Task(
+            project_id=proj.id,
+            title="Plan: ship a thing",
+            prompt="ship a thing",
+            status="running",
+            phase="planning",
+            mode="plan",
+            source="user",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(
+            project_id=proj.id, title="run", task_id=t.id, kind="plan", cwd=str(repo),
+        )
+        s.add(job)
+        s.flush()
+        jid, tid, pid = job.id, t.id, proj.id
+
+    log_dir = tmp_path / "logs" / jid
+    json_array = (
+        '[{"title":"step one","prompt":"do one","depends_on_titles":[]},'
+        '{"title":"step two","prompt":"do two","depends_on_titles":["step one"]}]'
+    )
+    _write_event_log(log_dir, json_array)
+    task_runner.on_job_finalized(jid, "done", log_dir=log_dir)
+
+    with session_scope() as s:
+        plan = s.get(models.Task, tid)
+        assert plan.status == "done" and plan.phase == "done"
+        outcome = s.query(models.Outcome).filter_by(task_id=tid).one()
+        assert outcome.kind == "plan" and outcome.status == "success"
+        assert "Created 2 task" in (outcome.summary or "")
+        children = (
+            s.query(models.Task)
+            .filter(models.Task.project_id == pid, models.Task.source == "planner")
+            .all()
+        )
+        by_title = {c.title: c for c in children}
+        assert {"step one", "step two"} == set(by_title)
+        assert by_title["step one"].status == "ready"
+        assert by_title["step two"].status == "pending"
+
+
+def test_plan_mode_empty_output_falls_back_to_research_task(
+    initdb: Path, tmp_path: Path
+) -> None:
+    """When the planner emits no usable JSON, the fallback ensures at least
+    one child task lands — a research task carrying the original ask. This
+    is the "the project page expects a task to track every ask" contract.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        t = models.Task(
+            project_id=proj.id,
+            title="Plan: what does this repo do?",
+            prompt="what does this repo do?",
+            status="running",
+            phase="planning",
+            mode="plan",
+            source="user",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(
+            project_id=proj.id, task_id=t.id, kind="plan", cwd=str(repo),
+        )
+        s.add(job)
+        s.flush()
+        jid, tid, pid = job.id, t.id, proj.id
+
+    log_dir = tmp_path / "logs" / jid
+    # Planner emitted no JSON array — just chatter.
+    _write_event_log(log_dir, "I'm not sure how to decompose this.")
+    task_runner.on_job_finalized(jid, "done", log_dir=log_dir)
+
+    with session_scope() as s:
+        plan = s.get(models.Task, tid)
+        assert plan.status == "done"
+        children = (
+            s.query(models.Task)
+            .filter(models.Task.project_id == pid, models.Task.source == "planner")
+            .all()
+        )
+        assert len(children) == 1
+        fallback = children[0]
+        assert fallback.mode == "research"
+        assert fallback.prompt == "what does this repo do?"
+        assert fallback.status == "ready"
+
+
+def test_research_mode_executes_at_project_root_without_worktree(
+    initdb: Path, tmp_path: Path
+) -> None:
+    """A research task runs at project.path, records its answer in the
+    Outcome summary, and does NOT set integration_status — there's no branch
+    to integrate. The execute branch's commit backstop is a no-op because
+    cwd == project.path.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    with session_scope() as s:
+        proj = models.Project(name="r", path=str(repo))
+        s.add(proj)
+        s.flush()
+        t = models.Task(
+            project_id=proj.id,
+            title="what does this repo do?",
+            prompt="what does this repo do?",
+            status="running",
+            phase="executing",
+            mode="research",
+            source="planner",
+        )
+        s.add(t)
+        s.flush()
+        job = models.Job(
+            project_id=proj.id, task_id=t.id, kind="execute", cwd=str(repo),
+        )
+        s.add(job)
+        s.flush()
+        jid, tid = job.id, t.id
+
+    log_dir = tmp_path / "logs" / jid
+    _write_event_log(log_dir, "The repo is an agent harness.")
+    task_runner.on_job_finalized(jid, "done", log_dir=log_dir)
+
+    with session_scope() as s:
+        task = s.get(models.Task, tid)
+        assert task.status == "done" and task.phase == "done"
+        # Research tasks have no branch to integrate.
+        assert task.integration_status is None
+        outcome = s.query(models.Outcome).filter_by(task_id=tid).one()
+        assert outcome.kind == "execute"
+        assert outcome.summary == "The repo is an agent harness."
+
+
 def test_planning_phase_records_plan_outcome_and_keeps_task_running(
     initdb: Path, tmp_path: Path
 ) -> None:

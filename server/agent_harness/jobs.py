@@ -50,6 +50,14 @@ _EXECUTE_PREFIX_TEMPLATE = (
     "complete."
 )
 
+_RESEARCH_PREFIX = (
+    "This is a research task. The deliverable is your final assistant message "
+    "— that's what the project page will show the user as the answer. The "
+    "harness will not commit any files written during this session, so any "
+    "work outside the answer text is lost. Keep the answer concise and "
+    "self-contained."
+)
+
 
 def _last_plan_summary(s, task_id: str | None) -> str | None:
     if not task_id:
@@ -65,14 +73,24 @@ def _last_plan_summary(s, task_id: str | None) -> str | None:
 def _augment_prompt_for_kind(s, job: "models.Job", prompt: str) -> str:
     """Prepend a kind-specific instruction to the user's prompt.
 
-    Plan Jobs get a read-only contract. Execute Jobs get the prior plan
-    summary so the agent has continuity in the fresh worktree session.
-    Integrate Jobs and ad-hoc Jobs pass through unchanged (the integrate
-    prompt is already built by ``integration.build_synthetic_task_prompt``).
+    Plan Jobs get a read-only contract. The top-level planner (Task with
+    ``mode='plan'``) instead gets the decomposition instructions from
+    ``services.planner.PLANNER_INSTRUCTIONS`` so it emits a JSON task list
+    rather than a numbered plan. Execute Jobs for ``mode='research'`` tasks
+    get the research prefix (no commits, final message is the deliverable).
+    Other execute jobs get the prior plan summary so the agent has continuity
+    in the fresh worktree session. Integrate Jobs and ad-hoc Jobs pass through
+    unchanged.
     """
+    task = s.get(models.Task, job.task_id) if job.task_id else None
     if job.kind == "plan":
+        if task is not None and task.mode == "plan":
+            from .services.planner import PLANNER_INSTRUCTIONS
+            return f"{PLANNER_INSTRUCTIONS}\n\nAsk:\n{prompt}"
         return f"{_PLANNING_PREFIX}\n\n{prompt}"
     if job.kind == "execute":
+        if task is not None and task.mode == "research":
+            return f"{_RESEARCH_PREFIX}\n\n{prompt}"
         plan = _last_plan_summary(s, job.task_id)
         return _EXECUTE_PREFIX_TEMPLATE.format(plan=plan or "(plan not recorded)") + "\n\n" + prompt
     return prompt

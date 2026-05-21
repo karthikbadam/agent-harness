@@ -264,9 +264,62 @@ def on_job_finalized(
 
         if job.kind == "plan":
             summary = _last_assistant_text(log_dir) if log_dir is not None else None
+            # Top-level planner task: decompose the ask into child tasks and
+            # mark itself done. Distinct from the per-task planning phase
+            # (mode='plan_then_execute') which parks at awaiting_ack.
+            if task.mode == "plan":
+                child_ids: list[str] = []
+                if job_status == "done" and log_dir is not None:
+                    from . import planner as _planner
+                    try:
+                        child_ids = _planner.parse_and_insert_from_log_dir(
+                            project_id, task.id, log_dir, task.prompt
+                        )
+                    except Exception:  # noqa: BLE001
+                        log.exception(
+                            "planner insert failed for task %s", task.id
+                        )
+                outcome_status = "success" if job_status == "done" else "failed"
+                plan_summary = (
+                    f"Created {len(child_ids)} task{'s' if len(child_ids) != 1 else ''}."
+                    if child_ids
+                    else summary
+                )
+                task.status = "done" if job_status == "done" else "failed"
+                task.phase = "done" if job_status == "done" else "failed"
+                if task.status == "failed":
+                    task.last_failed_at = datetime.now(timezone.utc)
+                s.add(
+                    models.Outcome(
+                        task_id=task.id,
+                        job_id=job.id,
+                        commit_sha=None,
+                        branch=None,
+                        summary=plan_summary,
+                        status=outcome_status,
+                        kind="plan",
+                    )
+                )
+                s.flush()
+                # Newly-inserted child tasks that landed 'ready' (no unmet
+                # deps) auto-run. They aren't downstream of the plan task in
+                # the DAG — _insert_drafts created them with source='planner'
+                # and the existing autorun path handles them.
+                for cid in child_ids:
+                    ds = s.get(models.Task, cid)
+                    if ds is not None and ds.status == "ready" and ds.source == "planner":
+                        autorun_ids.append(cid)
+                pending_events.append(
+                    (
+                        "task_done" if task.status == "done" else "task_failed",
+                        {"project_id": project_id, "task_id": task.id, "job_id": job.id},
+                    )
+                )
+                _emit_after(bus, pending_events)
+                return autorun_ids
+            # Per-task plan phase (mode='plan_then_execute'): park at
+            # awaiting_ack so the user/driver can ack into the execute phase.
             if job_status == "done":
-                # Plan ran cleanly. Park the Task at awaiting_ack; the user
-                # (or driver) calls /tasks/{id}/ack to advance to execute.
                 task.phase = "awaiting_ack"
                 s.add(
                     models.Outcome(
@@ -443,11 +496,15 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
 
     Mode → first-phase mapping:
       - ``synthetic`` (integrate task) → integrate job at project path.
+      - ``plan`` → plan job at project path. The planner decomposes the ask
+        into child tasks; no worktree, no commits.
       - ``plan_then_execute`` → plan job at project path (worktree comes
         later on ack).
       - ``execute_only`` → execute job in a fresh worktree, skipping the
         plan/ack handshake. The task still gets a per-task branch and can
         be integrated.
+      - ``research`` → execute job at project path, no worktree, no commits.
+        The agent's final assistant message is the deliverable.
       - ``one_shot`` → execute job at project path, no worktree, cannot
         be integrated. Used for narrow one-off edits that should not
         produce a branch.
@@ -462,6 +519,9 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
         cwd: str
         if t.synthetic:
             phase, kind = "integrating", "integrate"
+            cwd = project.path
+        elif t.mode == "plan":
+            phase, kind = "planning", "plan"
             cwd = project.path
         elif t.mode == "plan_then_execute":
             phase, kind = "planning", "plan"
@@ -489,6 +549,7 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
                     t.integration_status = "pending"
                     cwd = wt_path
         else:
+            # research and one_shot: execute at project path, no worktree.
             phase, kind = "executing", "execute"
             cwd = project.path
         t.status = "running"

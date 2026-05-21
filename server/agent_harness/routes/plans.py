@@ -1,8 +1,10 @@
 """Planner route.
 
-POST /api/projects/{id}/plan {ask} runs a one-off claude job that returns a
-JSON list of draft tasks. Drafts are inserted as ready (no deps) or pending
-(waiting on a predecessor), and any ready ones are auto-kicked.
+POST /api/projects/{id}/plan {ask} creates a ``mode='plan'`` Task and kicks
+off its planner Job. The task appears in the project's task list immediately;
+the user can click in to see the live planner stream. When the job finishes,
+``task_runner.on_job_finalized`` parses the JSON task array and inserts the
+child tasks (or a fallback ``research`` task if the planner emitted nothing).
 
 GET /api/projects/{id}/plan returns the most recent planner run for the UI's
 "view plan" affordance.
@@ -20,7 +22,6 @@ from ..config import get_settings
 from ..db import get_session
 from ..jobs import JobManager
 from ..schemas import LastPlanOut, PlanCreate, PlanOut
-from ..services import planner
 
 router = APIRouter(tags=["plans"], dependencies=[Depends(require_auth)])
 
@@ -41,70 +42,72 @@ async def plan_project(
 ) -> PlanOut:
     if s.get(models.Project, project_id) is None:
         raise HTTPException(404, "unknown project")
-    if not body.ask.strip():
+    ask = body.ask.strip()
+    if not ask:
         raise HTTPException(400, "ask cannot be empty")
-    settings = get_settings()
-    assert settings.logs_dir is not None
     mgr = _manager(request)
-    task_ids, raw, err = await planner.plan(
+    # Materialise the plan as a first-class Task so it renders on the project
+    # page with the same TaskCard/JobStream UI as every other task. The plan
+    # Job is kicked asynchronously; child tasks appear once it finishes.
+    task = models.Task(
         project_id=project_id,
-        ask=body.ask,
-        job_manager=mgr,
-        log_root=settings.logs_dir,
+        title=f"Plan: {ask[:60]}",
+        prompt=ask,
+        status="ready",
+        source="user",
+        mode="plan",
     )
-    return PlanOut(task_ids=task_ids, raw=raw, error=err)
-
-
-_PLANNER_ASK_MARKER = "\n\nAsk:\n"
+    s.add(task)
+    s.commit()
+    task_id = task.id
+    from ..services import task_runner
+    await task_runner.kickoff_first_phase(task_id, mgr)
+    return PlanOut(task_ids=[task_id], raw=None, error=None)
 
 
 @router.get("/api/projects/{project_id}/plan", response_model=LastPlanOut | None)
 def last_plan(
     project_id: str, s: Session = Depends(get_session)
 ) -> LastPlanOut | None:
-    """Return the most recent planner run for this project, if any."""
+    """Return the most recent planner run for this project, if any.
+
+    A planner run is a Task with ``mode='plan'``; its prompt is the user's ask
+    and its bound Job's assistant_text is the planner's output.
+    """
     if s.get(models.Project, project_id) is None:
         raise HTTPException(404, "unknown project")
-    # Planner jobs are ad_hoc Jobs whose title is "[plan] <truncated ask>".
+    plan_task = (
+        s.execute(
+            select(models.Task)
+            .where(
+                models.Task.project_id == project_id,
+                models.Task.mode == "plan",
+            )
+            .order_by(models.Task.created_at.desc())
+            .limit(1)
+        )
+        .scalar_one_or_none()
+    )
+    if plan_task is None:
+        return None
     job = (
         s.execute(
             select(models.Job)
-            .where(
-                models.Job.project_id == project_id,
-                models.Job.title.like("[plan] %"),
-                models.Job.task_id.is_(None),
-            )
+            .where(models.Job.task_id == plan_task.id, models.Job.kind == "plan")
             .order_by(models.Job.created_at.desc())
             .limit(1)
         )
         .scalar_one_or_none()
     )
-    if job is None:
-        return None
-    # The full ask + raw planner output live in turn-0's prompt/log. Rebuild
-    # them from DB so the UI doesn't need to re-read jsonl files.
-    turn = (
-        s.execute(
-            select(models.Turn).where(
-                models.Turn.job_id == job.id, models.Turn.idx == 0
-            )
-        )
-        .scalar_one_or_none()
-    )
-    ask = ""
-    if turn is not None and _PLANNER_ASK_MARKER in (turn.prompt or ""):
-        ask = (turn.prompt or "").split(_PLANNER_ASK_MARKER, 1)[1].strip()
-    # Read the assistant text from the job's log dir.
-    raw = _assistant_text_for_job(job.id)
-    # Find tasks created shortly after this job (planner inserts immediately
-    # after the job finishes). Match by source='planner' and a created_at
-    # within 60s of the job's ended_at (or current time).
-    task_ids = _tasks_from_planner_job(s, project_id, job)
+    raw = _assistant_text_for_job(job.id) if job is not None else ""
+    # Child tasks were inserted by task_runner shortly after the plan job
+    # finished; match by source='planner' inside the plan task's time window.
+    task_ids = _tasks_after(s, project_id, plan_task)
     return LastPlanOut(
-        job_id=job.id,
-        ask=ask,
+        job_id=job.id if job is not None else plan_task.id,
+        ask=plan_task.prompt,
         raw=raw,
-        created_at=job.created_at,
+        created_at=plan_task.created_at,
         task_ids=task_ids,
     )
 
@@ -140,17 +143,17 @@ def _assistant_text_for_job(job_id: str) -> str:
     return "\n".join(pieces)
 
 
-def _tasks_from_planner_job(
-    s: Session, project_id: str, plan_job: models.Job
+def _tasks_after(
+    s: Session, project_id: str, plan_task: models.Task
 ) -> list[str]:
-    """Return planner-sourced task ids created shortly after this plan job
-    finished. The planner inserts drafts synchronously after job.wait, so
-    the window is small (a few seconds in practice).
+    """Return planner-sourced child task ids created during this plan task's
+    lifetime. ``on_job_finalized`` inserts them immediately after the plan
+    job finishes, so a generous window catches them all.
     """
     from datetime import timedelta
 
-    anchor = plan_job.ended_at or plan_job.created_at
-    window = anchor + timedelta(minutes=5)
+    anchor = plan_task.created_at
+    window = anchor + timedelta(hours=1)
     rows = s.execute(
         select(models.Task.id)
         .where(

@@ -193,9 +193,18 @@ class TaskCreate(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     order_idx: int = 0
     # Lifecycle mode. Omit (or None) to keep the model default
-    # (``plan_then_execute``). Set ``one_shot`` for ad-hoc tasks you typed
-    # yourself and don't want the planner gate for.
-    mode: Literal["plan_then_execute", "one_shot", "execute_only"] | None = None
+    # (``plan_then_execute``). Other modes:
+    # - ``one_shot``: ad-hoc tasks you typed yourself, no planning gate.
+    # - ``execute_only``: planner-style narrow tasks, gets a worktree but skips
+    #   the plan/ack handshake.
+    # - ``research``: answer-only task. Runs at the project root with no
+    #   worktree, no commits; the final assistant message is the deliverable.
+    # - ``plan``: top-level planner task. Decomposes the user's ask into child
+    #   tasks. Created by ``POST /api/projects/{id}/plan``.
+    mode: (
+        Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan"]
+        | None
+    ) = None
 
 
 class TaskUpdate(BaseModel):
@@ -203,7 +212,10 @@ class TaskUpdate(BaseModel):
     prompt: str | None = None
     depends_on: list[str] | None = None
     order_idx: int | None = None
-    mode: Literal["plan_then_execute", "one_shot", "execute_only"] | None = None
+    mode: (
+        Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan"]
+        | None
+    ) = None
 
 
 class TaskOut(BaseModel):

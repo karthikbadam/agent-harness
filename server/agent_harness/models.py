@@ -173,7 +173,7 @@ class Task(Base):
     order_idx: Mapped[int] = mapped_column(Integer, default=0)
     mode: Mapped[str] = mapped_column(
         String(24), default="plan_then_execute"
-    )  # plan_then_execute|one_shot
+    )  # plan_then_execute|execute_only|one_shot|research|plan
     worktree_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     worktree_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     integration_status: Mapped[Optional[str]] = mapped_column(
