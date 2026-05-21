@@ -294,8 +294,8 @@ async def run_task(
     task_id: str, request: Request, s: Session = Depends(get_session)
 ) -> JobOut:
     """Kick a ready Task. Spawns the first phase's Job:
-    - plan_then_execute → Plan Job (kind=plan, cwd=project.path)
-    - one_shot non-synthetic → Execute Job (kind=execute, cwd=project.path)
+    - plan / plan_then_execute → Plan Job (kind=plan, cwd=project.path)
+    - research / one_shot non-synthetic → Execute Job (kind=execute, cwd=project.path)
     - synthetic (integration) → Integrate Job (kind=integrate, cwd=project.path)
     """
     t = s.get(models.Task, task_id)
@@ -311,7 +311,7 @@ async def run_task(
     if t.synthetic:
         phase = "integrating"
         kind = "integrate"
-    elif t.mode == "plan_then_execute":
+    elif t.mode in ("plan", "plan_then_execute"):
         phase = "planning"
         kind = "plan"
     else:
@@ -630,7 +630,7 @@ async def retry_task(
     if t.synthetic:
         t.phase = "integrating"
         kind = "integrate"
-    elif t.mode == "plan_then_execute":
+    elif t.mode in ("plan", "plan_then_execute"):
         t.phase = "planning"
         kind = "plan"
     else:
