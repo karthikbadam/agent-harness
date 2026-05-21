@@ -54,13 +54,47 @@ brew install uv              # one-time; install script will check
 ```
 
 The installer is idempotent — re-running it preserves your token. It prints a
-URL of the form `http://<lan-ip>:8765/auth?token=<x>` — open that on your
-iPhone (same WiFi) and you're in. That's the whole iPhone setup.
+URL of the form `http://<lan-ip>:8765/auth?token=<x>` — open that on any device (same WiFi) and you're in.
 
-> Plain HTTP on the LAN. No HTTPS, no cert profile to install, no push
-> notifications. If you want push, you'll need a real cert (e.g. via
-> Tailscale serve or a reverse proxy with Let's Encrypt) — out of scope
-> for the default install.
+## Development
+
+```bash
+./scripts/dev.sh
+# Backend on :8765 (uvicorn --reload, also serves the built SPA at /)
+# Vite runs `build --watch` into web/dist/ — no separate dev port.
+# Open http://localhost:8765
+```
+
+To restart a detached server (picks up code changes without holding a
+terminal open):
+
+```bash
+./scripts/restart.sh
+# Logs at ~/.agent-harness/logs/server.{out,err}.log
+#                       and ~/.agent-harness/logs/vite.{out,err}.log
+```
+
+Hard-refresh the browser to pick up frontend changes (the bundle hash changes
+on each rebuild, so it busts the cache).
+
+Run tests:
+
+```bash
+uv run pytest -q                              # 88 tests
+cd web && npm run typecheck && npm run build
+```
+
+Regenerate TypeScript types after editing Pydantic schemas:
+
+```bash
+# Option A: hit a live server
+cd web && npm run gen:types
+
+# Option B: dump spec offline
+uv run agent-harness gen-openapi web/openapi.json
+cd web && npm run gen:types:offline
+```
+
 
 ## Walkthrough
 
@@ -79,8 +113,7 @@ iPhone (same WiFi) and you're in. That's the whole iPhone setup.
 10. Reboot the Mac → launchd brings the service back → any
     `running` job in the DB is reconciled to `stopped`.
 
-### Projects · Tasks · Outcomes
-
+### Projects, Tasks, Outcomes
 Beyond one-shot jobs, projects can carry shared context and be driven as
 multi-step plans:
 
@@ -101,7 +134,7 @@ multi-step plans:
 See the [agent-harness skill](.claude/skills/agent-harness/SKILL.md) for curl
 recipes covering each of these.
 
-### v2: plan-then-execute, parallel worktrees, orchestrator MCP
+### Plan-then-execute, parallel worktrees, orchestrator MCP
 
 The default task lifecycle now gates on a planning turn:
 
@@ -203,77 +236,6 @@ Environment overrides (`AH_*` prefix): `AH_HOME`, `AH_AUTH_TOKEN`,
 `AH_CLAUDE_PATH`, `AH_IDLE_TIMEOUT_SECONDS`, `AH_PORT`, `AH_HOST`,
 `AH_MAX_CONCURRENT_JOBS`, `AH_LOG_RETENTION_DAYS`.
 
-## Development
-
-```bash
-./scripts/dev.sh
-# Backend on :8765 (uvicorn --reload, also serves the built SPA at /)
-# Vite runs `build --watch` into web/dist/ — no separate dev port.
-# Open http://localhost:8765
-```
-
-To restart a detached server (picks up code changes without holding a
-terminal open):
-
-```bash
-./scripts/restart.sh
-# Logs at ~/.agent-harness/logs/server.{out,err}.log
-#                       and ~/.agent-harness/logs/vite.{out,err}.log
-```
-
-Hard-refresh the browser to pick up frontend changes (the bundle hash changes
-on each rebuild, so it busts the cache).
-
-Run tests:
-
-```bash
-uv run pytest -q                              # 88 tests
-cd web && npm run typecheck && npm run build
-```
-
-Regenerate TypeScript types after editing Pydantic schemas:
-
-```bash
-# Option A: hit a live server
-cd web && npm run gen:types
-
-# Option B: dump spec offline
-uv run agent-harness gen-openapi web/openapi.json
-cd web && npm run gen:types:offline
-```
-
-## Troubleshooting
-
-For deeper diagnostics, common HTTP recipes, and a per-symptom playbook,
-see [docs/operations.md](docs/operations.md). Quick hits below.
-
-**iPhone says "Safari can't connect to the server".**
-Make sure the iPhone is on the same WiFi as the Mac, and that the LAN IP the
-installer printed still matches `ipconfig getifaddr en0` (it changes if you
-switch networks). Also confirm the launchd service is running:
-`launchctl list | grep agent-harness`.
-
-**Job stuck running, Stop button doesn't help.**
-The harness sent SIGTERM and waited 5s before SIGKILL. If the claude
-subprocess refused both, check `ps -fp <pid>` to confirm — then
-`kill -9 <pid>` manually. Also check the idle watchdog (`idle_timeout_seconds`)
-will eventually catch it.
-
-**Reconciler ran on startup and marked things stopped.**
-Expected after a Mac reboot or a manual `launchctl unload` then `load`. We
-can't reattach to a subprocess's stdout from a fresh parent, so any in-flight
-job is killed and marked stopped. The transcript jsonl is preserved.
-
-**Permission keeps getting blocked even after I added a rule.**
-Allowlist rules are passed via `--allowed-tools <rule1>,<rule2>,...`. Patterns
-follow claude's syntax: `Bash(npm test:*)`, `Edit(**/*.py)`, `WebFetch(*)`.
-If you add a global rule but the project also has a more restrictive one,
-both lists merge — there's no "subtract" semantics.
-
-**`agent-harness serve` won't start: "claude CLI not found".**
-Set `claude_path` in `config.toml` or `AH_CLAUDE_PATH` env. The error
-message includes the search order.
-
 ## Service commands
 
 ```bash
@@ -289,32 +251,6 @@ To uninstall completely:
 launchctl unload ~/Library/LaunchAgents/com.<you>.agent-harness.plist
 rm ~/Library/LaunchAgents/com.<you>.agent-harness.plist
 rm -rf ~/.agent-harness
-```
-
-## Project layout
-
-```
-agent-harness/
-├── pyproject.toml
-├── server/
-│   ├── agent_harness/
-│   │   ├── claude.py          # subprocess + stream-json parser
-│   │   ├── jobs.py            # JobManager (semaphore, locks, watchdog)
-│   │   ├── broadcaster.py     # replay-then-live SSE pub/sub
-│   │   ├── reconcile.py       # orphan-job recovery on startup
-│   │   ├── schedule_service.py# APScheduler integration
-│   │   └── routes/            # FastAPI routers
-│   └── tests/                 # pytest (88 tests)
-├── web/
-│   ├── src/
-│   │   ├── hooks/useJobStream.ts   # EventSource + Last-Event-ID reconnect
-│   │   ├── components/TurnTranscript.tsx
-│   │   └── pages/{Jobs,JobDetail,Schedules,Settings,AuthGate}.tsx
-│   └── types/api.ts          # generated from /api/openapi.json
-└── scripts/
-    ├── install.sh
-    ├── dev.sh
-    └── launchd.plist.tmpl
 ```
 
 ## License
