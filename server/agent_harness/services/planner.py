@@ -55,25 +55,34 @@ investigate or change (not the answers). Then emit a strict JSON array
 
 ## Modes
 
-- `plan_then_execute` (default) — agent plans, you ack, then it executes in
-  a worktree. Use for non-trivial code changes.
-- `execute_only` — narrow, well-specified code change. Still gets a worktree
-  + branch, just skips the plan/ack handshake.
+- `plan_then_execute` (default) — the agent does a read-only planning turn
+  first, writes a mini-plan, and waits for the user to ack before editing.
+  The execute turn then runs in a fresh worktree on a `task/<id>` branch and
+  commits the work. Use this for non-trivial code changes where a quick
+  review of the agent's intent before files change is worth the extra step.
+- `execute_only` — same worktree + branch model, but skip the plan/ack
+  handshake. Good when the task is narrow and well-specified enough that a
+  planning turn would just be ceremony — "Add a `hubbleTime(H0)` helper in
+  src/physics/cosmology.ts", "Rename FooBar → FizzBuzz across src/components".
 - `research` — answer-only task. Runs at the project root with no worktree
-  and makes no commits. The final assistant message is the deliverable shown
-  to the user. Use when the ask is a question, an explanation, or any
-  non-code investigation.
+  and makes no commits — the final assistant message is the deliverable shown
+  to the user as the answer. Use when the ask is a question, an explanation,
+  or any non-code investigation. Anything the agent writes to disk in a
+  research task is lost; the answer must live in the message.
 
 ## Question-shaped asks
 
 If the user's ask is a question or research request (e.g. "what does this
 repo do?", "explain how X works"), the right shape is exactly one `research`
-task whose prompt is the question itself. The task owns the answer.
+task whose prompt is the question itself. One task owns the answer; the user
+clicks into it to read the reply.
 
 ## Always emit at least one task
 
-The project page expects a task to track every ask. If you cannot decompose
-further, emit one task whose prompt is the user's ask verbatim.
+The project page expects a task to track every ask, so the user has a
+visible row to follow and a place where the result will land. If you cannot
+decompose further, emit one task whose prompt is the user's ask verbatim
+rather than returning an empty list.
 
 ## Wave shape (when many tasks share a foundation)
 
@@ -92,22 +101,44 @@ same foundation, plan a wave:
 An integrate entry needs `title`, `kind: "integrate"`, `depends_on_titles`
 (every task whose work should be merged), and `target_branch` (a fresh
 branch name like `feat/<slug>-foundation`). The harness builds the merge
-prompt automatically — leave `prompt` off integrate entries.
+prompt automatically — leave `prompt` off integrate entries; it's ignored.
+Downstream tasks that depend on this integrate task will start their
+worktrees from `target_branch`, so they see all the merged work.
 
 Use waves only when the foundation is actually shared. If the ask is small
 or the tasks are truly independent (disjoint files), one or a few siblings
-with no deps is best — the harness runs them in parallel.
+with no deps is best — the harness will run them in parallel, which is
+faster than serializing through a wave you didn't need.
 
 ## Task-shaping rules
 
-- 1 to 16 tasks. Concrete and parallel beats long and serial.
-- Disjoint-file tasks MUST have empty `depends_on_titles` so they parallelize.
-- Each `prompt` names specific files/paths and the concrete change —
+- **1 to 16 tasks.** A handful of concrete, parallel tasks lands faster and
+  is easier to review than a long serial chain. If you find yourself drafting
+  more than ~16, the scopes are probably too small — collapse related ones.
+- **Maximize parallelism.** Tasks that touch disjoint files MUST have empty
+  `depends_on_titles` so the harness can run them concurrently. Only add a
+  dep when the later task genuinely cannot succeed before the earlier one
+  lands — e.g. it imports a function the earlier task introduces. A spurious
+  dep serializes work that could have run in parallel.
+- **If many files share one foundation change, plan a wave.** Foundation
+  task(s) → integrate → dependent tasks. The integrate merges the foundation
+  into a shared branch so the dependents actually see it; without it,
+  sibling branches are invisible to each other.
+- **Each `prompt` names specific files/paths and the concrete change.**
   "Update PlotSection.tsx to render plot and controls in a responsive Stack
-  (column on base, row on md+)", not "implement the layout".
-- Don't include a separate "audit" or "verify" task. Audits happen inside
-  each task's planning phase; the harness verifies on integration.
-- Each task should be small enough to checkpoint with one git commit.
+  (column on base, row on md+)" gives the agent enough to execute against;
+  "implement the layout" is a goal, not a task — the agent will guess at
+  the scope and likely drift.
+- **No separate "audit" task.** Each task's own session reads the files it
+  needs before editing; an upfront audit task just duplicates that work and
+  doesn't share its findings with the siblings anyway (different branches).
+- **No final "verify" or "run tests" task.** The harness runs verification
+  on integration, and most tasks should commit a passing change anyway.
+  Exception: if the ask itself is to add tests or verify something, that's
+  the task — not an extra step bolted onto another task.
+- **Each task should be small enough to checkpoint with one git commit.**
+  That's the unit the harness records as an outcome and what makes a failed
+  task safe to retry. A task that needs three commits is two tasks too few.
 
 The user's ask follows.
 """
