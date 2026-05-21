@@ -20,10 +20,21 @@ function badgeForTask(t: TaskOut): StatusBadge {
     return { label: "Failed", color: "red" };
   if (t.status === "canceled") return { label: "Canceled", color: "orange" };
   if (t.phase === "awaiting_ack") return { label: "Awaiting ack", color: "orange" };
-  if (t.phase === "planning") return { label: "Planning…", color: "blue", pulse: true };
-  if (t.phase === "executing") return { label: "Executing…", color: "blue", pulse: true };
+  if (t.phase === "planning") {
+    // mode='plan' is the top-level planner decomposing the ask; mode='plan_then_execute'
+    // is a per-task planning turn before edits.
+    const label = t.mode === "plan" ? "Decomposing…" : "Planning…";
+    return { label, color: "blue", pulse: true };
+  }
+  if (t.phase === "executing") {
+    const label = t.mode === "research" ? "Researching…" : "Executing…";
+    return { label, color: "blue", pulse: true };
+  }
   if (t.phase === "integrating") return { label: "Integrating…", color: "blue", pulse: true };
-  if (t.status === "running") return { label: "Running…", color: "blue", pulse: true };
+  if (t.status === "running") {
+    const label = t.mode === "research" ? "Researching…" : "Running…";
+    return { label, color: "blue", pulse: true };
+  }
   if (t.status === "done") return { label: "Done", color: "green" };
   if (t.status === "ready") return { label: "Ready", color: "teal" };
   if (t.status === "pending") return { label: "Blocked on deps", color: "gray" };

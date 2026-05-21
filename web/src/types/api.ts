@@ -90,7 +90,23 @@ export interface paths {
         get: operations["get_project_api_projects__project_id__get"];
         put?: never;
         post?: never;
-        /** Delete Project */
+        /**
+         * Delete Project
+         * @description Delete a project and all its dependent rows.
+         *
+         *     The schema wasn't built with ``ondelete=CASCADE`` on every reference, so
+         *     naive ``s.delete(project)`` fails with FOREIGN KEY constraints. Tear down
+         *     in dependency order so each DELETE sees only orphans:
+         *
+         *       outcomes ──┐
+         *                  ├──> tasks  ──> (TaskDependency cascades on its own)
+         *       turns ─────┤
+         *                  ├──> jobs
+         *       driver_notes ──> (project + tasks + jobs)
+         *       schedules  ──> (project)
+         *       allowlist  ──> (handled by Project.rules SQLA cascade)
+         *       project
+         */
         delete: operations["delete_project_api_projects__project_id__delete"];
         options?: never;
         head?: never;
@@ -319,6 +335,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List All Tasks
+         * @description All tasks across all projects, newest first. Used by the Projects
+         *     page to show per-project task counts without N+1 fetches.
+         */
+        get: operations["list_all_tasks_api_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -350,8 +387,8 @@ export interface paths {
         /**
          * Run Task
          * @description Kick a ready Task. Spawns the first phase's Job:
-         *     - plan_then_execute → Plan Job (kind=plan, cwd=project.path)
-         *     - one_shot non-synthetic → Execute Job (kind=execute, cwd=project.path)
+         *     - plan / plan_then_execute → Plan Job (kind=plan, cwd=project.path)
+         *     - research / one_shot non-synthetic → Execute Job (kind=execute, cwd=project.path)
          *     - synthetic (integration) → Integrate Job (kind=integrate, cwd=project.path)
          */
         post: operations["run_task_api_tasks__task_id__run_post"];
@@ -553,6 +590,9 @@ export interface paths {
         /**
          * Last Plan
          * @description Return the most recent planner run for this project, if any.
+         *
+         *     A planner run is a Task with ``mode='plan'``; its prompt is the user's ask
+         *     and its bound Job's assistant_text is the planner's output.
          */
         get: operations["last_plan_api_projects__project_id__plan_get"];
         put?: never;
@@ -1247,7 +1287,7 @@ export interface components {
              */
             order_idx: number;
             /** Mode */
-            mode?: ("plan_then_execute" | "one_shot") | null;
+            mode?: ("plan_then_execute" | "one_shot" | "execute_only" | "research" | "plan") | null;
         };
         /** TaskOut */
         TaskOut: {
@@ -1309,7 +1349,7 @@ export interface components {
             /** Order Idx */
             order_idx?: number | null;
             /** Mode */
-            mode?: ("plan_then_execute" | "one_shot") | null;
+            mode?: ("plan_then_execute" | "one_shot" | "execute_only" | "research" | "plan") | null;
         };
         /** ToolResultEvent */
         ToolResultEvent: {
@@ -2312,6 +2352,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_all_tasks_api_tasks_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"][];
                 };
             };
             /** @description Validation Error */
