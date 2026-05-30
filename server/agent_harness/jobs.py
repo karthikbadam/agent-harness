@@ -304,11 +304,17 @@ class JobManager:
             project_id = project.id
             kind = job.kind
             project_extra = list(project.extra_claude_args or [])
-            idle_timeout = (
-                project.idle_timeout_seconds
-                if project.idle_timeout_seconds is not None
-                else self.default_idle_timeout_seconds
-            )
+            # Idle-timeout resolution: task override → project override →
+            # global default. A task can set 0 to disable the watchdog
+            # entirely (long unattended training turns); the watchdog treats
+            # <= 0 as "never fire".
+            task = s.get(models.Task, job.task_id) if job.task_id else None
+            if task is not None and task.idle_timeout_seconds is not None:
+                idle_timeout = task.idle_timeout_seconds
+            elif project.idle_timeout_seconds is not None:
+                idle_timeout = project.idle_timeout_seconds
+            else:
+                idle_timeout = self.default_idle_timeout_seconds
 
         allowed = _gather_allowlist(project_id, kind=kind)
         broadcaster.start_turn(turn_idx)

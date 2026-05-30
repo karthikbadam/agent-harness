@@ -205,6 +205,9 @@ class TaskCreate(BaseModel):
         Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan"]
         | None
     ) = None
+    # Per-task idle-timeout override (seconds). null = inherit project/global.
+    # 0 disables the watchdog for this task (long unattended training turns).
+    idle_timeout_seconds: int | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -216,6 +219,7 @@ class TaskUpdate(BaseModel):
         Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan"]
         | None
     ) = None
+    idle_timeout_seconds: int | None = None
 
 
 class TaskOut(BaseModel):
@@ -232,6 +236,7 @@ class TaskOut(BaseModel):
     worktree_branch: str | None = None
     integration_status: str | None = None
     synthetic: bool = False
+    idle_timeout_seconds: int | None = None
     depends_on: list[str] = Field(default_factory=list)
     latest_outcome_id: str | None = None
     created_at: datetime

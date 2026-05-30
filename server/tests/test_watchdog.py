@@ -97,6 +97,46 @@ async def test_watchdog_pauses_during_inflight_tool_call(initdb: Path) -> None:
         assert job.status == "done", f"expected done, got {job.status}"
 
 
+async def test_task_override_wins_over_project_and_global(initdb: Path) -> None:
+    """A task-level idle_timeout_seconds=1 stops a silent hang even though the
+    project (600) and global default (600) would not. Proves the resolution
+    order task → project → global."""
+    with session_scope() as s:
+        proj = models.Project(name="p", path="/tmp", idle_timeout_seconds=600)
+        s.add(proj)
+        s.flush()
+        pid = proj.id
+        task = models.Task(
+            project_id=pid,
+            title="train",
+            prompt="train",
+            status="running",
+            mode="execute_only",
+            idle_timeout_seconds=1,
+        )
+        s.add(task)
+        s.flush()
+        tid = task.id
+
+    reg = BroadcasterRegistry(initdb / "logs")
+    mgr = JobManager(reg, claude_path=str(SHIM), default_idle_timeout_seconds=600)
+
+    os.environ["FAKE_CLAUDE_FIXTURE"] = str(FIXTURES / "stream" / "silent.jsonl")
+    os.environ["FAKE_CLAUDE_HANG"] = "1"
+    try:
+        jid = mgr.create_job(pid, prompt="train", task_id=tid, kind="execute")
+        await mgr.start(jid)
+        await asyncio.wait_for(mgr.wait(jid), timeout=15)
+    finally:
+        os.environ.pop("FAKE_CLAUDE_FIXTURE", None)
+        os.environ.pop("FAKE_CLAUDE_HANG", None)
+
+    with session_scope() as s:
+        job = s.get(models.Job, jid)
+        assert job is not None
+        assert job.status == "stopped", f"expected stopped, got {job.status}"
+
+
 async def test_project_override_wins_over_global_default(initdb: Path) -> None:
     """Project with idle_timeout_seconds=1 stops; same scenario with default 60 wouldn't."""
     with session_scope() as s:

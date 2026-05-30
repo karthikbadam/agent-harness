@@ -82,6 +82,8 @@ def _apply_column_migrations(engine: Engine) -> None:
         ("tasks", "phase", "VARCHAR(16)"),
         ("jobs", "kind", "VARCHAR(12) NOT NULL DEFAULT 'ad_hoc'"),
         ("jobs", "cwd", "TEXT NOT NULL DEFAULT ''"),
+        # agent-loop: per-task idle timeout override (null = inherit project/global)
+        ("tasks", "idle_timeout_seconds", "INTEGER"),
     ]
 
     with engine.begin() as conn:

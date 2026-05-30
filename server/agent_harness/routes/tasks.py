@@ -67,6 +67,7 @@ def _to_out(s: Session, t: models.Task) -> TaskOut:
         worktree_branch=t.worktree_branch,
         integration_status=t.integration_status,
         synthetic=t.synthetic,
+        idle_timeout_seconds=t.idle_timeout_seconds,
         depends_on=_deps_of(s, t.id),
         latest_outcome_id=_latest_outcome_id(s, t.id),
         created_at=t.created_at,
@@ -176,6 +177,8 @@ async def create_task(
     )
     if body.mode is not None:
         task_kwargs["mode"] = body.mode
+    if body.idle_timeout_seconds is not None:
+        task_kwargs["idle_timeout_seconds"] = body.idle_timeout_seconds
     t = models.Task(**task_kwargs)
     s.add(t)
     s.flush()
@@ -250,6 +253,9 @@ def update_task(
         t.order_idx = body.order_idx
     if body.mode is not None:
         t.mode = body.mode
+    # Use fields_set so an explicit null clears the override back to inherit.
+    if "idle_timeout_seconds" in body.model_fields_set:
+        t.idle_timeout_seconds = body.idle_timeout_seconds
     if body.depends_on is not None:
         _validate_deps(s, t.project_id, body.depends_on)
         _detect_cycle(s, t.id, body.depends_on)

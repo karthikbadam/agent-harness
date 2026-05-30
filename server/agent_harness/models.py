@@ -180,6 +180,7 @@ class Task(Base):
         String(16), nullable=True
     )  # pending|integrated|conflict; null for one_shot and synthetic tasks
     synthetic: Mapped[bool] = mapped_column(default=False)
+    idle_timeout_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     retries: Mapped[int] = mapped_column(Integer, default=0)
     last_failed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
