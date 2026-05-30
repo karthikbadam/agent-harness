@@ -723,10 +723,14 @@ def _harness_coords_block(parent_task_id: str) -> str:
     base = "http://127.0.0.1:8765"
     return (
         "Before registering any artifact, export these (artifacts must attach to "
-        "the loop parent so its page shows one current graph):\n"
+        "the loop parent so its page shows one current view):\n"
         f"  export AH_URL={base}\n"
         f"  export AH_TOKEN={token}\n"
-        f"  export AH_TASK_ID={parent_task_id}"
+        f"  export AH_TASK_ID={parent_task_id}\n"
+        "Use a STABLE artifact `name` every iteration — do NOT put the iteration "
+        "number in it (use e.g. \"progress\" or \"results\", not \"progress "
+        "(iter 4)\") — so each artifact UPDATES IN PLACE instead of piling up a "
+        "new one per iteration."
     )
 
 

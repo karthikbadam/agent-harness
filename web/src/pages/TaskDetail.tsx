@@ -48,6 +48,22 @@ export function TaskDetailPage() {
   const metricName = spec.metric_name ?? "metric";
   const rows = [...(iterations ?? [])].sort((a, b) => b.iteration - a.iteration);
 
+  // Agents sometimes name an artifact per-iteration ("Progress graph (iter 4)"),
+  // which creates a fresh row each time instead of updating one. Collapse a
+  // series to its latest: strip a trailing "(iter N)"-style suffix and keep the
+  // newest per (kind, normalized name). The API returns newest-first.
+  const seenArtifacts = new Set<string>();
+  const artifactList = (artifacts ?? []).filter((a) => {
+    const base = a.name
+      .replace(/\s*\((?:iter(?:ation)?|step|round|v(?:ersion)?)?\s*\d+\)\s*$/i, "")
+      .trim()
+      .toLowerCase();
+    const key = `${a.kind}::${base || a.name.toLowerCase()}`;
+    if (seenArtifacts.has(key)) return false;
+    seenArtifacts.add(key);
+    return true;
+  });
+
   return (
     <Shell
       title={task.data?.title ?? "Task"}
@@ -99,9 +115,9 @@ export function TaskDetailPage() {
         </HStack>
       )}
 
-      {/* Flexible: render whatever the task produced. */}
+      {/* Flexible: render whatever the task produced (latest of each series). */}
       <Stack gap={5}>
-        {(artifacts ?? []).map((a) => (
+        {artifactList.map((a) => (
           <ArtifactView key={a.id} artifact={a} live={live} />
         ))}
       </Stack>
@@ -152,7 +168,7 @@ export function TaskDetailPage() {
       )}
 
       {!task.isLoading &&
-        (artifacts?.length ?? 0) === 0 &&
+        artifactList.length === 0 &&
         !(isLoop && rows.length > 0) && (
           <Text color="fg.muted" fontSize="sm">
             No artifacts yet.
