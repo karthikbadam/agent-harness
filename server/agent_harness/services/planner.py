@@ -747,6 +747,11 @@ def advance_loop(
                 state["non_improving_streak"] = (
                     state.get("non_improving_streak", 0) + 1
                 )
+        elif job_status == "stopped":
+            # Operational interruption (server restart / manual stop of the
+            # iteration), NOT a research failure — don't penalize the loop.
+            # The iteration is recorded as failed but the run continues.
+            pass
         else:
             state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
 

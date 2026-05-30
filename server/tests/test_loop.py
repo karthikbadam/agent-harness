@@ -346,8 +346,10 @@ async def test_loop_survives_restart(initdb: Path, tmp_path: Path) -> None:
         parent = s.get(models.Task, parent_id)
         assert parent.status == "running", "loop should still be going"
         assert parent.loop_state["iteration"] == 1
-        # The interrupted iteration counts as one failure (below the cap).
-        assert parent.loop_state["consecutive_failures"] == 1
+        # A restart interrupt is operational, NOT a research failure — so it
+        # must not count toward the consecutive-failure stop (else repeated
+        # deploys would kill a long run).
+        assert parent.loop_state["consecutive_failures"] == 0
         kids = (
             s.query(models.Task)
             .filter(models.Task.parent_task_id == parent_id)
