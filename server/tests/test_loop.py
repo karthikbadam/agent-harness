@@ -255,6 +255,66 @@ def test_loop_stops_after_consecutive_failures(initdb: Path, tmp_path: Path) -> 
         assert parent.loop_state["consecutive_failures"] == 2
 
 
+def test_stuck_detection_triggers_rethink(initdb: Path, tmp_path: Path) -> None:
+    """After stuck_after non-improving iterations, the next one is a 'rethink'
+    iteration — different prompt + escalated model — and the streak resets."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    spec = {
+        "metric_name": "val_acc",
+        "direction": "maximize",
+        "max_iterations": 20,
+        "max_consecutive_failures": 5,
+        "stuck_after": 2,
+        "escalate_model": "big-model",
+    }
+    with session_scope() as s:
+        pid, parent_id = _make_loop(s, repo, spec)
+
+    child = planner.start_loop(parent_id)
+    # baseline improves (0.5), then two that don't beat it → stuck.
+    for m in [0.5, 0.4, 0.45]:
+        autorun = _finalize_iteration(tmp_path, pid, repo, child, _result_text(m))
+        child = autorun[0] if autorun else None
+
+    assert child is not None
+    with session_scope() as s:
+        nxt = s.get(models.Task, child)
+        assert nxt.model_override == "big-model"
+        assert "rethink" in nxt.title.lower()
+        assert "RETHINK" in nxt.prompt
+        parent = s.get(models.Task, parent_id)
+        assert parent.loop_state["non_improving_streak"] == 0  # reset for the new dir
+
+
+def test_improvement_resets_stuck_streak(initdb: Path, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    spec = {
+        "metric_name": "val_acc",
+        "direction": "maximize",
+        "max_iterations": 20,
+        "max_consecutive_failures": 5,
+        "stuck_after": 2,
+    }
+    with session_scope() as s:
+        pid, parent_id = _make_loop(s, repo, spec)
+
+    child = planner.start_loop(parent_id)
+    # 0.5 (improve) → 0.4 (streak 1) → 0.6 (improve, resets) → next is NOT meta.
+    for m in [0.5, 0.4, 0.6]:
+        autorun = _finalize_iteration(tmp_path, pid, repo, child, _result_text(m))
+        child = autorun[0] if autorun else None
+
+    with session_scope() as s:
+        nxt = s.get(models.Task, child)
+        assert nxt.model_override is None
+        assert "rethink" not in nxt.title.lower()
+        assert s.get(models.Task, parent_id).loop_state["non_improving_streak"] == 0
+
+
 async def test_loop_survives_restart(initdb: Path, tmp_path: Path) -> None:
     """A server restart kills the in-flight iteration; reconcile must finalize
     it and spawn the next so the loop resumes instead of stalling."""

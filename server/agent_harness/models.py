@@ -187,6 +187,9 @@ class Task(Base):
     #   started_at, spent_usd}
     loop_spec: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     loop_state: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Per-task model override (passed as ``--model`` at spawn). Used by the
+    # loop's stuck-detection to run a "rethink" iteration on a stronger model.
+    model_override: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     worktree_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     worktree_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     integration_status: Mapped[Optional[str]] = mapped_column(

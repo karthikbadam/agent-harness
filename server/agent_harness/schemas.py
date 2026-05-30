@@ -285,6 +285,13 @@ class LoopCreate(BaseModel):
     max_cost_usd: float | None = None
     max_wall_clock_s: int | None = None
     max_consecutive_failures: int = 3
+    # Stuck-detection: after this many consecutive non-improving iterations,
+    # run a "rethink" iteration that reviews everything and proposes a
+    # fundamentally different direction. null = disabled.
+    stuck_after: int | None = None
+    # Optional stronger model to run those rethink iterations on (e.g.
+    # "claude-opus-4-8"). null = same model as normal iterations.
+    escalate_model: str | None = None
     idle_timeout_seconds: int | None = 0  # iterations train long; disable by default
 
 

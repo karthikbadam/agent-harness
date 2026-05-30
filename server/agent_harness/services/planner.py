@@ -423,6 +423,10 @@ def _default_loop_state() -> dict:
         "best_metric": None,
         "best_commit": None,
         "consecutive_failures": 0,
+        # Consecutive successful-but-not-improving iterations. Drives
+        # stuck-detection: when it reaches spec.stuck_after the next iteration
+        # is a "rethink" (meta) iteration.
+        "non_improving_streak": 0,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "spent_usd": 0.0,
     }
@@ -569,16 +573,33 @@ def _loop_stop_reason(spec: dict, state: dict, job_status: str) -> str | None:
 
 
 def _build_iteration_prompt(
-    parent: models.Task, iteration: int, state: dict, spec: dict
+    parent: models.Task, iteration: int, state: dict, spec: dict, meta: bool = False
 ) -> str:
     """Synthesize iteration N's prompt from the standing instruction
     (``parent.prompt`` — the program.md body) plus the carried state header.
-    This is the "task generated on the go": the prompt evolves with the run."""
+    This is the "task generated on the go": the prompt evolves with the run.
+
+    When ``meta`` is set (stuck-detection fired), the header tells the agent to
+    step back, review the whole run, and try a fundamentally different
+    direction instead of another local variation."""
     metric_name = spec.get("metric_name", "metric")
     direction = spec.get("direction", "maximize")
     best = state.get("best_metric")
     best_commit = state.get("best_commit")
-    if best is None:
+    if meta:
+        streak = spec.get("stuck_after", "several")
+        standing = (
+            f"⟲ RETHINK ITERATION {iteration}. The loop has plateaued — about "
+            f"{streak} iterations in a row failed to improve {metric_name} "
+            f"(best is {best}). STOP iterating on recent variations. Read ALL of "
+            f"results.tsv and the git log, and explicitly reason about WHY "
+            f"progress stalled: which families of ideas have been exhausted, "
+            f"what assumption might be wrong. Then try ONE fundamentally "
+            f"different approach this iteration — a different mechanism, not a "
+            f"tweak of the last few. Be bold; this is the move that breaks the "
+            f"plateau."
+        )
+    elif best is None:
         standing = (
             f"This is iteration {iteration} — the FIRST one. Establish the "
             f"baseline: run the experiment as-is and record {metric_name}."
@@ -623,23 +644,30 @@ def _harness_coords_block(parent_task_id: str) -> str:
 
 
 def _make_iteration_task(
-    s, parent: models.Task, iteration: int, state: dict, spec: dict
+    s, parent: models.Task, iteration: int, state: dict, spec: dict,
+    meta: bool = False,
 ) -> models.Task:
-    """Insert a single loop iteration child task (ready to run)."""
+    """Insert a single loop iteration child task (ready to run).
+
+    ``meta`` marks a stuck-detection "rethink" iteration: a different prompt
+    and, if ``spec.escalate_model`` is set, a stronger model for that run.
+    """
+    model_override = spec.get("escalate_model") if meta else None
     child = models.Task(
         project_id=parent.project_id,
         # Short, self-describing title. Retitled with the experiment's
         # description once it reports (see task_runner loop branch), so the
         # list reads like "Iteration 11 · Adam lr 0.01" rather than echoing
         # the parent's full name on every row.
-        title=f"Iteration {iteration}",
-        prompt=_build_iteration_prompt(parent, iteration, state, spec),
+        title=f"Iteration {iteration}{' · rethink' if meta else ''}",
+        prompt=_build_iteration_prompt(parent, iteration, state, spec, meta=meta),
         status="ready",
         source="loop",
         order_idx=iteration,
         mode="one_shot",  # project root, no worktree, agent self-commits
         parent_task_id=parent.id,
         idle_timeout_seconds=parent.idle_timeout_seconds,
+        model_override=model_override,
     )
     s.add(child)
     s.flush()
@@ -714,6 +742,11 @@ def advance_loop(
             ):
                 state["best_metric"] = metric
                 state["best_commit"] = result.get("commit")
+                state["non_improving_streak"] = 0
+            else:
+                state["non_improving_streak"] = (
+                    state.get("non_improving_streak", 0) + 1
+                )
         else:
             state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
 
@@ -725,5 +758,16 @@ def advance_loop(
             parent.phase = "done"
             return result, None, stop_reason
 
-        child = _make_iteration_task(s, parent, iteration + 1, state, spec)
+        # Stuck-detection: if we've gone stuck_after iterations without
+        # improving, make the NEXT iteration a "rethink" and reset the streak
+        # so the new direction gets a fresh window before we escalate again.
+        stuck_after = spec.get("stuck_after")
+        meta_next = bool(stuck_after) and state["non_improving_streak"] >= stuck_after
+        if meta_next:
+            state["non_improving_streak"] = 0
+            parent.loop_state = state
+
+        child = _make_iteration_task(
+            s, parent, iteration + 1, state, spec, meta=meta_next
+        )
         return result, child.id, None

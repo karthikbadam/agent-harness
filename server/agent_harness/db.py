@@ -91,6 +91,9 @@ def _apply_column_migrations(engine: Engine) -> None:
         ("tasks", "loop_spec", "JSON"),
         ("tasks", "loop_state", "JSON"),
         ("outcomes", "meta", "JSON"),
+        # Tier 3: loop stuck-detection runs a "rethink" iteration, optionally
+        # on a stronger model, via a per-task model override.
+        ("tasks", "model_override", "VARCHAR(64)"),
     ]
 
     with engine.begin() as conn:

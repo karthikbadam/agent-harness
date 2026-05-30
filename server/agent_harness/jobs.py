@@ -14,17 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from sqlalchemy import select
 
 from .broadcaster import BroadcasterRegistry, make_status_event
 from .claude import ClaudeRunner
-from .config import get_settings
 from .db import session_scope
 from . import models
 from .schemas import StreamEvent, ToolResultEvent, ToolUseEvent, TurnDoneEvent
@@ -315,6 +312,8 @@ class JobManager:
                 idle_timeout = project.idle_timeout_seconds
             else:
                 idle_timeout = self.default_idle_timeout_seconds
+            # Per-task model override (loop "rethink" iterations may escalate).
+            model_override = task.model_override if task is not None else None
 
         allowed = _gather_allowlist(project_id, kind=kind)
         broadcaster.start_turn(turn_idx)
@@ -329,7 +328,11 @@ class JobManager:
             permission_mode=permission_mode if not dangerously_skip else None,
             allowed_tools=allowed if not dangerously_skip else [],
             dangerously_skip=dangerously_skip,
-            extra_args=self.default_extra_args + project_extra,
+            extra_args=(
+                self.default_extra_args
+                + project_extra
+                + (["--model", model_override] if model_override else [])
+            ),
             claude_path=self.claude_path,
         )
         self._runners[job_id] = runner

@@ -245,6 +245,8 @@ async def create_loop(
         "max_cost_usd": body.max_cost_usd,
         "max_wall_clock_s": body.max_wall_clock_s,
         "max_consecutive_failures": body.max_consecutive_failures,
+        "stuck_after": body.stuck_after,
+        "escalate_model": body.escalate_model,
     }
     t = models.Task(
         project_id=project_id,
