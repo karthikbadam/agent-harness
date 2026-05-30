@@ -92,10 +92,29 @@ function parseDelimited(text: string): { header: string[]; rows: string[][] } | 
   return { header: split(first), rows: lines.slice(1).map(split) };
 }
 
+/** Agents register "table" artifacts as either real TSV/CSV or as a markdown
+ * doc with a pipe-table. Detect markdown so we render it properly instead of
+ * comma-splitting prose. */
+function looksMarkdown(text: string): boolean {
+  if (/^\s*#{1,6}\s/.test(text)) return true; // a heading
+  if (/\|[\s:-]*-{2,}[\s:-]*\|/.test(text)) return true; // a |---|---| separator
+  return false;
+}
+
 function TableArtifact({ artifact, live }: { artifact: ArtifactOut; live: boolean }) {
   const { data, isLoading } = useArtifactText(artifact, live);
   if (isLoading) return <Spinner size="sm" />;
-  const parsed = data ? parseDelimited(data) : null;
+  if (data == null) return <DownloadLink artifact={artifact} />;
+  // Markdown ledgers (headings / pipe-tables) render as markdown — MarkdownText
+  // turns the pipe-table into a real table and keeps the surrounding prose.
+  if (looksMarkdown(data)) {
+    return (
+      <Box maxH="26rem" overflowY="auto">
+        <MarkdownText source={data} />
+      </Box>
+    );
+  }
+  const parsed = parseDelimited(data);
   if (!parsed) return <DownloadLink artifact={artifact} />;
   return (
     <Box overflowX="auto" maxH="22rem" overflowY="auto" borderWidth="1px" borderColor="border" rounded="md">

@@ -73,6 +73,27 @@ async def test_register_list_download_artifact(app_client, tmp_path: Path) -> No
     assert r.content.startswith(b"\x89PNG")
 
 
+async def test_svg_without_extension_serves_image_type(app_client, tmp_path: Path) -> None:
+    """Agents register graphs with a display name and no extension. The download
+    must sniff the bytes and serve image/svg+xml so <img> renders it."""
+    client, _ = app_client
+    proj_dir = tmp_path / "repo"
+    proj_dir.mkdir()
+    (proj_dir / "chart.out").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>'
+    )
+    _, tid = await _make_project_and_task(client, str(proj_dir))
+    r = await client.post(
+        f"/api/tasks/{tid}/artifacts",
+        headers=AUTH,
+        json={"kind": "graph", "path": "chart.out", "name": "Progress graph"},
+    )
+    assert r.status_code == 201, r.text
+    r = await client.get(r.json()["download_url"], headers=AUTH)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/svg+xml")
+
+
 async def test_reregister_same_name_updates_in_place(app_client, tmp_path: Path) -> None:
     client, _ = app_client
     proj_dir = tmp_path / "repo"

@@ -173,6 +173,31 @@ def list_artifacts(task_id: str, s: Session = Depends(get_session)) -> list[Arti
     return [_to_out(a) for a in rows]
 
 
+def _sniff_media_type(p: Path) -> str | None:
+    """Best-effort content-type from the file's first bytes. Agents often
+    register artifacts with a display name and no extension (e.g. "Progress
+    graph"), so the default octet-stream breaks inline <img> rendering — most
+    importantly for SVG, which browsers refuse to render in <img> without an
+    ``image/svg+xml`` type. Sniffing the bytes fixes that."""
+    try:
+        with p.open("rb") as fh:
+            head = fh.read(512)
+    except OSError:
+        return None
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if head[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    stripped = head.lstrip()
+    if stripped[:4] == b"<svg" or (stripped[:5] == b"<?xml" and b"<svg" in head):
+        return "image/svg+xml"
+    return None
+
+
 @router.get("/api/artifacts/{artifact_id}/download")
 def download_artifact(artifact_id: str, s: Session = Depends(get_session)) -> FileResponse:
     a = s.get(models.Artifact, artifact_id)
@@ -181,7 +206,8 @@ def download_artifact(artifact_id: str, s: Session = Depends(get_session)) -> Fi
     p = Path(a.path)
     if not p.is_file():
         raise HTTPException(410, "artifact file no longer present")
-    return FileResponse(str(p), filename=a.name)
+    media = _sniff_media_type(p)
+    return FileResponse(str(p), filename=a.name, media_type=media)
 
 
 @router.delete(
