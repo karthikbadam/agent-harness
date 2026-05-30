@@ -3,7 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { LuGitBranch } from "react-icons/lu";
 
 import type { TaskOut } from "../types";
-import { useAckTask, useRetryTask, useRunTask } from "../hooks/useTasks";
+import {
+  useAckTask,
+  useCancelTask,
+  useRetryTask,
+  useRunTask,
+} from "../hooks/useTasks";
+import { LoopPanel } from "./LoopPanel";
 
 interface Props {
   task: TaskOut;
@@ -63,10 +69,13 @@ export function TaskCard({ task }: Props) {
   const run = useRunTask(task.project_id);
   const ack = useAckTask(task.project_id);
   const retry = useRetryTask(task.project_id);
+  const cancel = useCancelTask(task.project_id);
 
+  const isLoop = task.mode === "loop";
   const canRun = task.status === "ready";
   const canAck = task.phase === "awaiting_ack";
   const canRetry = task.status === "failed";
+  const canStopLoop = isLoop && task.status === "running";
 
   const badge = badgeForTask(task);
 
@@ -152,8 +161,20 @@ export function TaskCard({ task }: Props) {
               Retry
             </Button>
           )}
+          {canStopLoop && (
+            <Button
+              size="2xs"
+              variant="outline"
+              colorPalette="red"
+              onClick={() => cancel.mutate(task.id)}
+              loading={cancel.isPending}
+            >
+              Stop loop
+            </Button>
+          )}
         </HStack>
       </Flex>
+      {isLoop && <LoopPanel task={task} />}
     </Box>
   );
 }

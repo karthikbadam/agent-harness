@@ -1,7 +1,10 @@
-import { api } from "./client";
+import { api, sseUrl } from "./client";
 import type {
+  ArtifactOut,
+  IterationOut,
   JobOut,
   LastPlanOut,
+  LoopCreate,
   TaskCreate,
   TaskOut,
   TaskUpdate,
@@ -40,4 +43,21 @@ export const tasksApi = {
     ),
   lastPlan: (projectId: string) =>
     api.get<LastPlanOut | null>(`/api/projects/${projectId}/plan`),
+
+  // Loop (autoresearch) task surface.
+  createLoop: (projectId: string, body: LoopCreate, opts?: { run?: boolean }) =>
+    api.post<TaskOut>(
+      `/api/projects/${projectId}/loops${opts?.run === false ? "?run=false" : ""}`,
+      body,
+    ),
+  listIterations: (id: string) =>
+    api.get<IterationOut[]>(`/api/tasks/${id}/iterations`),
+
+  // Artifacts (graphs/tables/reports a task produced).
+  listArtifacts: (id: string) =>
+    api.get<ArtifactOut[]>(`/api/tasks/${id}/artifacts`),
+  // Browser <img>/<a> can't set the auth header, so carry the token in the
+  // query string (the download route accepts ?token=, same as SSE).
+  artifactUrl: (artifactId: string) =>
+    sseUrl(`/api/artifacts/${artifactId}/download`),
 };
