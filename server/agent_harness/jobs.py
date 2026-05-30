@@ -27,7 +27,7 @@ from .claude import ClaudeRunner
 from .config import get_settings
 from .db import session_scope
 from . import models
-from .schemas import StreamEvent, TurnDoneEvent
+from .schemas import StreamEvent, ToolResultEvent, ToolUseEvent, TurnDoneEvent
 
 log = logging.getLogger(__name__)
 
@@ -333,9 +333,15 @@ class JobManager:
         last_event: Optional[StreamEvent] = None
         last_event_at = time.monotonic()
         timed_out = False
+        # Inflight tool-call count. The watchdog ignores idle ticks while >0
+        # so a long Bash call (e.g. `python train.py` for 5 min) doesn't get
+        # SIGTERM'd just because Claude is quiet between tool_use and
+        # tool_result. Parallel tool_use blocks → multiple increments,
+        # matched by their tool_result decrements.
+        inflight_tools = 0
 
         async def watchdog() -> None:
-            nonlocal timed_out
+            nonlocal timed_out, last_event_at
             if idle_timeout <= 0:
                 return
             check_every = min(5.0, max(0.1, idle_timeout / 4))
@@ -343,6 +349,12 @@ class JobManager:
                 await asyncio.sleep(check_every)
                 if runner.returncode is not None:
                     return
+                if inflight_tools > 0:
+                    # Tool call in flight — keep the timer pinned to "now"
+                    # so when the result arrives we resume from a clean
+                    # baseline.
+                    last_event_at = time.monotonic()
+                    continue
                 idle = time.monotonic() - last_event_at
                 if idle >= idle_timeout:
                     log.warning(
@@ -361,6 +373,10 @@ class JobManager:
                 if runner.pid and last_event is None:
                     self._mark_turn_running(job_id, turn_idx, pid=runner.pid, started_at=start_ts)
                 await broadcaster.publish(ev)
+                if isinstance(ev, ToolUseEvent):
+                    inflight_tools += 1
+                elif isinstance(ev, ToolResultEvent):
+                    inflight_tools = max(0, inflight_tools - 1)
                 last_event = ev
                 last_event_at = time.monotonic()
         except Exception as e:  # noqa: BLE001

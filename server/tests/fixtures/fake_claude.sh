@@ -14,6 +14,19 @@ set -eu
 delay_ms="${FAKE_CLAUDE_DELAY_MS:-0}"
 
 while IFS= read -r line; do
+  # Directive lines start with '#' and are NOT printed. `# sleep N` sleeps
+  # N seconds before continuing — useful for simulating a long-running
+  # tool call between tool_use and tool_result.
+  case "$line" in
+    "# sleep "*)
+      n="${line#"# sleep "}"
+      sleep "$n"
+      continue
+      ;;
+    "#"*)
+      continue
+      ;;
+  esac
   printf '%s\n' "$line"
   if [ "$delay_ms" != "0" ]; then
     # busy sleep via python for ms precision (more portable than `sleep 0.001`)

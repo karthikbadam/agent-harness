@@ -66,6 +66,37 @@ async def test_watchdog_does_not_kill_active_turn(initdb: Path) -> None:
         assert job.status == "done"
 
 
+async def test_watchdog_pauses_during_inflight_tool_call(initdb: Path) -> None:
+    """A long Bash tool call (no events while it runs) must not trip the
+    watchdog. Fixture emits tool_use, then the shim sleeps 3s before
+    emitting tool_result. Idle timeout is 1s — without the heartbeat fix
+    the job would be SIGTERM'd; with the fix it completes cleanly."""
+    with session_scope() as s:
+        proj = models.Project(name="p", path="/tmp", idle_timeout_seconds=1)
+        s.add(proj)
+        s.flush()
+        pid = proj.id
+
+    reg = BroadcasterRegistry(initdb / "logs")
+    mgr = JobManager(reg, claude_path=str(SHIM), default_idle_timeout_seconds=1)
+
+    # 3s pause between every line — far exceeds the 1s idle budget — but
+    # the tool_use → tool_result span is "in flight" so the watchdog must
+    # not kill the job.
+    os.environ["FAKE_CLAUDE_FIXTURE"] = str(FIXTURES / "stream" / "slow_tool.jsonl")
+    try:
+        jid = mgr.create_job(pid, prompt="hi")
+        await mgr.start(jid)
+        await asyncio.wait_for(mgr.wait(jid), timeout=15)
+    finally:
+        os.environ.pop("FAKE_CLAUDE_FIXTURE", None)
+
+    with session_scope() as s:
+        job = s.get(models.Job, jid)
+        assert job is not None
+        assert job.status == "done", f"expected done, got {job.status}"
+
+
 async def test_project_override_wins_over_global_default(initdb: Path) -> None:
     """Project with idle_timeout_seconds=1 stops; same scenario with default 60 wouldn't."""
     with session_scope() as s:
