@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.broadcasters = registry
     app.state.job_manager = manager
     app.state.owned_drivers = {}
-    await reconcile_jobs(registry)
+    await reconcile_jobs(registry, manager)
     schedules = ScheduleService(manager)
     schedules.start()
     app.state.schedules = schedules

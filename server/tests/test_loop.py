@@ -18,8 +18,10 @@ import httpx
 import pytest
 
 from agent_harness import config, models
+from agent_harness.broadcaster import BroadcasterRegistry
 from agent_harness.db import session_scope
 from agent_harness.main import create_app
+from agent_harness.reconcile import reconcile_jobs
 from agent_harness.services import planner, task_runner
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -251,6 +253,49 @@ def test_loop_stops_after_consecutive_failures(initdb: Path, tmp_path: Path) -> 
         parent = s.get(models.Task, parent_id)
         assert parent.status == "done"
         assert parent.loop_state["consecutive_failures"] == 2
+
+
+async def test_loop_survives_restart(initdb: Path, tmp_path: Path) -> None:
+    """A server restart kills the in-flight iteration; reconcile must finalize
+    it and spawn the next so the loop resumes instead of stalling."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    spec = {"metric_name": "val_acc", "max_iterations": 5, "max_consecutive_failures": 3}
+    with session_scope() as s:
+        pid, parent_id = _make_loop(s, repo, spec)
+
+    child1 = planner.start_loop(parent_id)
+    # Simulate that iteration #1 had been kicked: a running task + running job.
+    with session_scope() as s:
+        s.get(models.Task, child1).status = "running"
+        job = models.Job(
+            project_id=pid, task_id=child1, kind="execute", cwd=str(repo),
+            status="running",
+        )
+        s.add(job)
+        s.flush()
+        jid = job.id
+
+    # Restart reconciliation (no manager → the resumed iteration is left ready).
+    reg = BroadcasterRegistry(initdb / "logs")
+    reconciled = await reconcile_jobs(reg)
+    assert jid in reconciled
+
+    with session_scope() as s:
+        parent = s.get(models.Task, parent_id)
+        assert parent.status == "running", "loop should still be going"
+        assert parent.loop_state["iteration"] == 1
+        # The interrupted iteration counts as one failure (below the cap).
+        assert parent.loop_state["consecutive_failures"] == 1
+        kids = (
+            s.query(models.Task)
+            .filter(models.Task.parent_task_id == parent_id)
+            .all()
+        )
+        assert len(kids) == 2, "interrupted iter1 + resumed iter2"
+        nxt = [k for k in kids if k.status == "ready"]
+        assert len(nxt) == 1 and nxt[0].order_idx == 2, "next iteration queued"
 
 
 def test_metric_backstop_from_results_tsv(initdb: Path, tmp_path: Path) -> None:

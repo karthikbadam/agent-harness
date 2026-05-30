@@ -51,9 +51,19 @@ def _kill(pid: int, term_wait: float = 5.0) -> None:
         return
 
 
-async def reconcile_jobs(broadcasters: BroadcasterRegistry) -> list[str]:
+async def reconcile_jobs(
+    broadcasters: BroadcasterRegistry, job_manager: object | None = None
+) -> list[str]:
     """Idempotent: scan DB for running jobs, kill orphans, mark stopped, emit
     a synthetic job_status event.
+
+    For task-bound orphans we also run the normal finalize path
+    (``task_runner.on_job_finalized`` with status ``stopped``) so the owning
+    Task's status propagates instead of being stranded in ``running``. This is
+    what lets a **loop survive a restart**: the interrupted iteration finalizes,
+    ``advance_loop`` runs, and the next iteration is spawned. When a
+    ``job_manager`` is provided we kick those follow-on tasks so the loop
+    actually resumes (otherwise it would just sit ``ready``).
 
     Returns the list of job ids reconciled.
     """
@@ -66,6 +76,7 @@ async def reconcile_jobs(broadcasters: BroadcasterRegistry) -> list[str]:
         job_ids = [j.id for j in running_jobs]
 
     reconciled: list[str] = []
+    autorun_ids: list[str] = []
     for job_id in job_ids:
         try:
             turn_idx = _stop_orphan(job_id)
@@ -73,8 +84,32 @@ async def reconcile_jobs(broadcasters: BroadcasterRegistry) -> list[str]:
             b.start_turn(turn_idx)
             await b.publish(make_status_event(job_id, turn_idx, "stopped"))
             reconciled.append(job_id)
+            with session_scope() as s:
+                jb = s.get(models.Job, job_id)
+                is_task_bound = jb is not None and jb.task_id is not None
+            if is_task_bound:
+                from .services import task_runner
+
+                try:
+                    ids = task_runner.on_job_finalized(
+                        job_id, "stopped", log_dir=b.log_dir
+                    )
+                    autorun_ids.extend(ids or [])
+                except Exception:  # noqa: BLE001
+                    log.exception("finalize-on-reconcile failed for %s", job_id)
         except Exception as e:  # noqa: BLE001
             log.exception("reconcile failed for %s: %s", job_id, e)
+
+    # Resume follow-on work (e.g. a loop's next iteration) now that the manager
+    # exists. Without a manager (some tests) the tasks are left ``ready``.
+    if job_manager is not None and autorun_ids:
+        from .services import task_runner
+
+        for tid in autorun_ids:
+            try:
+                await task_runner.kickoff_first_phase(tid, job_manager)
+            except Exception:  # noqa: BLE001
+                log.exception("reconcile autorun kickoff failed for %s", tid)
     return reconciled
 
 
