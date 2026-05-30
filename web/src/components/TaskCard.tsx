@@ -1,6 +1,6 @@
 import { Box, Button, Flex, HStack, Stack, Text } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
-import { LuGitBranch } from "react-icons/lu";
+import { LuGitBranch, LuRepeat } from "react-icons/lu";
 
 import type { TaskOut } from "../types";
 import {
@@ -9,7 +9,6 @@ import {
   useRetryTask,
   useRunTask,
 } from "../hooks/useTasks";
-import { LoopPanel } from "./LoopPanel";
 
 interface Props {
   task: TaskOut;
@@ -22,6 +21,14 @@ interface StatusBadge {
 }
 
 function badgeForTask(t: TaskOut): StatusBadge {
+  // A loop reads as a loop, not a generic "Executing…".
+  if (t.mode === "loop") {
+    if (t.status === "running") return { label: "Looping", color: "blue", pulse: true };
+    if (t.status === "done") return { label: "Loop finished", color: "green" };
+    if (t.status === "failed") return { label: "Loop failed", color: "red" };
+    if (t.status === "canceled") return { label: "Loop stopped", color: "orange" };
+    if (t.status === "ready") return { label: "Loop ready", color: "teal" };
+  }
   if (t.status === "failed" || t.phase === "failed")
     return { label: "Failed", color: "red" };
   if (t.status === "canceled") return { label: "Canceled", color: "orange" };
@@ -88,7 +95,9 @@ export function TaskCard({ task }: Props) {
       px={4}
       py={3.5}
       cursor="pointer"
-      onClick={() => navigate(`/jobs?task_id=${task.id}`)}
+      onClick={() =>
+        navigate(isLoop ? `/tasks/${task.id}` : `/jobs?task_id=${task.id}`)
+      }
       _hover={{ bg: "bg.muted" }}
       transition="background-color 0.15s"
     >
@@ -109,7 +118,17 @@ export function TaskCard({ task }: Props) {
                 {badge.label}
               </Text>
             </HStack>
-            {task.worktree_branch ? (
+            {isLoop ? (
+              <HStack gap={1.5} color="fg.muted">
+                <Text>·</Text>
+                <Box lineHeight="0">
+                  <LuRepeat />
+                </Box>
+                <Text fontFamily="mono" fontSize="2xs">
+                  {loopMeta(task)}
+                </Text>
+              </HStack>
+            ) : task.worktree_branch ? (
               <HStack gap={1.5} color="fg.muted">
                 <Text>·</Text>
                 <Box lineHeight="0">
@@ -174,7 +193,20 @@ export function TaskCard({ task }: Props) {
           )}
         </HStack>
       </Flex>
-      {isLoop && <LoopPanel task={task} />}
     </Box>
   );
+}
+
+/** Compact loop summary for the card meta row, e.g. "11/40 · best 0.958". */
+function loopMeta(t: TaskOut): string {
+  const ls = (t.loop_state ?? {}) as {
+    iteration?: number;
+    best_metric?: number | null;
+  };
+  const spec = (t.loop_spec ?? {}) as { max_iterations?: number };
+  const iter = ls.iteration ?? 0;
+  const count = spec.max_iterations ? `${iter}/${spec.max_iterations}` : `${iter}`;
+  const best =
+    typeof ls.best_metric === "number" ? ` · best ${ls.best_metric.toFixed(3)}` : "";
+  return `${count}${best}`;
 }

@@ -459,6 +459,13 @@ def on_job_finalized(
                     )
                 except Exception:  # noqa: BLE001
                     log.exception("advance_loop failed for iteration %s", task.id)
+                # Retitle the finished iteration with what it tried, so the task
+                # list reads like the experiment log it is.
+                desc = (loop_result or {}).get("description")
+                if isinstance(desc, str) and desc.strip():
+                    n = (loop_result or {}).get("iteration")
+                    prefix = f"iter {n}" if n is not None else (task.title or "iter")
+                    task.title = f"{prefix} · {desc.strip()}"[:256]
 
             s.add(
                 models.Outcome(
