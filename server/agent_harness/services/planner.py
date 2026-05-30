@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import subprocess
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from pathlib import Path
@@ -403,3 +405,299 @@ def _integrate_prompt_placeholder(target_branch: str) -> str:
         f"(planner integrate — will merge dep task branches into "
         f"'{target_branch}' once deps resolve)"
     )
+
+
+# ============================ Loop (iterate) strategy ======================= #
+#
+# The planner's second task-generation strategy. Where the decompose path turns
+# one job into a parallel DAG, the iterate path turns each finished iteration
+# into (at most) one successor, carrying state and honoring stop conditions —
+# an autoresearch loop. ``start_loop`` seeds iteration #1; ``advance_loop`` is
+# called by ``task_runner.on_job_finalized`` when a ``source='loop'`` iteration
+# finishes, and decides whether to spawn the next one or end the loop.
+
+
+def _default_loop_state() -> dict:
+    return {
+        "iteration": 0,  # count of COMPLETED iterations
+        "best_metric": None,
+        "best_commit": None,
+        "consecutive_failures": 0,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "spent_usd": 0.0,
+    }
+
+
+def _extract_json_object(text: str) -> dict | None:
+    """Find the iteration's ``LOOP_RESULT: { ... }`` line and parse the object.
+
+    Tolerant of the object appearing without the prefix, in a fence, or with
+    surrounding prose. Returns None if nothing parseable is found.
+    """
+    if not text:
+        return None
+    # Prefer an explicit LOOP_RESULT: marker, last occurrence wins (the agent
+    # may print intermediate ones).
+    marks = list(re.finditer(r"LOOP_RESULT:\s*(\{.*?\})", text, re.DOTALL))
+    for m in reversed(marks):
+        try:
+            obj = json.loads(m.group(1))
+            if isinstance(obj, dict):
+                return obj
+        except Exception:  # noqa: BLE001
+            continue
+    # Fenced object fallback.
+    fence = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text)
+    if fence:
+        try:
+            obj = json.loads(fence.group(1))
+            if isinstance(obj, dict):
+                return obj
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
+def _git_head(cwd: str) -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", cwd, "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode().strip()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _results_tsv_last_metric(cwd: str, metric_name: str) -> float | None:
+    """Backstop metric source: read the last data row of ``results.tsv`` in the
+    loop's working dir and pull the ``metric_name`` column. Returns None if the
+    file/column/row is missing or unparseable."""
+    p = Path(cwd) / "results.tsv"
+    if not p.is_file():
+        return None
+    try:
+        lines = [ln for ln in p.read_text().splitlines() if ln.strip()]
+    except Exception:  # noqa: BLE001
+        return None
+    if len(lines) < 2:
+        return None
+    header = lines[0].split("\t")
+    if metric_name not in header:
+        return None
+    col = header.index(metric_name)
+    last = lines[-1].split("\t")
+    if col >= len(last):
+        return None
+    try:
+        return float(last[col])
+    except ValueError:
+        return None
+
+
+def _parse_iteration_result(
+    log_dir: Path | None, cwd: str, spec: dict, iteration: int
+) -> dict:
+    """Build the iteration result dict from the agent's structured output, with
+    a ``results.tsv`` + ``git HEAD`` backstop. Always returns a dict with at
+    least ``iteration``; ``metric`` may be None if nothing was parseable."""
+    metric_name = spec.get("metric_name", "metric")
+    obj = _extract_json_object(_all_assistant_text(log_dir)) if log_dir else None
+    metric: float | None = None
+    kept: bool | None = None
+    description: str | None = None
+    citation: str | None = None
+    if obj is not None:
+        m = obj.get("metric")
+        if isinstance(m, (int, float)):
+            metric = float(m)
+        if isinstance(obj.get("kept"), bool):
+            kept = obj["kept"]
+        if isinstance(obj.get("description"), str):
+            description = obj["description"][:500]
+        if isinstance(obj.get("citation"), str):
+            citation = obj["citation"][:300]
+    if metric is None:
+        metric = _results_tsv_last_metric(cwd, metric_name)
+    commit = _git_head(cwd)
+    return {
+        "iteration": iteration,
+        "metric": metric,
+        "kept": kept,
+        "description": description,
+        "citation": citation,
+        "commit": commit,
+    }
+
+
+def _is_improvement(direction: str, new: float, best: float | None) -> bool:
+    if best is None:
+        return True
+    return new > best if direction == "maximize" else new < best
+
+
+def _loop_stop_reason(spec: dict, state: dict, job_status: str) -> str | None:
+    """Return the first triggered stop condition, or None to keep looping.
+
+    Priority: consecutive failures → target reached → max iterations →
+    cost budget → wall-clock budget.
+    """
+    if state["consecutive_failures"] >= spec.get("max_consecutive_failures", 3):
+        return "max-consecutive-failures"
+    tgt = spec.get("target_metric")
+    best = state.get("best_metric")
+    if tgt is not None and best is not None:
+        direction = spec.get("direction", "maximize")
+        hit = best >= tgt if direction == "maximize" else best <= tgt
+        if hit:
+            return "target-reached"
+    if state["iteration"] >= spec.get("max_iterations", 50):
+        return "max-iterations"
+    max_cost = spec.get("max_cost_usd")
+    if max_cost is not None and state.get("spent_usd", 0.0) >= max_cost:
+        return "max-cost"
+    max_wall = spec.get("max_wall_clock_s")
+    if max_wall is not None:
+        try:
+            started = datetime.fromisoformat(state["started_at"])
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        except Exception:  # noqa: BLE001
+            elapsed = 0.0
+        if elapsed >= max_wall:
+            return "max-wall-clock"
+    return None
+
+
+def _build_iteration_prompt(
+    parent: models.Task, iteration: int, state: dict, spec: dict
+) -> str:
+    """Synthesize iteration N's prompt from the standing instruction
+    (``parent.prompt`` — the program.md body) plus the carried state header.
+    This is the "task generated on the go": the prompt evolves with the run."""
+    metric_name = spec.get("metric_name", "metric")
+    direction = spec.get("direction", "maximize")
+    best = state.get("best_metric")
+    best_commit = state.get("best_commit")
+    if best is None:
+        standing = (
+            f"This is iteration {iteration} — the FIRST one. Establish the "
+            f"baseline: run the experiment as-is and record {metric_name}."
+        )
+    else:
+        standing = (
+            f"You are iteration {iteration}. Best {metric_name} so far: "
+            f"{best} (at commit {best_commit}). The goal is to {direction} "
+            f"{metric_name}. Read results.tsv for what's already been tried and "
+            f"pick a NEW idea — do not repeat a prior experiment."
+        )
+    contract = (
+        "Run exactly ONE experiment this iteration, keep/discard via git as the "
+        "standing instructions describe, regenerate the progress graph, and "
+        "register artifacts. When finished, print EXACTLY one line:\n"
+        'LOOP_RESULT: {"metric": <number>, "kept": <true|false>, '
+        '"description": "<≤10 words>", "citation": "<paper or empty>"}'
+    )
+    return f"{standing}\n\n{contract}\n\n---\n\n{parent.prompt}"
+
+
+def _make_iteration_task(
+    s, parent: models.Task, iteration: int, state: dict, spec: dict
+) -> models.Task:
+    """Insert a single loop iteration child task (ready to run)."""
+    child = models.Task(
+        project_id=parent.project_id,
+        title=f"{parent.title} — iter {iteration}"[:256],
+        prompt=_build_iteration_prompt(parent, iteration, state, spec),
+        status="ready",
+        source="loop",
+        order_idx=iteration,
+        mode="one_shot",  # project root, no worktree, agent self-commits
+        parent_task_id=parent.id,
+        idle_timeout_seconds=parent.idle_timeout_seconds,
+    )
+    s.add(child)
+    s.flush()
+    return child
+
+
+def start_loop(parent_task_id: str) -> str | None:
+    """Seed a loop: init the parent's ``loop_state``, flip it to ``running``,
+    and insert iteration #1. Returns the child task id to kick, or None if the
+    parent is missing or not a runnable loop.
+
+    Called from ``task_runner.kickoff_first_phase`` for ``mode='loop'`` tasks.
+    """
+    with session_scope() as s:
+        parent = s.get(models.Task, parent_task_id)
+        if parent is None or parent.mode != "loop":
+            return None
+        spec = parent.loop_spec or {}
+        state = _default_loop_state()
+        next_iter = state["iteration"] + 1  # 1
+        child = _make_iteration_task(s, parent, next_iter, state, spec)
+        parent.loop_state = state
+        parent.status = "running"
+        parent.phase = "executing"
+        return child.id
+
+
+def advance_loop(
+    parent_task_id: str,
+    job_status: str,
+    cwd: str,
+    cost_usd: float | None,
+    log_dir: Path | None,
+) -> tuple[dict, str | None, str | None]:
+    """Process a finished loop iteration and decide what's next.
+
+    Returns ``(result, next_child_id, stop_reason)``:
+      - ``result``: the parsed iteration result, to be stored on the iteration's
+        ``Outcome.meta`` by the caller.
+      - ``next_child_id``: the id of the next iteration task (caller appends it
+        to ``autorun_ids`` for inline kickoff), or None if the loop is ending.
+      - ``stop_reason``: non-None iff the loop is ending (caller marks the
+        parent done with a summary).
+
+    Owns the ``loop_state`` update and the next-task insertion in its own
+    session — mirroring how the decompose path owns ``_insert_drafts``. The
+    caller keeps the iteration ``Outcome`` write.
+    """
+    with session_scope() as s:
+        parent = s.get(models.Task, parent_task_id)
+        if parent is None:
+            return {}, None, "parent-missing"
+        # A cancel flips the parent off 'running'; respect it and stop.
+        if parent.status != "running":
+            return {}, None, "canceled"
+        spec = parent.loop_spec or {}
+        state = dict(parent.loop_state or _default_loop_state())
+        iteration = state["iteration"] + 1
+        result = _parse_iteration_result(log_dir, cwd, spec, iteration)
+
+        # Update carried state.
+        state["iteration"] = iteration
+        state["spent_usd"] = round(
+            float(state.get("spent_usd", 0.0)) + float(cost_usd or 0.0), 6
+        )
+        metric = result.get("metric")
+        succeeded = job_status == "done" and metric is not None
+        if succeeded:
+            state["consecutive_failures"] = 0
+            if _is_improvement(
+                spec.get("direction", "maximize"), metric, state.get("best_metric")
+            ):
+                state["best_metric"] = metric
+                state["best_commit"] = result.get("commit")
+        else:
+            state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
+
+        stop_reason = _loop_stop_reason(spec, state, job_status)
+        parent.loop_state = state  # reassign so SQLAlchemy flags the JSON dirty
+
+        if stop_reason is not None:
+            parent.status = "done"
+            parent.phase = "done"
+            return result, None, stop_reason
+
+        child = _make_iteration_task(s, parent, iteration + 1, state, spec)
+        return result, child.id, None

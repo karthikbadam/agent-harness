@@ -20,7 +20,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .. import models
 from ..db import session_scope
@@ -438,6 +438,28 @@ def on_job_finalized(
                 _commit_dirty_worktree(cwd, commit_msg)
             sha, branch = (_git_head(cwd) if cwd else (None, None))
             outcome_status = "success" if job_status == "done" else "failed"
+
+            # Loop iteration: hand the finished iteration to the planner's
+            # iterate strategy, which parses the result, updates the parent's
+            # loop_state, and decides whether to spawn the next iteration or
+            # stop. Done BEFORE we add this iteration's Outcome so the separate
+            # session writes don't contend (same ordering the decompose path
+            # uses). The returned result is stored on the Outcome's meta.
+            loop_result: dict = {}
+            loop_next_child: str | None = None
+            loop_stop_reason: str | None = None
+            if task.source == "loop" and task.parent_task_id:
+                from . import planner as _planner
+                cost = _job_cost_usd(s, job.id)
+                try:
+                    loop_result, loop_next_child, loop_stop_reason = (
+                        _planner.advance_loop(
+                            task.parent_task_id, job_status, cwd or "", cost, log_dir
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    log.exception("advance_loop failed for iteration %s", task.id)
+
             s.add(
                 models.Outcome(
                     task_id=task.id,
@@ -447,6 +469,7 @@ def on_job_finalized(
                     summary=summary,
                     status=outcome_status,
                     kind="execute",
+                    meta=loop_result or {},
                 )
             )
             task.status = "done" if job_status == "done" else "failed"
@@ -459,6 +482,26 @@ def on_job_finalized(
                 and task.mode in ("plan_then_execute", "execute_only")
             ):
                 task.integration_status = "pending"
+
+            # Loop bookkeeping: spawn the next iteration (autorun), or, when the
+            # loop ended, record a final checkpoint Outcome on the parent.
+            if task.source == "loop" and task.parent_task_id:
+                if loop_next_child is not None:
+                    autorun_ids.append(loop_next_child)
+                elif loop_stop_reason is not None:
+                    _record_loop_finish(
+                        s, task.parent_task_id, job.id, loop_stop_reason
+                    )
+                    pending_events.append(
+                        (
+                            "task_done",
+                            {
+                                "project_id": project_id,
+                                "task_id": task.parent_task_id,
+                                "job_id": job.id,
+                            },
+                        )
+                    )
             s.flush()
             transitions = _reevaluate_downstream(s, task.id)
             event = "task_done" if task.status == "done" else "task_failed"
@@ -508,7 +551,26 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
       - ``one_shot`` → execute job at project path, no worktree, cannot
         be integrated. Used for narrow one-off edits that should not
         produce a branch.
+      - ``loop`` → the parent runs NO Claude job. ``planner.start_loop``
+        seeds iteration #1 (a ``source='loop'`` one_shot child) and flips the
+        parent to ``running``; we then kick that child. Each iteration's
+        finalize spawns the next via ``planner.advance_loop`` until a stop
+        condition (see ``on_job_finalized``).
     """
+    # Loop parent: delegate to the planner's iterate strategy and kick the
+    # first iteration child instead of spawning a job for the parent itself.
+    with session_scope() as s:
+        peek = s.get(models.Task, task_id)
+        if peek is None or peek.status != "ready":
+            return None
+        is_loop = peek.mode == "loop"
+    if is_loop:
+        from . import planner as _planner
+        child_id = _planner.start_loop(task_id)
+        if child_id is None:
+            return None
+        return await kickoff_first_phase(child_id, job_manager)
+
     with session_scope() as s:
         t = s.get(models.Task, task_id)
         if t is None or t.status != "ready":
@@ -569,6 +631,49 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
 def _emit_after(bus: "driver_bus.DriverEventBus", events: list[tuple[str, dict]]) -> None:
     for event, kw in events:
         bus.emit(event, **kw)
+
+
+def _job_cost_usd(s, job_id: str) -> float:
+    """Total cost across a job's turns — fed into the loop's spend budget."""
+    row = s.execute(
+        select(func.coalesce(func.sum(models.Turn.cost_usd), 0.0)).where(
+            models.Turn.job_id == job_id
+        )
+    ).first()
+    return float(row[0]) if row and row[0] is not None else 0.0
+
+
+def _record_loop_finish(s, parent_id: str, job_id: str, stop_reason: str) -> None:
+    """Write a final checkpoint Outcome on the loop parent when it ends.
+
+    ``advance_loop`` already flipped the parent to ``done`` (in its own
+    session); this records the human-readable summary + best result so the
+    parent has a terminal Outcome row like every other task.
+    """
+    parent = s.get(models.Task, parent_id)
+    if parent is None:
+        return
+    state = dict(parent.loop_state or {})
+    spec = parent.loop_spec or {}
+    metric_name = spec.get("metric_name", "metric")
+    best = state.get("best_metric")
+    iters = state.get("iteration")
+    summary = (
+        f"Loop finished ({stop_reason}). Best {metric_name}={best} "
+        f"at {state.get('best_commit')} after {iters} iteration(s)."
+    )
+    s.add(
+        models.Outcome(
+            task_id=parent_id,
+            job_id=job_id,
+            commit_sha=state.get("best_commit"),
+            branch=None,
+            summary=summary,
+            status="success",
+            kind="loop",
+            meta={"stop_reason": stop_reason, **state},
+        )
+    )
 
 
 def try_autodisable_autopilot(project_id: str) -> bool:
