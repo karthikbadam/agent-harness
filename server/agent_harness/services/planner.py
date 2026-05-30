@@ -630,9 +630,9 @@ def _make_iteration_task(
         project_id=parent.project_id,
         # Short, self-describing title. Retitled with the experiment's
         # description once it reports (see task_runner loop branch), so the
-        # list reads like "iter 11 · Adam lr 0.01" rather than echoing the
-        # parent's full name on every row.
-        title=f"iter {iteration}",
+        # list reads like "Iteration 11 · Adam lr 0.01" rather than echoing
+        # the parent's full name on every row.
+        title=f"Iteration {iteration}",
         prompt=_build_iteration_prompt(parent, iteration, state, spec),
         status="ready",
         source="loop",

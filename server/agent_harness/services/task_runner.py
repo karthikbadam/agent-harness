@@ -464,7 +464,7 @@ def on_job_finalized(
                 desc = (loop_result or {}).get("description")
                 if isinstance(desc, str) and desc.strip():
                     n = (loop_result or {}).get("iteration")
-                    prefix = f"iter {n}" if n is not None else (task.title or "iter")
+                    prefix = f"Iteration {n}" if n is not None else (task.title or "Iteration")
                     task.title = f"{prefix} · {desc.strip()}"[:256]
 
             s.add(
