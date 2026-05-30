@@ -255,6 +255,27 @@ class OutcomeOut(BaseModel):
     created_at: datetime
 
 
+class ArtifactCreate(BaseModel):
+    # Path the agent wrote, relative to the job's cwd (worktree/project) or
+    # absolute. The handler copies it into AH_HOME/artifacts/<task_id>/.
+    path: str
+    name: str | None = None  # display name; defaults to basename(path)
+    kind: Literal["graph", "table", "report", "checkpoint", "log", "file"] = "file"
+    meta: dict = Field(default_factory=dict)
+    job_id: str | None = None
+
+
+class ArtifactOut(BaseModel):
+    id: str
+    task_id: str
+    job_id: str | None = None
+    kind: str
+    name: str
+    meta: dict = Field(default_factory=dict)
+    download_url: str
+    created_at: datetime
+
+
 class SplitTaskItem(BaseModel):
     title: str
     prompt: str

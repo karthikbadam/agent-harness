@@ -215,6 +215,28 @@ class DriverNote(Base):
     acknowledged_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
 
+class Artifact(Base):
+    """A file an agent produced and registered against a task — a graph, a
+    results table, a report, a checkpoint pointer, a log. The harness copies
+    the file into ``AH_HOME/artifacts/<task_id>/<name>`` so it survives
+    worktree cleanup, and surfaces it on the task page (PNG inline, others as
+    downloads). This is how the autoresearch loop's ``progress.png`` and
+    ``citations.md`` reach the phone."""
+
+    __tablename__ = "artifacts"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    job_id: Mapped[Optional[str]] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(
+        String(16), default="file"
+    )  # graph|table|report|checkpoint|log|file
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)  # stored path under AH_HOME
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class Outcome(Base):
     __tablename__ = "outcomes"
 

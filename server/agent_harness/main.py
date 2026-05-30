@@ -30,6 +30,7 @@ from .reconcile import reconcile_jobs
 from .schedule_service import ScheduleService
 from .services import claude_md, orchestrator_mcp, task_runner
 from .routes import allowlist as allowlist_routes
+from .routes import artifacts as artifacts_routes
 from .routes import driver as driver_routes
 from .routes import jobs as jobs_routes
 from .routes import outcomes as outcomes_routes
@@ -127,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(allowlist_routes.router)
     app.include_router(tasks_routes.router)
     app.include_router(outcomes_routes.router)
+    app.include_router(artifacts_routes.router)
     app.include_router(plans_routes.router)
     app.include_router(stream_routes.router)
     app.include_router(stream_routes.schema_router)
