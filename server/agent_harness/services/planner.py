@@ -597,7 +597,29 @@ def _build_iteration_prompt(
         'LOOP_RESULT: {"metric": <number>, "kept": <true|false>, '
         '"description": "<≤10 words>", "citation": "<paper or empty>"}'
     )
-    return f"{standing}\n\n{contract}\n\n---\n\n{parent.prompt}"
+    # Inject the harness coordinates so the iteration's artifact curls target the
+    # LOOP PARENT, not this iteration child. Registering progress.png/results.tsv
+    # against the parent (F3 re-registers same-name in place) means the parent
+    # task always shows one current graph across the whole run.
+    coords = _harness_coords_block(parent.id)
+    return f"{coords}\n\n{standing}\n\n{contract}\n\n---\n\n{parent.prompt}"
+
+
+def _harness_coords_block(parent_task_id: str) -> str:
+    """Env exports the iteration agent should `export` before registering
+    artifacts. AH_TASK_ID points at the loop parent so the graph lands there."""
+    from ..config import get_settings
+
+    s = get_settings()
+    token = s.auth_token or ""
+    base = "http://127.0.0.1:8765"
+    return (
+        "Before registering any artifact, export these (artifacts must attach to "
+        "the loop parent so its page shows one current graph):\n"
+        f"  export AH_URL={base}\n"
+        f"  export AH_TOKEN={token}\n"
+        f"  export AH_TASK_ID={parent_task_id}"
+    )
 
 
 def _make_iteration_task(
