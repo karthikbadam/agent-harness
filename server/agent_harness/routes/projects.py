@@ -136,11 +136,48 @@ def path_suggestions(s: Session = Depends(get_session)) -> list[PathSuggestion]:
     return out
 
 
+def _ensure_project_dir(path: str) -> None:
+    """Create the directory and make it a git repo (with an initial commit so
+    HEAD exists) — used when the UI starts a project in a brand-new folder.
+    Best-effort and idempotent: a path that already exists / is already a repo
+    is left as-is."""
+    import subprocess
+    from pathlib import Path
+
+    d = Path(path)
+    d.mkdir(parents=True, exist_ok=True)
+    if (d / ".git").exists():
+        return
+    try:
+        subprocess.run(
+            ["git", "init", "-q", "-b", "main", str(d)], check=True, timeout=10
+        )
+        gi = d / ".gitignore"
+        if not gi.exists():
+            gi.write_text("node_modules/\ndist/\nrun.log\n.DS_Store\n")
+        # An initial commit so `main` is born (loops branch from HEAD). Identity
+        # flags keep it working even if global git identity is unset.
+        env_id = ["-c", "user.email=agent-harness@local", "-c", "user.name=agent-harness"]
+        subprocess.run(["git", "-C", str(d), "add", "-A"], check=True, timeout=10)
+        subprocess.run(
+            ["git", "-C", str(d), *env_id, "commit", "-q", "--no-gpg-sign",
+             "-m", "init: project scaffold"],
+            check=True, timeout=10,
+        )
+    except Exception:  # noqa: BLE001
+        # Leave whatever git state we managed; the first task/loop iteration
+        # can still initialize/commit. Don't block project creation on this.
+        pass
+
+
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(body: ProjectCreate, s: Session = Depends(get_session)) -> ProjectOut:
+    path = _expand_path(body.path)
+    if body.create_dir:
+        _ensure_project_dir(path)
     p = models.Project(
         name=body.name,
-        path=_expand_path(body.path),
+        path=path,
         permission_mode=body.permission_mode,
         dangerously_skip=body.dangerously_skip,
         extra_claude_args=list(body.extra_claude_args),

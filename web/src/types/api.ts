@@ -1227,6 +1227,10 @@ export interface components {
              * @default 3
              */
             max_consecutive_failures: number;
+            /** Stuck After */
+            stuck_after?: number | null;
+            /** Escalate Model */
+            escalate_model?: string | null;
             /**
              * Idle Timeout Seconds
              * @default 0
@@ -1312,6 +1316,11 @@ export interface components {
             name: string;
             /** Path */
             path: string;
+            /**
+             * Create Dir
+             * @default false
+             */
+            create_dir: boolean;
             /**
              * Permission Mode
              * @default acceptEdits

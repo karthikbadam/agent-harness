@@ -75,6 +75,10 @@ StreamEvent = Annotated[
 class ProjectCreate(BaseModel):
     name: str
     path: str
+    # When true, create the directory if it doesn't exist and `git init` it
+    # (with an initial commit) so a fresh project is immediately usable —
+    # lets the UI start a project in a brand-new folder.
+    create_dir: bool = False
     permission_mode: Literal["acceptEdits", "plan", "default"] = "acceptEdits"
     dangerously_skip: bool = False
     extra_claude_args: list[str] = Field(default_factory=list)
