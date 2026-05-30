@@ -28,6 +28,7 @@ def _to_out(o: models.Outcome) -> OutcomeOut:
         summary=o.summary,
         status=o.status,
         kind=o.kind,
+        meta=o.meta or {},
         created_at=o.created_at,
     )
 

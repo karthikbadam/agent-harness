@@ -21,7 +21,16 @@ from .. import models
 from ..auth import require_auth
 from ..db import get_session
 from ..jobs import JobManager
-from ..schemas import JobOut, MergeIn, SplitIn, TaskCreate, TaskOut, TaskUpdate
+from ..schemas import (
+    IterationOut,
+    JobOut,
+    LoopCreate,
+    MergeIn,
+    SplitIn,
+    TaskCreate,
+    TaskOut,
+    TaskUpdate,
+)
 from ..routes.jobs import _to_out as _job_to_out
 
 router = APIRouter(tags=["tasks"], dependencies=[Depends(require_auth)])
@@ -68,6 +77,9 @@ def _to_out(s: Session, t: models.Task) -> TaskOut:
         integration_status=t.integration_status,
         synthetic=t.synthetic,
         idle_timeout_seconds=t.idle_timeout_seconds,
+        parent_task_id=t.parent_task_id,
+        loop_spec=t.loop_spec,
+        loop_state=t.loop_state,
         depends_on=_deps_of(s, t.id),
         latest_outcome_id=_latest_outcome_id(s, t.id),
         created_at=t.created_at,
@@ -201,6 +213,102 @@ async def create_task(
             await task_runner.kickoff_first_phase(t.id, _manager(request))
             s.refresh(t)
     return _to_out(s, t)
+
+
+@router.post(
+    "/api/projects/{project_id}/loops",
+    response_model=TaskOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_loop(
+    project_id: str,
+    body: LoopCreate,
+    request: Request,
+    run: bool = True,
+    s: Session = Depends(get_session),
+) -> TaskOut:
+    """Create an autoresearch loop — a ``mode='loop'`` parent task that spawns
+    one iteration child at a time until a stop condition (max_iterations /
+    target_metric / cost / wall-clock / consecutive failures).
+
+    Defaults to ``?run=true``: the loop starts immediately (seeds iteration #1).
+    Pass ``?run=false`` to create it paused (status ``ready``; kick later with
+    ``POST /tasks/{id}/run``).
+    """
+    if s.get(models.Project, project_id) is None:
+        raise HTTPException(404, "unknown project")
+    spec = {
+        "metric_name": body.metric_name,
+        "direction": body.direction,
+        "max_iterations": body.max_iterations,
+        "target_metric": body.target_metric,
+        "max_cost_usd": body.max_cost_usd,
+        "max_wall_clock_s": body.max_wall_clock_s,
+        "max_consecutive_failures": body.max_consecutive_failures,
+    }
+    t = models.Task(
+        project_id=project_id,
+        title=body.title,
+        prompt=body.prompt,
+        source="manual",
+        status="ready",  # no deps; ready to start
+        mode="loop",
+        loop_spec=spec,
+        idle_timeout_seconds=body.idle_timeout_seconds,
+    )
+    s.add(t)
+    s.commit()
+    s.refresh(t)
+    from ..services import driver_bus
+
+    driver_bus.get_bus().emit("task_ready", project_id, task_id=t.id)
+    if run:
+        from ..services import task_runner
+
+        await task_runner.kickoff_first_phase(t.id, _manager(request))
+        s.refresh(t)
+    return _to_out(s, t)
+
+
+@router.get(
+    "/api/tasks/{task_id}/iterations", response_model=list[IterationOut]
+)
+def list_iterations(
+    task_id: str, s: Session = Depends(get_session)
+) -> list[IterationOut]:
+    """The iteration children of a loop parent, flattened with each one's
+    parsed result (metric, kept) for the UI series. Ordered by iteration."""
+    if s.get(models.Task, task_id) is None:
+        raise HTTPException(404, "unknown task")
+    children = (
+        s.query(models.Task)
+        .filter(models.Task.parent_task_id == task_id)
+        .order_by(models.Task.order_idx)
+        .all()
+    )
+    out: list[IterationOut] = []
+    for c in children:
+        # Latest execute outcome carries the parsed result in meta.
+        row = s.execute(
+            select(models.Outcome)
+            .where(models.Outcome.task_id == c.id)
+            .order_by(models.Outcome.created_at.desc())
+        ).first()
+        meta = (row[0].meta or {}) if row else {}
+        commit = row[0].commit_sha if row else None
+        out.append(
+            IterationOut(
+                task_id=c.id,
+                iteration=c.order_idx,
+                status=c.status,
+                metric=meta.get("metric"),
+                kept=meta.get("kept"),
+                description=meta.get("description"),
+                commit_sha=commit,
+                created_at=c.created_at,
+            )
+        )
+    return out
 
 
 @router.get("/api/projects/{project_id}/tasks", response_model=list[TaskOut])
@@ -703,6 +811,24 @@ async def cancel_task(
     if t is None:
         raise HTTPException(404, "not found")
     if t.status == "running":
+        mgr = _manager(request)
+        # Loop parent runs no job of its own — its work lives in the currently
+        # running iteration child. Mark the parent canceled FIRST so the child's
+        # finalize (advance_loop) sees a non-running parent and stops, then stop
+        # the child's job.
+        if t.mode == "loop":
+            t.status = "canceled"
+            s.commit()
+            child_job = s.execute(
+                select(models.Job.id)
+                .join(models.Task, models.Task.id == models.Job.task_id)
+                .where(models.Task.parent_task_id == task_id)
+                .order_by(models.Job.created_at.desc())
+            ).first()
+            if child_job is not None:
+                await mgr.stop(child_job[0])
+            s.refresh(t)
+            return _to_out(s, t)
         # Stop the most recent task-bound job.
         job_row = s.execute(
             select(models.Job.id)
@@ -710,7 +836,6 @@ async def cancel_task(
             .order_by(models.Job.created_at.desc())
         ).first()
         if job_row is not None:
-            mgr = _manager(request)
             await mgr.stop(job_row[0])
     # GC the worktree if one was created for this task.
     if t.worktree_path or t.worktree_branch:
