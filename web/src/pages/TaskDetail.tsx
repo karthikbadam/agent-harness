@@ -27,6 +27,14 @@ function fmt(n: number | null | undefined, d = 4): string {
   return typeof n === "number" ? n.toFixed(d) : "—";
 }
 
+function fmtDuration(s: number | null | undefined): string {
+  if (typeof s !== "number" || s <= 0) return "";
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return sec ? `${m}m ${sec}s` : `${m}m`;
+}
+
 /**
  * Dig-in view for a task. Renders whatever the task produced — artifacts
  * dispatched by kind (graph/table/report/log/file) — so it's flexible across
@@ -167,6 +175,15 @@ export function TaskDetailPage() {
                     <Text color="fg.subtle">—</Text>
                   )}
                 </Box>
+                <Text
+                  color="fg.subtle"
+                  fontFamily="mono"
+                  w="3.5rem"
+                  flexShrink={0}
+                  textAlign="right"
+                >
+                  {fmtDuration(it.duration_s)}
+                </Text>
                 <Text color="fg.muted" truncate flex="1" minW={0}>
                   {it.description ?? ""}
                 </Text>

@@ -1088,6 +1088,8 @@ export interface components {
             description?: string | null;
             /** Commit Sha */
             commit_sha?: string | null;
+            /** Duration S */
+            duration_s?: number | null;
             /**
              * Created At
              * Format: date-time

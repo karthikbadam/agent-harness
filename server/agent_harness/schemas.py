@@ -309,6 +309,7 @@ class IterationOut(BaseModel):
     kept: bool | None = None
     description: str | None = None
     commit_sha: str | None = None
+    duration_s: float | None = None  # wall-clock of the iteration's job
     created_at: datetime
 
 

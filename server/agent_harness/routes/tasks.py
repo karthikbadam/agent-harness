@@ -14,7 +14,7 @@ There is no auto-run: the user explicitly kicks each ready task via
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -298,6 +298,17 @@ def list_iterations(
         ).first()
         meta = (row[0].meta or {}) if row else {}
         commit = row[0].commit_sha if row else None
+        # Wall-clock of the iteration's job: first turn start → last turn end.
+        span = s.execute(
+            select(
+                func.min(models.Turn.started_at), func.max(models.Turn.ended_at)
+            )
+            .join(models.Job, models.Job.id == models.Turn.job_id)
+            .where(models.Job.task_id == c.id)
+        ).first()
+        duration_s = None
+        if span and span[0] and span[1]:
+            duration_s = max(0.0, (span[1] - span[0]).total_seconds())
         out.append(
             IterationOut(
                 task_id=c.id,
@@ -307,6 +318,7 @@ def list_iterations(
                 kept=meta.get("kept"),
                 description=meta.get("description"),
                 commit_sha=commit,
+                duration_s=duration_s,
                 created_at=c.created_at,
             )
         )

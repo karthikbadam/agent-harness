@@ -739,7 +739,10 @@ def _harness_coords_block(parent_task_id: str) -> str:
         "(markdown/text), `log` (text), `file` (anything else).\n"
         "- Use a STABLE `name` every iteration — do NOT put the iteration number "
         "in it (use \"progress\", not \"progress (iter 4)\") — so each artifact "
-        "UPDATES IN PLACE instead of piling up a new one per iteration."
+        "UPDATES IN PLACE instead of piling up a new one per iteration.\n"
+        "- Register the SAME small set of artifacts every iteration with the SAME "
+        "`kind` AND `name` each time. Pick one kind per file and stick to it "
+        "(don't register the same document as both a `table` and a `report`)."
     )
 
 
