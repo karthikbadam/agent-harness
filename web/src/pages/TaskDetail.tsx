@@ -48,12 +48,21 @@ export function TaskDetailPage() {
   const metricName = spec.metric_name ?? "metric";
   const rows = [...(iterations ?? [])].sort((a, b) => b.iteration - a.iteration);
 
-  // Agents sometimes name an artifact per-iteration ("Progress graph (iter 4)"),
-  // which creates a fresh row each time instead of updating one. Collapse a
-  // series to its latest: strip a trailing "(iter N)"-style suffix and keep the
-  // newest per (kind, normalized name). The API returns newest-first.
+  // Keep the view clean when agents name artifacts inconsistently across
+  // iterations. The API returns newest-first, so we keep the first occurrence:
+  //   - graphs collapse to the single latest (a loop has one "current" progress
+  //     chart, however it's named — "progress", "Progress graph (iter 6)", …);
+  //   - tables/reports/etc. dedupe by normalized name (strip a trailing
+  //     "(iter N)") so distinct docs — e.g. a survey AND a bibliography —
+  //     both survive.
   const seenArtifacts = new Set<string>();
+  let graphShown = false;
   const artifactList = (artifacts ?? []).filter((a) => {
+    if (a.kind === "graph") {
+      if (graphShown) return false;
+      graphShown = true;
+      return true;
+    }
     const base = a.name
       .replace(/\s*\((?:iter(?:ation)?|step|round|v(?:ersion)?)?\s*\d+\)\s*$/i, "")
       .trim()
