@@ -49,11 +49,46 @@ investigate or change (not the answers). Then emit a strict JSON array
       "title": "<imperative title, <= 80 chars>",
       "prompt": "<the exact prompt the agent will run when this task executes — name specific files and the concrete change>",
       "depends_on_titles": ["<earlier task title>", ...],
-      "kind": "task" | "integrate",                                    // optional, default "task"
+      "kind": "task" | "integrate" | "loop",                           // optional, default "task"
       "mode": "plan_then_execute" | "execute_only" | "research"        // optional, default "plan_then_execute"
     },
     ...
   ]
+
+## Loop tasks — for open-ended, iterative asks
+
+Some asks are not "do X once" but "keep improving/accumulating toward a goal
+over many small steps." Those are **loops**, and you emit ONE entry with
+`kind: "loop"`. The harness then runs it autonomously: each iteration is its own
+fresh agent turn that does ONE unit of work, reports a metric, and the harness
+spawns the next — keeping/advancing via git, detecting plateaus, and stopping at
+a target or cap. You do NOT decompose a loop into many tasks; you emit a single
+loop entry and let the harness iterate.
+
+Recognize a loop when the ask is iterative/unbounded with a sense of "better"
+over time, e.g.:
+- optimize a metric ("train a model to maximize accuracy", autoresearch);
+- accumulate a corpus ("build a knowledge base / literature survey on X");
+- incrementally build something to match a spec ("procedurally build a Milky
+  Way galaxy in WebGL, researching and reproducing its real characteristics");
+- "keep doing X until Y", "iterate on", "explore approaches to".
+
+A loop entry has these fields (in addition to `title`):
+
+  {
+    "kind": "loop",
+    "title": "<short title>",
+    "prompt": "<the PER-ITERATION program: what ONE iteration should do, the metric definition, and the quality bar. The harness automatically prepends the iteration header + a LOOP_RESULT contract + artifact-registration coordinates, so you do NOT need to include those — just describe one iteration's job clearly and how it commits/keeps work. Tell the first iteration to scaffold anything it needs.>",
+    "metric_name": "<the thing being maximized, e.g. val_acc | papers | characteristics>",
+    "direction": "maximize" | "minimize",          // default maximize
+    "max_iterations": <int>,                         // a sane cap, e.g. 25
+    "target_metric": <number or null>,               // stop when reached (optional)
+    "stuck_after": <int or null>                     // after this many non-improving iters, the harness runs a "rethink" iteration (optional, e.g. 3)
+  }
+
+The per-iteration `prompt` is the loop's "program": make it self-contained for a
+single iteration (pick one sub-goal, do it, commit, define the metric). The
+harness owns the looping, keep/discard, plateau-detection, and stopping.
 
 ## Modes
 
@@ -303,6 +338,28 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
                 t.prompt = _integrate_prompt_placeholder(target_branch)
                 created_ids.append(t.id)
                 continue
+            if kind == "loop":
+                prompt = item.get("prompt")
+                if not isinstance(prompt, str) or not prompt.strip():
+                    log.warning("planner loop entry %r missing prompt; skipping", title)
+                    continue
+                t = models.Task(
+                    project_id=project_id,
+                    title=title[:256],
+                    prompt=prompt,
+                    status="pending",
+                    source="planner",
+                    order_idx=idx,
+                    mode="loop",
+                    loop_spec=_loop_spec_from_item(item),
+                    idle_timeout_seconds=0,  # iterations may run long
+                )
+                s.add(t)
+                s.flush()
+                title_to_id[title] = t.id
+                title_to_kind[title] = "loop"
+                created_ids.append(t.id)
+                continue
             prompt = item.get("prompt")
             if not isinstance(prompt, str):
                 continue
@@ -405,6 +462,36 @@ def _integrate_prompt_placeholder(target_branch: str) -> str:
         f"(planner integrate — will merge dep task branches into "
         f"'{target_branch}' once deps resolve)"
     )
+
+
+def _loop_spec_from_item(item: dict) -> dict:
+    """Build a loop_spec from a planner ``kind: "loop"`` entry, filling in safe
+    defaults for anything the planner omitted."""
+    metric = item.get("metric_name")
+    metric = metric.strip() if isinstance(metric, str) and metric.strip() else "metric"
+    direction = item.get("direction")
+    if direction not in ("maximize", "minimize"):
+        direction = "maximize"
+    max_iter = item.get("max_iterations")
+    if not isinstance(max_iter, int) or max_iter <= 0:
+        max_iter = 25
+    stuck = item.get("stuck_after")
+    if not isinstance(stuck, int) or stuck <= 0:
+        stuck = 4
+    target = item.get("target_metric")
+    if not isinstance(target, (int, float)):
+        target = None
+    return {
+        "metric_name": metric,
+        "direction": direction,
+        "max_iterations": max_iter,
+        "target_metric": target,
+        "max_cost_usd": None,
+        "max_wall_clock_s": None,
+        "max_consecutive_failures": 3,
+        "stuck_after": stuck,
+        "escalate_model": None,
+    }
 
 
 # ============================ Loop (iterate) strategy ======================= #

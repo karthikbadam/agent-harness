@@ -360,6 +360,58 @@ async def test_loop_survives_restart(initdb: Path, tmp_path: Path) -> None:
         assert len(nxt) == 1 and nxt[0].order_idx == 2, "next iteration queued"
 
 
+def test_planner_emits_runnable_loop_task(initdb: Path) -> None:
+    """A planner 'loop' entry becomes a ready mode='loop' task (which then
+    auto-runs), with the loop_spec carried from the entry."""
+    with session_scope() as s:
+        p = models.Project(name="x", path="/tmp")
+        s.add(p)
+        s.flush()
+        pid = p.id
+    parsed = [
+        {
+            "kind": "loop",
+            "title": "galaxy",
+            "prompt": "Build one Milky Way characteristic per iteration.",
+            "metric_name": "characteristics",
+            "direction": "maximize",
+            "max_iterations": 20,
+            "target_metric": 18,
+            "stuck_after": 3,
+        }
+    ]
+    ids = planner._insert_drafts(pid, parsed)
+    assert len(ids) == 1
+    with session_scope() as s:
+        t = s.get(models.Task, ids[0])
+        assert t.mode == "loop"
+        assert t.source == "planner"
+        assert t.status == "ready"  # no deps → ready → planner autorun kicks it
+        assert t.idle_timeout_seconds == 0
+        assert t.loop_spec["metric_name"] == "characteristics"
+        assert t.loop_spec["max_iterations"] == 20
+        assert t.loop_spec["target_metric"] == 18
+        assert t.loop_spec["stuck_after"] == 3
+
+
+def test_planner_loop_defaults(initdb: Path) -> None:
+    with session_scope() as s:
+        p = models.Project(name="x", path="/tmp")
+        s.add(p)
+        s.flush()
+        pid = p.id
+    ids = planner._insert_drafts(
+        pid, [{"kind": "loop", "title": "survey", "prompt": "one iteration"}]
+    )
+    with session_scope() as s:
+        spec = s.get(models.Task, ids[0]).loop_spec
+        assert spec["metric_name"] == "metric"
+        assert spec["direction"] == "maximize"
+        assert spec["max_iterations"] == 25
+        assert spec["stuck_after"] == 4
+        assert spec["target_metric"] is None
+
+
 def test_metric_backstop_from_results_tsv(initdb: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
