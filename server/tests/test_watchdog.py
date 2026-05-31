@@ -42,6 +42,36 @@ async def test_watchdog_stops_silent_turn(initdb: Path) -> None:
         assert job.status == "stopped"
 
 
+async def test_completed_turn_that_lingers_finalizes_done(initdb: Path) -> None:
+    """A turn that delivers its result and then lingers (a tool left a
+    backgrounded child holding the pipe) must finalize as ``done`` — not be
+    reaped by the idle watchdog and mis-recorded as stopped/failed."""
+    with session_scope() as s:
+        proj = models.Project(name="p", path="/tmp", idle_timeout_seconds=1)
+        s.add(proj)
+        s.flush()
+        pid = proj.id
+
+    reg = BroadcasterRegistry(initdb / "logs")
+    mgr = JobManager(reg, claude_path=str(SHIM), default_idle_timeout_seconds=1)
+
+    # Fixture ends with a `result` event; HANG makes the process linger after.
+    os.environ["FAKE_CLAUDE_FIXTURE"] = str(FIXTURES / "stream" / "tool_use_ok.jsonl")
+    os.environ["FAKE_CLAUDE_HANG"] = "1"
+    try:
+        jid = mgr.create_job(pid, prompt="hi")
+        await mgr.start(jid)
+        await asyncio.wait_for(mgr.wait(jid), timeout=15)
+    finally:
+        os.environ.pop("FAKE_CLAUDE_FIXTURE", None)
+        os.environ.pop("FAKE_CLAUDE_HANG", None)
+
+    with session_scope() as s:
+        job = s.get(models.Job, jid)
+        assert job is not None
+        assert job.status == "done", f"expected done, got {job.status}"
+
+
 async def test_watchdog_does_not_kill_active_turn(initdb: Path) -> None:
     with session_scope() as s:
         proj = models.Project(name="p", path="/tmp", idle_timeout_seconds=30)

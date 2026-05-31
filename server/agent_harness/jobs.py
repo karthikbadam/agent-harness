@@ -430,7 +430,13 @@ class JobManager:
             cost = last_event.cost_usd
             duration = last_event.duration_ms
 
-        if timed_out or runner.stop_requested:
+        if isinstance(last_event, TurnDoneEvent):
+            # A delivered result is authoritative. If the idle watchdog fired
+            # late because the process lingered after the result (a tool left a
+            # backgrounded child holding the pipe), still honor the result's
+            # exit code rather than mis-recording a completed turn as stopped.
+            status = "done" if exit_code == 0 else "failed"
+        elif timed_out or runner.stop_requested:
             status = "stopped"
         elif exit_code == 0:
             status = "done"
