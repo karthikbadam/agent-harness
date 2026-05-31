@@ -119,6 +119,17 @@ You have three ways to compose this — pick the simplest that fits:
 When a loop has setup nodes, its per-iteration `prompt` must ASSUME the
 foundation already exists (do NOT re-scaffold each iteration).
 
+**INVARIANT — never emit a detached loop alongside foundation nodes.** If the
+graph contains ANY other task the loop builds on (scaffold / setup / wave /
+integrate nodes), the loop MUST list its foundation in `depends_on_titles` —
+normally the final `integrate`/merge node (pattern 3) or the last serial setup
+task (pattern 2). A loop with `depends_on_titles: []` starts IMMEDIATELY and
+runs at the project root **concurrently with your build tasks**, re-scaffolding
+over them and corrupting the foundation. The ONLY graph where a loop has no
+deps is pattern 1 (self-contained) — where there are NO other foundation nodes
+and iteration 1 does the scaffolding itself. So: if you emitted any scaffold /
+wave / integrate node, you are NOT in pattern 1 — the loop MUST depend on it.
+
 ## Modes
 
 - `plan_then_execute` (default) — the agent does a read-only planning turn
