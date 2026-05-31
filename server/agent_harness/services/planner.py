@@ -90,6 +90,35 @@ The per-iteration `prompt` is the loop's "program": make it self-contained for a
 single iteration (pick one sub-goal, do it, commit, define the metric). The
 harness owns the looping, keep/discard, plateau-detection, and stopping.
 
+### Composing a graph: giving a loop a foundation
+
+The task list is a **graph** — any node may `depends_on_titles` others — and a
+loop is just a node in it. So a "set up a foundation, then iteratively optimize"
+ask is naturally **setup node(s) → loop**. Two facts constrain how the
+foundation reaches the loop:
+
+- A loop runs at the **project root**, and its iterations do NOT use worktrees.
+- So whatever the loop builds on must already be on the loop's branch (the
+  project root / `main`) before it starts.
+
+You have three ways to compose this — pick the simplest that fits:
+
+1. **Self-contained loop** (no setup nodes): the loop's FIRST iteration scaffolds
+   what it needs. Best when setup is light or tightly coupled to the iteration.
+2. **Serial setup → loop**: emit one or a few `one_shot` setup tasks at the
+   project root, chained via `depends_on_titles` (each on the previous), that
+   commit the foundation directly to the root; the loop `depends_on_titles` the
+   last. No worktrees, no merge.
+3. **Parallel wave → integrate → loop**: build genuinely independent foundation
+   pieces in parallel (`mode: "execute_only"`, worktrees), join them with a
+   `kind: "integrate"` node whose **`target_branch` is `"main"`**, and have the
+   loop depend on that integrate. The integrate merges the foundation onto the
+   root so the loop sees it. (For loops the integrate target MUST be the root
+   branch the loop runs on — unlike a pure wave feeding worktree dependents.)
+
+When a loop has setup nodes, its per-iteration `prompt` must ASSUME the
+foundation already exists (do NOT re-scaffold each iteration).
+
 ## Modes
 
 - `plan_then_execute` (default) — the agent does a read-only planning turn
@@ -239,6 +268,44 @@ def _all_assistant_text(log_dir: Path) -> str:
     return "\n".join(pieces)
 
 
+def _latest_assistant_text(log_dir: Path) -> str:
+    """assistant_text from only the HIGHEST-numbered turn file. A steering
+    re-plan is a followup turn, so its revised task array lives in the latest
+    turn; reading all turns would concatenate it with the prior plan and parse
+    the wrong array."""
+    if not log_dir.is_dir():
+        return ""
+    turns = list(log_dir.glob("turn-*.jsonl"))
+    if not turns:
+        return ""
+
+    def _idx(p: Path) -> int:
+        try:
+            return int(p.stem.split("-")[1])
+        except (IndexError, ValueError):
+            return -1
+
+    last = max(turns, key=_idx)
+    pieces: list[str] = []
+    try:
+        with last.open("rb") as fh:
+            for raw in fh:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line or '"assistant_text"' not in line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                if ev.get("type") == "assistant_text" and isinstance(
+                    ev.get("text"), str
+                ):
+                    pieces.append(ev["text"])
+    except Exception:  # noqa: BLE001
+        return ""
+    return "\n".join(pieces)
+
+
 def parse_and_insert_from_log_dir(
     project_id: str, plan_task_id: str, log_dir: Path, ask: str
 ) -> list[str]:
@@ -254,17 +321,55 @@ def parse_and_insert_from_log_dir(
     raw = _all_assistant_text(log_dir)
     parsed = _extract_json_array(raw)
     if parsed and isinstance(parsed, list):
-        ids = _insert_drafts(project_id, parsed)
+        ids = _insert_drafts(project_id, parsed, plan_task_id=plan_task_id)
         if ids:
             return ids
     log.info(
         "planner emitted no usable tasks for %s; inserting fallback research task",
         plan_task_id,
     )
-    return _insert_fallback_research(project_id, ask)
+    return _insert_fallback_research(project_id, ask, plan_task_id=plan_task_id)
 
 
-def _insert_fallback_research(project_id: str, ask: str) -> list[str]:
+def replace_drafts_from_log_dir(
+    project_id: str, plan_task_id: str, log_dir: Path
+) -> list[str]:
+    """Steering re-plan: the planner re-ran (a followup on the plan job) and
+    emitted a NEW task list. Delete this plan's still-``pending`` draft children
+    (never anything that already started) and insert the fresh array. Returns
+    the new draft ids, or [] (keeping the old drafts) if nothing parseable came
+    back.
+    """
+    parsed = _extract_json_array(_latest_assistant_text(log_dir))
+    if not (parsed and isinstance(parsed, list)):
+        return []
+    with session_scope() as s:
+        draft_ids = [
+            r[0]
+            for r in s.execute(
+                select(models.Task.id).where(
+                    models.Task.parent_task_id == plan_task_id,
+                    models.Task.source == "planner",
+                    models.Task.status == "pending",
+                )
+            ).all()
+        ]
+        if draft_ids:
+            s.execute(
+                models.TaskDependency.__table__.delete().where(
+                    (models.TaskDependency.task_id.in_(draft_ids))
+                    | (models.TaskDependency.depends_on_id.in_(draft_ids))
+                )
+            )
+            s.execute(
+                models.Task.__table__.delete().where(models.Task.id.in_(draft_ids))
+            )
+    return _insert_drafts(project_id, parsed, plan_task_id=plan_task_id)
+
+
+def _insert_fallback_research(
+    project_id: str, ask: str, plan_task_id: str | None = None
+) -> list[str]:
     """Insert a single ``research`` task carrying the original ask.
 
     Used when the planner failed to produce a task array. Lands ``ready`` so
@@ -280,18 +385,23 @@ def _insert_fallback_research(project_id: str, ask: str) -> list[str]:
             source="planner",
             order_idx=0,
             mode="research",
+            parent_task_id=plan_task_id,
         )
         s.add(t)
         s.flush()
         return [t.id]
 
 
-def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
+def _insert_drafts(
+    project_id: str, parsed: list[dict], plan_task_id: str | None = None
+) -> list[str]:
     """Insert planner-drafted tasks, resolving depends_on_titles to ids.
 
     Drafts land as ``source='planner'``. Tasks with no deps are inserted as
     ``ready`` so they auto-run; tasks with deps stay ``pending`` until their
-    predecessors finish. Skips entries missing a title or prompt.
+    predecessors finish. Skips entries missing a title or prompt. When
+    ``plan_task_id`` is given, every draft is linked to it via
+    ``parent_task_id`` so the plan owns its drafts (grouping + steering-replace).
 
     Entries with ``kind: "integrate"`` are created as synthetic, one-shot
     integrate tasks. Their prompt is auto-built from the dep ``task/<id>``
@@ -329,6 +439,7 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
                     order_idx=idx,
                     mode="one_shot",
                     synthetic=True,
+                    parent_task_id=plan_task_id,
                 )
                 s.add(t)
                 s.flush()
@@ -353,6 +464,7 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
                     mode="loop",
                     loop_spec=_loop_spec_from_item(item),
                     idle_timeout_seconds=0,  # iterations may run long
+                    parent_task_id=plan_task_id,
                 )
                 s.add(t)
                 s.flush()
@@ -374,6 +486,7 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
                 source="planner",
                 order_idx=idx,
                 mode=mode,
+                parent_task_id=plan_task_id,
             )
             s.add(t)
             s.flush()

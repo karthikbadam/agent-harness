@@ -290,6 +290,25 @@ def delete_project(project_id: str, s: Session = Depends(get_session)) -> None:
                 )
             )
         )
+        # Artifacts FK to tasks/jobs and were added after this teardown was
+        # written — drain them too or the tasks DELETE hits a FK constraint.
+        s.execute(
+            models.Artifact.__table__.delete().where(
+                or_(
+                    models.Artifact.job_id.in_(job_ids or [""]),
+                    models.Artifact.task_id.in_(task_ids or [""]),
+                )
+            )
+        )
+    if task_ids:
+        # Tasks self-reference via parent_task_id (loop iterations → loop
+        # parent); clear those links before the bulk delete so the row-by-row
+        # FK check can't trip on a parent removed before its child.
+        s.execute(
+            models.Task.__table__.update()
+            .where(models.Task.id.in_(task_ids))
+            .values(parent_task_id=None)
+        )
     s.execute(
         models.DriverNote.__table__.delete().where(
             or_(

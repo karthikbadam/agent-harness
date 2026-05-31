@@ -307,6 +307,11 @@ class ClaudeRunner:
             stderr=asyncio.subprocess.PIPE,
             cwd=self.cwd,
             env=merged_env,
+            # The StreamReader's default line buffer is 64 KB; a single
+            # stream-json line (e.g. a large file Write or tool result echoed
+            # back) can exceed that and raise LimitOverrunError, killing the
+            # job. Raise the ceiling so long lines parse instead of crashing.
+            limit=16 * 1024 * 1024,
         )
         assert self._proc.stdout is not None
         parser = self._parser

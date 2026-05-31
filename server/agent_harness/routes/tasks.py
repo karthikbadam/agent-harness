@@ -413,6 +413,14 @@ def delete_task(task_id: str, s: Session = Depends(get_session)) -> None:
         (models.TaskDependency.task_id == task_id)
         | (models.TaskDependency.depends_on_id == task_id)
     ).delete()
+    # Drain rows that FK to this task (artifacts/outcomes registered against it)
+    # and clear child links (loop iterations point here via parent_task_id), or
+    # the delete trips a FOREIGN KEY constraint.
+    s.query(models.Artifact).filter(models.Artifact.task_id == task_id).delete()
+    s.query(models.Outcome).filter(models.Outcome.task_id == task_id).delete()
+    s.query(models.Task).filter(models.Task.parent_task_id == task_id).update(
+        {models.Task.parent_task_id: None}
+    )
     s.delete(t)
     s.commit()
 
@@ -421,46 +429,73 @@ def delete_task(task_id: str, s: Session = Depends(get_session)) -> None:
 async def run_task(
     task_id: str, request: Request, s: Session = Depends(get_session)
 ) -> JobOut:
-    """Kick a ready Task. Spawns the first phase's Job:
-    - plan / plan_then_execute → Plan Job (kind=plan, cwd=project.path)
-    - research / one_shot non-synthetic → Execute Job (kind=execute, cwd=project.path)
-    - synthetic (integration) → Integrate Job (kind=integrate, cwd=project.path)
-    """
+    """Kick a ready Task by spawning its first phase via the single canonical
+    path, ``task_runner.kickoff_first_phase`` — which knows every mode/kind
+    (loop→start_loop, execute_only→worktree, synthetic→integrate, plan→plan).
+    Spawning a job directly here would bypass that (e.g. run a loop as one
+    direct turn, or run an execute_only task at the project root with no
+    worktree)."""
+    from ..services import task_runner
+
     t = s.get(models.Task, task_id)
     if t is None:
         raise HTTPException(404, "not found")
     if t.status != "ready":
         raise HTTPException(409, f"task status is {t.status!r}; only 'ready' may run")
-    project = s.get(models.Project, t.project_id)
-    if project is None:
-        raise HTTPException(500, "project missing")
-    mgr = _manager(request)
-    title = f"[task] {t.title}"[:256]
-    if t.synthetic:
-        phase = "integrating"
-        kind = "integrate"
-    elif t.mode in ("plan", "plan_then_execute"):
-        phase = "planning"
-        kind = "plan"
-    else:
-        phase = "executing"
-        kind = "execute"
-    t.status = "running"
-    t.phase = phase
-    s.commit()
-    jid = mgr.create_job(
-        t.project_id,
-        t.prompt,
-        title=title,
-        task_id=t.id,
-        kind=kind,
-        cwd=project.path,
-    )
-    await mgr.start(jid)
+    jid = await task_runner.kickoff_first_phase(task_id, _manager(request))
+    if jid is None:
+        raise HTTPException(500, "failed to start task")
     s.expire_all()
     job = s.get(models.Job, jid)
     assert job is not None
     return _job_to_out(job)
+
+
+@router.post("/api/tasks/{task_id}/confirm", response_model=list[TaskOut])
+async def confirm_plan(
+    task_id: str, request: Request, s: Session = Depends(get_session)
+) -> list[TaskOut]:
+    """Confirm a drafted plan parked at ``awaiting_ack``: promote its draft
+    children to runnable and launch the graph. No Claude turn — the no-unmet-dep
+    drafts are kicked via ``kickoff_first_phase`` and the rest sequence through
+    the normal dependency/autorun flow."""
+    from ..services import task_runner
+
+    plan = s.get(models.Task, task_id)
+    if plan is None:
+        raise HTTPException(404, "not found")
+    if plan.mode != "plan":
+        raise HTTPException(409, "not a plan task")
+    if plan.phase != "awaiting_ack":
+        raise HTTPException(409, f"plan is not awaiting review (phase={plan.phase!r})")
+    drafts = (
+        s.query(models.Task)
+        .filter(
+            models.Task.parent_task_id == task_id,
+            models.Task.source == "planner",
+            models.Task.status == "pending",
+        )
+        .all()
+    )
+    ready_ids: list[str] = []
+    for d in drafts:
+        d.status = _initial_status(s, d.id)  # ready iff its deps are all done
+        if d.status == "ready":
+            ready_ids.append(d.id)
+    plan.status = "done"
+    plan.phase = "done"
+    s.commit()
+    mgr = _manager(request)
+    for tid in ready_ids:
+        await task_runner.kickoff_first_phase(tid, mgr)
+    s.expire_all()
+    rows = (
+        s.query(models.Task)
+        .filter(models.Task.parent_task_id == task_id)
+        .order_by(models.Task.order_idx)
+        .all()
+    )
+    return [_to_out(s, t) for t in rows]
 
 
 @router.post("/api/tasks/{task_id}/ack", response_model=JobOut)
@@ -714,17 +749,18 @@ async def retry_task(
     if t.status != "failed":
         raise HTTPException(409, f"task status is {t.status!r}; only 'failed' may retry")
     mgr = _manager(request)
-    title = f"[task] {t.title}"[:256]
-    failed_phase = t.phase
     project = s.get(models.Project, t.project_id)
     if project is None:
         raise HTTPException(500, "project missing")
     t.retries = (t.retries or 0) + 1
 
-    if failed_phase == "executing" and t.worktree_path:
-        # Keep the worktree and re-run the execute Job only.
-        from ..services import task_runner
+    from ..services import task_runner
 
+    # Resume in place when the task already has a worktree carrying partial work
+    # (a failed execute task keeps its worktree). NOTE: we key on the worktree,
+    # not failed_phase — finalize sets phase='failed', so the old
+    # ``failed_phase == 'executing'`` guard never matched.
+    if t.worktree_path:
         t.phase = "awaiting_ack"
         t.status = "running"
         t.integration_status = None
@@ -747,34 +783,21 @@ async def retry_task(
         assert job is not None
         return _job_to_out(job)
 
-    # Default: clear worktree and replay from the first phase.
-    if t.worktree_path or t.worktree_branch:
+    # Default: replay from the first phase via the canonical kickoff path (which
+    # creates worktrees / starts loops correctly — a raw create_job here would
+    # run loops as one turn and execute_only tasks at the project root).
+    if t.worktree_branch:
         from ..services import worktrees
 
         worktrees.remove(project, t)
-        t.worktree_path = None
         t.worktree_branch = None
     t.integration_status = None
-    if t.synthetic:
-        t.phase = "integrating"
-        kind = "integrate"
-    elif t.mode in ("plan", "plan_then_execute"):
-        t.phase = "planning"
-        kind = "plan"
-    else:
-        t.phase = "executing"
-        kind = "execute"
-    t.status = "running"
+    t.phase = None
+    t.status = "ready"
     s.commit()
-    jid = mgr.create_job(
-        t.project_id,
-        t.prompt,
-        title=title,
-        task_id=t.id,
-        kind=kind,
-        cwd=project.path,
-    )
-    await mgr.start(jid)
+    jid = await task_runner.kickoff_first_phase(task_id, mgr)
+    if jid is None:
+        raise HTTPException(500, "retry failed to start task")
     s.expire_all()
     job = s.get(models.Job, jid)
     assert job is not None

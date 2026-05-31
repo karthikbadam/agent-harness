@@ -28,6 +28,10 @@ from . import driver_bus, worktrees
 
 log = logging.getLogger(__name__)
 
+# A plan auto-runs only if it's simple: no loop nodes and fewer than this many
+# tasks. Anything heavier parks as a reviewable draft (gate + steer + confirm).
+PLAN_AUTORUN_MAX = 10
+
 
 def _git_head(project_path: str) -> tuple[str | None, str | None]:
     """Return (commit_sha, branch) for the project's working dir, or (None, None)."""
@@ -268,53 +272,97 @@ def on_job_finalized(
             # mark itself done. Distinct from the per-task planning phase
             # (mode='plan_then_execute') which parks at awaiting_ack.
             if task.mode == "plan":
+                # The planner job decomposed the ask into a task GRAPH. Three
+                # outcomes: failed; first plan (insert + gate auto-run vs draft);
+                # or a steering re-plan (a followup turn while parked at
+                # awaiting_ack → replace the draft list, stay parked).
+                from . import planner as _planner
+
+                if job_status != "done":
+                    task.status = "failed"
+                    task.phase = "failed"
+                    task.last_failed_at = datetime.now(timezone.utc)
+                    s.add(models.Outcome(
+                        task_id=task.id, job_id=job.id, commit_sha=None, branch=None,
+                        summary=summary, status="failed", kind="plan",
+                    ))
+                    pending_events.append((
+                        "task_failed",
+                        {"project_id": project_id, "task_id": task.id, "job_id": job.id},
+                    ))
+                    _emit_after(bus, pending_events)
+                    return autorun_ids
+
+                # A followup on an already-finalized (auto-ran) plan is a no-op.
+                if task.status == "done":
+                    s.add(models.Outcome(
+                        task_id=task.id, job_id=job.id, commit_sha=None, branch=None,
+                        summary=summary, status="success", kind="plan",
+                    ))
+                    _emit_after(bus, pending_events)
+                    return autorun_ids
+
+                is_steering = task.phase == "awaiting_ack"
                 child_ids: list[str] = []
-                if job_status == "done" and log_dir is not None:
-                    from . import planner as _planner
-                    try:
+                try:
+                    if is_steering:
+                        child_ids = _planner.replace_drafts_from_log_dir(
+                            project_id, task.id, log_dir
+                        )
+                    elif log_dir is not None:
                         child_ids = _planner.parse_and_insert_from_log_dir(
                             project_id, task.id, log_dir, task.prompt
                         )
-                    except Exception:  # noqa: BLE001
-                        log.exception(
-                            "planner insert failed for task %s", task.id
-                        )
-                outcome_status = "success" if job_status == "done" else "failed"
-                plan_summary = (
-                    f"Created {len(child_ids)} task{'s' if len(child_ids) != 1 else ''}."
-                    if child_ids
-                    else summary
-                )
-                task.status = "done" if job_status == "done" else "failed"
-                task.phase = "done" if job_status == "done" else "failed"
-                if task.status == "failed":
-                    task.last_failed_at = datetime.now(timezone.utc)
-                s.add(
-                    models.Outcome(
-                        task_id=task.id,
-                        job_id=job.id,
-                        commit_sha=None,
-                        branch=None,
-                        summary=plan_summary,
-                        status=outcome_status,
-                        kind="plan",
-                    )
-                )
-                s.flush()
-                # Newly-inserted child tasks that landed 'ready' (no unmet
-                # deps) auto-run. They aren't downstream of the plan task in
-                # the DAG — _insert_drafts created them with source='planner'
-                # and the existing autorun path handles them.
+                except Exception:  # noqa: BLE001
+                    log.exception("planner insert/replace failed for task %s", task.id)
+
+                # Gate: auto-run only simple plans (no loops, < PLAN_AUTORUN_MAX
+                # tasks). A steering re-plan always re-parks for review.
+                has_loop = False
+                n = 0
                 for cid in child_ids:
                     ds = s.get(models.Task, cid)
-                    if ds is not None and ds.status == "ready" and ds.source == "planner":
-                        autorun_ids.append(cid)
-                pending_events.append(
-                    (
-                        "task_done" if task.status == "done" else "task_failed",
-                        {"project_id": project_id, "task_id": task.id, "job_id": job.id},
-                    )
+                    if ds is None:
+                        continue
+                    n += 1
+                    if ds.mode == "loop":
+                        has_loop = True
+                auto_run = (not has_loop) and (n < PLAN_AUTORUN_MAX)
+
+                if not is_steering and auto_run:
+                    task.status = "done"
+                    task.phase = "done"
+                    event = "task_done"
+                    for cid in child_ids:
+                        ds = s.get(models.Task, cid)
+                        if ds is not None and ds.status == "ready" and ds.source == "planner":
+                            autorun_ids.append(cid)
+                else:
+                    # Park as a reviewable draft: the plan stays running at
+                    # awaiting_ack. Hold ALL drafts uniformly at 'pending'
+                    # (override the no-dep→ready promotion in _insert_drafts) so
+                    # steer-replace and confirm operate on a uniform set.
+                    task.status = "running"
+                    task.phase = "awaiting_ack"
+                    event = "plan_ready"
+                    for cid in child_ids:
+                        ds = s.get(models.Task, cid)
+                        if ds is not None and ds.source == "planner":
+                            ds.status = "pending"
+
+                verb = "Revised" if is_steering else "Drafted"
+                plan_summary = (
+                    f"{verb} {n} task{'s' if n != 1 else ''}." if n else summary
                 )
+                s.add(models.Outcome(
+                    task_id=task.id, job_id=job.id, commit_sha=None, branch=None,
+                    summary=plan_summary, status="success", kind="plan",
+                ))
+                s.flush()
+                pending_events.append((
+                    event,
+                    {"project_id": project_id, "task_id": task.id, "job_id": job.id},
+                ))
                 _emit_after(bus, pending_events)
                 return autorun_ids
             # Per-task plan phase (mode='plan_then_execute'): park at

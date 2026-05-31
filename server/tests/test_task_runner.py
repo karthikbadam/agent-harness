@@ -206,7 +206,7 @@ def test_plan_mode_inserts_children_and_marks_self_done(
         assert plan.status == "done" and plan.phase == "done"
         outcome = s.query(models.Outcome).filter_by(task_id=tid).one()
         assert outcome.kind == "plan" and outcome.status == "success"
-        assert "Created 2 task" in (outcome.summary or "")
+        assert "Drafted 2 task" in (outcome.summary or "")
         children = (
             s.query(models.Task)
             .filter(models.Task.project_id == pid, models.Task.source == "planner")
