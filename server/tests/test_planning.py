@@ -305,6 +305,47 @@ async def test_confirm_launches_drafts(app_client, tmp_path: Path) -> None:
         assert d.status in ("running", "done")  # promoted + launched
 
 
+async def test_followup_on_gated_plan_replans_not_acks(app_client, tmp_path: Path) -> None:
+    """A followup on a gated plan (mode='plan' at awaiting_ack) must re-plan on
+    the SAME plan job, not get routed to the plan_then_execute ack path (which
+    would advance it to executing)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    r = await app_client.post("/api/projects", headers=AUTH, json={"name": "p", "path": str(repo)})
+    pid = r.json()["id"]
+    with session_scope() as s:
+        plan = models.Task(
+            project_id=pid,
+            title="Plan",
+            prompt="x",
+            status="running",
+            phase="awaiting_ack",
+            mode="plan",
+            source="user",
+        )
+        s.add(plan)
+        s.flush()
+        job = models.Job(
+            project_id=pid,
+            title="plan",
+            task_id=plan.id,
+            kind="plan",
+            cwd=str(repo),
+            session_id="sess",
+        )
+        s.add(job)
+        s.flush()
+        s.add(models.Turn(job_id=job.id, idx=0, prompt="x", status="done"))
+        jid = job.id
+    r = await app_client.post(
+        f"/api/jobs/{jid}/followup", headers=AUTH, json={"prompt": "make it one loop"}
+    )
+    assert r.status_code == 200, r.text
+    # Followup path keeps the same plan job; the ack path would spawn an execute
+    # job (kind='execute') and advance the task.
+    assert r.json()["kind"] == "plan"
+
+
 async def test_delete_project_with_artifacts(app_client, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
