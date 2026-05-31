@@ -169,6 +169,14 @@ export function useCancelTask(projectId: string) {
   });
 }
 
+export function useConfirmPlan(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => tasksApi.confirm(id),
+    onSuccess: () => invalidateTasksFor(qc, projectId),
+  });
+}
+
 export function usePlan(projectId: string) {
   const qc = useQueryClient();
   return useMutation({

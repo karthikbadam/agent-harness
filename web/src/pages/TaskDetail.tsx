@@ -3,6 +3,7 @@ import { Box, Button, Center, Flex, HStack, Spinner, Stack, Text } from "@chakra
 
 import { Shell } from "../components/Shell";
 import { ArtifactView } from "../components/ArtifactView";
+import { PlanReview } from "../components/PlanReview";
 import { StatusPill } from "../components/StatusPill";
 import {
   useArtifacts,
@@ -111,6 +112,8 @@ export function TaskDetailPage() {
           <Spinner />
         </Center>
       )}
+
+      {task.data?.mode === "plan" && <PlanReview task={task.data} />}
 
       {isLoop && (
         <HStack gap={5} fontSize="sm" wrap="wrap" mb={4}>

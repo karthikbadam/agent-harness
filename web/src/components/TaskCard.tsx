@@ -6,6 +6,7 @@ import type { TaskOut } from "../types";
 import {
   useAckTask,
   useCancelTask,
+  useConfirmPlan,
   useRetryTask,
   useRunTask,
 } from "../hooks/useTasks";
@@ -32,6 +33,9 @@ function badgeForTask(t: TaskOut): StatusBadge {
   if (t.status === "failed" || t.phase === "failed")
     return { label: "Failed", color: "red" };
   if (t.status === "canceled") return { label: "Canceled", color: "orange" };
+  // A gated planner draft awaiting your review + confirm.
+  if (t.mode === "plan" && t.phase === "awaiting_ack")
+    return { label: "Plan · review", color: "orange", pulse: true };
   if (t.phase === "awaiting_ack") return { label: "Awaiting ack", color: "orange" };
   if (t.phase === "planning") {
     // mode='plan' is the top-level planner decomposing the ask; mode='plan_then_execute'
@@ -77,10 +81,14 @@ export function TaskCard({ task }: Props) {
   const ack = useAckTask(task.project_id);
   const retry = useRetryTask(task.project_id);
   const cancel = useCancelTask(task.project_id);
+  const confirmPlan = useConfirmPlan(task.project_id);
 
   const isLoop = task.mode === "loop";
+  const isPlanReview = task.mode === "plan" && task.phase === "awaiting_ack";
   const canRun = task.status === "ready";
-  const canAck = task.phase === "awaiting_ack";
+  // plan_then_execute parks at awaiting_ack and is acked into execution; a
+  // gated planner draft (mode='plan') is confirmed, not acked.
+  const canAck = task.phase === "awaiting_ack" && !isPlanReview;
   const canRetry = task.status === "failed";
   const canStopLoop = isLoop && task.status === "running";
 
@@ -96,7 +104,11 @@ export function TaskCard({ task }: Props) {
       py={3.5}
       cursor="pointer"
       onClick={() =>
-        navigate(isLoop ? `/tasks/${task.id}` : `/jobs?task_id=${task.id}`)
+        navigate(
+          isLoop || isPlanReview
+            ? `/tasks/${task.id}`
+            : `/jobs?task_id=${task.id}`,
+        )
       }
       _hover={{ bg: "bg.muted" }}
       transition="background-color 0.15s"
@@ -167,6 +179,16 @@ export function TaskCard({ task }: Props) {
               loading={ack.isPending}
             >
               Ack plan
+            </Button>
+          )}
+          {isPlanReview && (
+            <Button
+              size="2xs"
+              colorPalette="green"
+              onClick={() => confirmPlan.mutate(task.id)}
+              loading={confirmPlan.isPending}
+            >
+              Confirm & run
             </Button>
           )}
           {canRetry && (

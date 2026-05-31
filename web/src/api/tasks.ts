@@ -34,6 +34,7 @@ export const tasksApi = {
   retry: (id: string) => api.post<JobOut>(`/api/tasks/${id}/retry`, {}),
   restart: (id: string) => api.post<TaskOut>(`/api/tasks/${id}/restart`, {}),
   cancel: (id: string) => api.post<TaskOut>(`/api/tasks/${id}/cancel`, {}),
+  confirm: (id: string) => api.post<TaskOut[]>(`/api/tasks/${id}/confirm`, {}),
   outcomes: (id: string) =>
     api.get<OutcomeOut[]>(`/api/tasks/${id}/outcomes`),
   plan: (projectId: string, ask: string) =>
