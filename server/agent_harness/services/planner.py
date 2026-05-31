@@ -947,10 +947,19 @@ def advance_loop(
         state["iteration"] = iteration
         state["spent_usd"] = round(float(state.get("spent_usd", 0.0)) + float(cost_usd or 0.0), 6)
         metric = result.get("metric")
+        kept = result.get("kept")
         succeeded = job_status == "done" and metric is not None
         if succeeded:
             state["consecutive_failures"] = 0
-            if _is_improvement(spec.get("direction", "maximize"), metric, state.get("best_metric")):
+            # Only an iteration the agent actually KEPT can become the new best.
+            # If kept is False the experiment was reverted out of the tree, so
+            # recording its metric/commit as "best" would point best_commit at a
+            # reverted commit and diverge the harness's best_metric from what
+            # later iterations read back from the tree / benchmark history.
+            improved = _is_improvement(
+                spec.get("direction", "maximize"), metric, state.get("best_metric")
+            )
+            if kept is not False and improved:
                 state["best_metric"] = metric
                 state["best_commit"] = result.get("commit")
                 state["non_improving_streak"] = 0
