@@ -1,0 +1,22 @@
+{
+  "name": "agent-harness-monorepo",
+  "private": true,
+  "description": "Root tooling: pre-commit formatting/linting for server (ruff) and web (prettier).",
+  "scripts": {
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.3"
+  },
+  "lint-staged": {
+    "server/**/*.py": [
+      ".venv/bin/ruff format",
+      ".venv/bin/ruff check --fix"
+    ],
+    "web/**/*.{ts,tsx,css,json}": [
+      "prettier --write"
+    ]
+  }
+}
