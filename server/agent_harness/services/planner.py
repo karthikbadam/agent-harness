@@ -182,6 +182,16 @@ prompt automatically — leave `prompt` off integrate entries; it's ignored.
 Downstream tasks that depend on this integrate task will start their
 worktrees from `target_branch`, so they see all the merged work.
 
+**INVARIANT — merging worktree branches REQUIRES `kind: "integrate"`.** A
+`one_shot` / `execute_only` / `plan_then_execute` task CANNOT merge another
+task's work: each runs in its own worktree (or the bare root) and does not know
+the sibling `task/<id>` branch names, so a regular task titled "Integrate …" or
+"Merge … to main" silently merges NOTHING. Any node whose job is to combine the
+outputs of parallel worktree tasks MUST be `kind: "integrate"` with a
+`target_branch`. If you catch yourself writing a non-integrate task that
+`depends_on` several worktree tasks in order to "merge"/"assemble"/"combine"
+them, convert it to `kind: "integrate"`.
+
 Use waves only when the foundation is actually shared. If the ask is small
 or the tasks are truly independent (disjoint files), one or a few siblings
 with no deps is best — the harness will run them in parallel, which is
