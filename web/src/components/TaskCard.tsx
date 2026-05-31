@@ -24,10 +24,12 @@ interface StatusBadge {
 function badgeForTask(t: TaskOut): StatusBadge {
   // A loop reads as a loop, not a generic "Executing…".
   if (t.mode === "loop") {
-    if (t.status === "running") return { label: "Looping", color: "blue", pulse: true };
+    if (t.status === "running")
+      return { label: "Looping", color: "blue", pulse: true };
     if (t.status === "done") return { label: "Loop finished", color: "green" };
     if (t.status === "failed") return { label: "Loop failed", color: "red" };
-    if (t.status === "canceled") return { label: "Loop stopped", color: "orange" };
+    if (t.status === "canceled")
+      return { label: "Loop stopped", color: "orange" };
     if (t.status === "ready") return { label: "Loop ready", color: "teal" };
   }
   if (t.status === "failed" || t.phase === "failed")
@@ -36,7 +38,8 @@ function badgeForTask(t: TaskOut): StatusBadge {
   // A gated planner draft awaiting your review + confirm.
   if (t.mode === "plan" && t.phase === "awaiting_ack")
     return { label: "Plan · review", color: "orange", pulse: true };
-  if (t.phase === "awaiting_ack") return { label: "Awaiting ack", color: "orange" };
+  if (t.phase === "awaiting_ack")
+    return { label: "Awaiting ack", color: "orange" };
   if (t.phase === "planning") {
     // mode='plan' is the top-level planner decomposing the ask; mode='plan_then_execute'
     // is a per-task planning turn before edits.
@@ -47,14 +50,16 @@ function badgeForTask(t: TaskOut): StatusBadge {
     const label = t.mode === "research" ? "Researching…" : "Executing…";
     return { label, color: "blue", pulse: true };
   }
-  if (t.phase === "integrating") return { label: "Integrating…", color: "blue", pulse: true };
+  if (t.phase === "integrating")
+    return { label: "Integrating…", color: "blue", pulse: true };
   if (t.status === "running") {
     const label = t.mode === "research" ? "Researching…" : "Running…";
     return { label, color: "blue", pulse: true };
   }
   if (t.status === "done") return { label: "Done", color: "green" };
   if (t.status === "ready") return { label: "Ready", color: "teal" };
-  if (t.status === "pending") return { label: "Blocked on deps", color: "gray" };
+  if (t.status === "pending")
+    return { label: "Blocked on deps", color: "gray" };
   return { label: t.status, color: "gray" };
 }
 
@@ -124,7 +129,9 @@ export function TaskCard({ task }: Props) {
                 boxSize="1.5"
                 rounded="full"
                 bg={DOT_BG[badge.color]}
-                animation={badge.pulse ? "pulse 1.4s ease-in-out infinite" : undefined}
+                animation={
+                  badge.pulse ? "pulse 1.4s ease-in-out infinite" : undefined
+                }
               />
               <Text color={DOT_FG[badge.color]} fontWeight="medium">
                 {badge.label}
@@ -227,8 +234,12 @@ function loopMeta(t: TaskOut): string {
   };
   const spec = (t.loop_spec ?? {}) as { max_iterations?: number };
   const iter = ls.iteration ?? 0;
-  const count = spec.max_iterations ? `${iter}/${spec.max_iterations}` : `${iter}`;
+  const count = spec.max_iterations
+    ? `${iter}/${spec.max_iterations}`
+    : `${iter}`;
   const best =
-    typeof ls.best_metric === "number" ? ` · best ${ls.best_metric.toFixed(3)}` : "";
+    typeof ls.best_metric === "number"
+      ? ` · best ${ls.best_metric.toFixed(3)}`
+      : "";
   return `${count}${best}`;
 }

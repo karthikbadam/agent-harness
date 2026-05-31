@@ -86,7 +86,9 @@ async def test_followup_resumes_with_session_id(initdb: Path) -> None:
     await mgr.wait(jid)
 
     captured_resume: list[str | None] = []
-    real_init = __import__("agent_harness.claude", fromlist=["ClaudeRunner"]).ClaudeRunner.__post_init__
+    real_init = __import__(
+        "agent_harness.claude", fromlist=["ClaudeRunner"]
+    ).ClaudeRunner.__post_init__
 
     def spy_init(self):  # type: ignore[no-untyped-def]
         captured_resume.append(self.resume_session_id)

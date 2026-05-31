@@ -1,8 +1,4 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { jobsApi } from "../api/jobs";
 import type { FollowupCreate, JobCreate } from "../types";
@@ -11,7 +7,11 @@ export const jobsKey = ["jobs"] as const;
 export const jobKey = (id: string) => ["job", id] as const;
 
 export function useJobs() {
-  return useQuery({ queryKey: jobsKey, queryFn: jobsApi.list, refetchInterval: 5_000 });
+  return useQuery({
+    queryKey: jobsKey,
+    queryFn: jobsApi.list,
+    refetchInterval: 5_000,
+  });
 }
 
 export function useJob(id: string | undefined) {

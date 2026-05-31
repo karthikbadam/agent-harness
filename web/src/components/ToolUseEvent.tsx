@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { Badge, Box, Button, Code, Flex, HStack, Stack, Text } from "@chakra-ui/react";
+import {
+  Badge,
+  Box,
+  Button,
+  Code,
+  Flex,
+  HStack,
+  Stack,
+  Text,
+} from "@chakra-ui/react";
 
 import type { ToolUseEvent as TU } from "../types";
 
@@ -17,7 +26,12 @@ export function ToolUseEventCard({ event }: { event: TU }) {
             {event.tool}
           </Badge>
           {layout.header && (
-            <Text fontSize="sm" color="fg" wordBreak="break-all" fontFamily={layout.headerMono ? "mono" : undefined}>
+            <Text
+              fontSize="sm"
+              color="fg"
+              wordBreak="break-all"
+              fontFamily={layout.headerMono ? "mono" : undefined}
+            >
               {layout.header}
             </Text>
           )}
@@ -81,11 +95,18 @@ function layoutFor(tool: string, input: Record<string, unknown>): Layout {
   if (tool === "Grep") {
     const pattern = str(input.pattern);
     const path = str(input.path);
-    return { header: path ? `${pattern}  in  ${basename(path)}` : pattern, headerMono: true };
+    return {
+      header: path ? `${pattern}  in  ${basename(path)}` : pattern,
+      headerMono: true,
+    };
   }
 
   if (tool === "WebFetch") {
-    return { header: str(input.url), headerMono: true, body: str(input.prompt) || undefined };
+    return {
+      header: str(input.url),
+      headerMono: true,
+      body: str(input.prompt) || undefined,
+    };
   }
 
   // Generic fallback: render JSON.

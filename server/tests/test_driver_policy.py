@@ -73,12 +73,19 @@ def test_retry_respects_backoff(initdb: Path) -> None:
         pid = _proj(s)
         # Recently failed → still in backoff, should NOT retry.
         recent = _task(
-            s, pid, "recent", status="failed",
-            retries=0, last_failed_at=datetime.now(timezone.utc),
+            s,
+            pid,
+            "recent",
+            status="failed",
+            retries=0,
+            last_failed_at=datetime.now(timezone.utc),
         )
         # Long-ago failed → past backoff, should retry.
         long_ago = _task(
-            s, pid, "long", status="failed",
+            s,
+            pid,
+            "long",
+            status="failed",
             retries=0,
             last_failed_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )
@@ -92,7 +99,10 @@ def test_retry_stops_at_max(initdb: Path) -> None:
     with session_scope() as s:
         pid = _proj(s)
         _task(
-            s, pid, "exhausted", status="failed",
+            s,
+            pid,
+            "exhausted",
+            status="failed",
             retries=driver_policy.MAX_RETRIES,
             last_failed_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )

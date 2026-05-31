@@ -76,13 +76,13 @@ class Job(Base):
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(256), default="")
-    status: Mapped[str] = mapped_column(String(16), default="queued")  # queued|running|done|failed|stopped
+    status: Mapped[str] = mapped_column(
+        String(16), default="queued"
+    )  # queued|running|done|failed|stopped
     session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     schedule_id: Mapped[Optional[str]] = mapped_column(ForeignKey("schedules.id"), nullable=True)
     task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
-    kind: Mapped[str] = mapped_column(
-        String(12), default="ad_hoc"
-    )  # ad_hoc|plan|execute|integrate
+    kind: Mapped[str] = mapped_column(String(12), default="ad_hoc")  # ad_hoc|plan|execute|integrate
     cwd: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
@@ -177,9 +177,7 @@ class Task(Base):
     # Loop grouping: an iteration task (source='loop') points at its loop
     # parent (mode='loop'). Null for everything else. Lets the UI group a
     # loop's iteration children and lets advance_loop find the parent.
-    parent_task_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("tasks.id"), nullable=True
-    )
+    parent_task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
     # Loop definition + live state — set only on the mode='loop' parent.
     # loop_spec: {metric_name, direction, iter_prompt_template, max_iterations,
     #   target_metric?, max_cost_usd?, max_wall_clock_s?, max_consecutive_failures}

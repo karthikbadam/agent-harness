@@ -22,13 +22,19 @@ export function PlanReview({ task }: { task: TaskOut }) {
     .filter((j) => j.task_id === task.id)
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
   const followup = useFollowup(planJob?.id ?? "");
-  const replanning = planJob?.status === "running" || planJob?.status === "queued";
+  const replanning =
+    planJob?.status === "running" || planJob?.status === "queued";
   const awaiting = task.phase === "awaiting_ack";
 
   return (
     <Stack gap={4}>
       <Box>
-        <Text fontSize="2xs" color="fg.subtle" textTransform="uppercase" mb={1.5}>
+        <Text
+          fontSize="2xs"
+          color="fg.subtle"
+          textTransform="uppercase"
+          mb={1.5}
+        >
           Proposed plan ({drafts.length})
         </Text>
         <Stack gap={1.5}>

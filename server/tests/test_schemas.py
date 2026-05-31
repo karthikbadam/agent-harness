@@ -16,17 +16,20 @@ def _base() -> dict[str, object]:
 
 
 def test_discriminated_union_routes_by_type() -> None:
-    e = _StreamAdapter.validate_python({**_base(), "type": "tool_use", "tool": "Bash", "input": {"cmd": "ls"}})
+    e = _StreamAdapter.validate_python(
+        {**_base(), "type": "tool_use", "tool": "Bash", "input": {"cmd": "ls"}}
+    )
     assert isinstance(e, schemas.ToolUseEvent)
     assert e.tool == "Bash"
 
     e = _StreamAdapter.validate_python({**_base(), "type": "assistant_text", "text": "hi"})
     assert isinstance(e, schemas.AssistantTextEvent)
 
-    e = _StreamAdapter.validate_python({**_base(), "type": "turn_done", "exit_code": 0, "cost_usd": 0.01})
+    e = _StreamAdapter.validate_python(
+        {**_base(), "type": "turn_done", "exit_code": 0, "cost_usd": 0.01}
+    )
     assert isinstance(e, schemas.TurnDoneEvent)
     assert e.cost_usd == 0.01
-
 
 
 def test_unknown_event_type_rejected() -> None:

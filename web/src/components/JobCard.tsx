@@ -1,5 +1,13 @@
 import { useNavigate } from "react-router-dom";
-import { Box, Button, Flex, HStack, IconButton, Stack, Text } from "@chakra-ui/react";
+import {
+  Box,
+  Button,
+  Flex,
+  HStack,
+  IconButton,
+  Stack,
+  Text,
+} from "@chakra-ui/react";
 import { LuTrash2, LuListTodo } from "react-icons/lu";
 
 import type { JobOut } from "../types";
@@ -54,7 +62,10 @@ export function JobCard({ job }: { job: JobOut }) {
                 <Text fontFamily="mono">{job.task_id.slice(0, 8)}</Text>
               </HStack>
             )}
-            <Text>· {(job.turns ?? []).length} turn{(job.turns ?? []).length === 1 ? "" : "s"}</Text>
+            <Text>
+              · {(job.turns ?? []).length} turn
+              {(job.turns ?? []).length === 1 ? "" : "s"}
+            </Text>
             <Text color="fg.subtle">· {relativeTime(created)}</Text>
           </HStack>
         </Stack>

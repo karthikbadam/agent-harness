@@ -66,9 +66,7 @@ def _to_action(a: driver_policy.Action) -> SuggestedAction:
     )
 
 
-async def _wait_for_subscriber(
-    bus: driver_bus.DriverEventBus, timeout: float = 5.0
-) -> bool:
+async def _wait_for_subscriber(bus: driver_bus.DriverEventBus, timeout: float = 5.0) -> bool:
     """Poll the bus for a subscriber up to `timeout` seconds. Returns True if
     a subscriber connected before the deadline.
     """
@@ -84,9 +82,7 @@ async def _wait_for_subscriber(
 
 
 @router.get("/api/projects/{project_id}/driver", response_model=DriverStateOut)
-def get_driver_state(
-    project_id: str, s: Session = Depends(get_session)
-) -> DriverStateOut:
+def get_driver_state(project_id: str, s: Session = Depends(get_session)) -> DriverStateOut:
     p = s.get(models.Project, project_id)
     if p is None:
         raise HTTPException(404, "unknown project")
@@ -106,9 +102,7 @@ def get_driver_state(
     )
 
 
-@router.patch(
-    "/api/projects/{project_id}/driver", response_model=DriverStateOut
-)
+@router.patch("/api/projects/{project_id}/driver", response_model=DriverStateOut)
 async def set_driver_mode(
     project_id: str,
     body: DriverModeUpdate,
@@ -146,13 +140,9 @@ async def set_driver_mode(
         bus.emit("reconcile_now", project_id, force=True)
     elif body.mode == "off":
         # If this was the last on project, terminate any harness-owned driver.
-        any_on = (
-            s.execute(
-                select(models.Project.id).where(
-                    models.Project.autopilot_mode == "on"
-                )
-            ).first()
-        )
+        any_on = s.execute(
+            select(models.Project.id).where(models.Project.autopilot_mode == "on")
+        ).first()
         if not any_on:
             owned = getattr(request.app.state, "owned_drivers", {})
             for pid, proc in list(owned.items()):
@@ -219,9 +209,7 @@ def _spawn_driver_subprocess(request: Request):
     "/api/projects/{project_id}/driver/suggestions",
     response_model=list[SuggestedAction],
 )
-def list_suggestions(
-    project_id: str, s: Session = Depends(get_session)
-) -> list[SuggestedAction]:
+def list_suggestions(project_id: str, s: Session = Depends(get_session)) -> list[SuggestedAction]:
     p = s.get(models.Project, project_id)
     if p is None:
         raise HTTPException(404, "unknown project")
@@ -257,12 +245,11 @@ def list_project_notes(
 
 
 @router.post(
-    "/api/driver/notes", response_model=DriverNoteOut,
+    "/api/driver/notes",
+    response_model=DriverNoteOut,
     status_code=status.HTTP_201_CREATED,
 )
-def create_note(
-    body: DriverNoteCreate, s: Session = Depends(get_session)
-) -> DriverNoteOut:
+def create_note(body: DriverNoteCreate, s: Session = Depends(get_session)) -> DriverNoteOut:
     if s.get(models.Project, body.project_id) is None:
         raise HTTPException(404, "unknown project")
     # 7-day prune of old notes — cheap lazy garbage collection.
@@ -286,12 +273,8 @@ def create_note(
     return _to_note_out(n)
 
 
-@router.post(
-    "/api/driver/notes/{note_id}/acknowledge", response_model=DriverNoteOut
-)
-def acknowledge_note(
-    note_id: str, s: Session = Depends(get_session)
-) -> DriverNoteOut:
+@router.post("/api/driver/notes/{note_id}/acknowledge", response_model=DriverNoteOut)
+def acknowledge_note(note_id: str, s: Session = Depends(get_session)) -> DriverNoteOut:
     n = s.get(models.DriverNote, note_id)
     if n is None:
         raise HTTPException(404, "not found")
@@ -307,9 +290,7 @@ def acknowledge_note(
 
 @router.get("/api/driver/status", response_model=DriverGlobalStatus)
 def driver_status(s: Session = Depends(get_session)) -> DriverGlobalStatus:
-    rows = s.execute(
-        select(models.Project.id).where(models.Project.autopilot_mode == "on")
-    ).all()
+    rows = s.execute(select(models.Project.id).where(models.Project.autopilot_mode == "on")).all()
     return DriverGlobalStatus(
         connected=driver_bus.get_bus().has_subscriber(),
         last_seen=driver_bus.get_bus().last_seen_at(),
@@ -321,9 +302,7 @@ def driver_status(s: Session = Depends(get_session)) -> DriverGlobalStatus:
 
 
 @router.get("/api/driver/events")
-async def driver_events(
-    request: Request, s: Session = Depends(get_session)
-) -> Response:
+async def driver_events(request: Request, s: Session = Depends(get_session)) -> Response:
     """Long-lived SSE: events emitted by the bus, gated by autopilot_mode.
 
     At most one active subscriber — second connect gets 409. On subscribe,

@@ -88,9 +88,7 @@ async def test_suggestions_returns_actions(app_client: httpx.AsyncClient) -> Non
         s.add(models.Project(id="pd", name="p", path="/tmp"))
         s.flush()
         s.add(models.Task(project_id="pd", title="r1", prompt="x", status="ready"))
-    r = await app_client.get(
-        "/api/projects/pd/driver/suggestions", headers=_auth()
-    )
+    r = await app_client.get("/api/projects/pd/driver/suggestions", headers=_auth())
     assert r.status_code == 200
     actions = r.json()
     assert any(a["kind"] == "run" for a in actions)
@@ -112,15 +110,11 @@ async def test_notes_crud(app_client: httpx.AsyncClient) -> None:
     assert r.status_code == 201
     nid = r.json()["id"]
 
-    r = await app_client.get(
-        "/api/projects/pe/driver/notes", headers=_auth()
-    )
+    r = await app_client.get("/api/projects/pe/driver/notes", headers=_auth())
     assert r.status_code == 200
     assert any(n["id"] == nid for n in r.json())
 
-    r = await app_client.post(
-        f"/api/driver/notes/{nid}/acknowledge", headers=_auth()
-    )
+    r = await app_client.post(f"/api/driver/notes/{nid}/acknowledge", headers=_auth())
     assert r.status_code == 200
     assert r.json()["acknowledged_at"] is not None
 

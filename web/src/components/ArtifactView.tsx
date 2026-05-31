@@ -1,5 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { Box, Image, Link, Spinner, Stack, Table, Text } from "@chakra-ui/react";
+import {
+  Box,
+  Image,
+  Link,
+  Spinner,
+  Stack,
+  Table,
+  Text,
+} from "@chakra-ui/react";
 
 import { tasksApi } from "../api/tasks";
 import { MarkdownText } from "./MarkdownText";
@@ -32,7 +40,13 @@ export function ArtifactView({
   );
 }
 
-function ArtifactBody({ artifact, live }: { artifact: ArtifactOut; live: boolean }) {
+function ArtifactBody({
+  artifact,
+  live,
+}: {
+  artifact: ArtifactOut;
+  live: boolean;
+}) {
   switch (artifact.kind) {
     case "graph":
       return (
@@ -78,12 +92,15 @@ function DownloadLink({ artifact }: { artifact: ArtifactOut }) {
 function useArtifactText(artifact: ArtifactOut, live: boolean) {
   return useQuery({
     queryKey: ["artifact-text", artifact.id],
-    queryFn: () => fetch(tasksApi.artifactUrl(artifact.id)).then((r) => r.text()),
+    queryFn: () =>
+      fetch(tasksApi.artifactUrl(artifact.id)).then((r) => r.text()),
     refetchInterval: live ? 5_000 : false,
   });
 }
 
-function parseDelimited(text: string): { header: string[]; rows: string[][] } | null {
+function parseDelimited(
+  text: string,
+): { header: string[]; rows: string[][] } | null {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   const first = lines[0];
   if (!first) return null;
@@ -101,7 +118,13 @@ function looksMarkdown(text: string): boolean {
   return false;
 }
 
-function TableArtifact({ artifact, live }: { artifact: ArtifactOut; live: boolean }) {
+function TableArtifact({
+  artifact,
+  live,
+}: {
+  artifact: ArtifactOut;
+  live: boolean;
+}) {
   const { data, isLoading } = useArtifactText(artifact, live);
   if (isLoading) return <Spinner size="sm" />;
   if (data == null) return <DownloadLink artifact={artifact} />;
@@ -117,7 +140,14 @@ function TableArtifact({ artifact, live }: { artifact: ArtifactOut; live: boolea
   const parsed = parseDelimited(data);
   if (!parsed) return <DownloadLink artifact={artifact} />;
   return (
-    <Box overflowX="auto" maxH="22rem" overflowY="auto" borderWidth="1px" borderColor="border" rounded="md">
+    <Box
+      overflowX="auto"
+      maxH="22rem"
+      overflowY="auto"
+      borderWidth="1px"
+      borderColor="border"
+      rounded="md"
+    >
       <Table.Root size="sm" variant="line" stickyHeader>
         <Table.Header>
           <Table.Row>
@@ -132,7 +162,11 @@ function TableArtifact({ artifact, live }: { artifact: ArtifactOut; live: boolea
           {parsed.rows.map((row, ri) => (
             <Table.Row key={ri}>
               {row.map((cell, ci) => (
-                <Table.Cell key={ci} fontSize="2xs" fontFamily={ci === 0 ? "mono" : undefined}>
+                <Table.Cell
+                  key={ci}
+                  fontSize="2xs"
+                  fontFamily={ci === 0 ? "mono" : undefined}
+                >
                   {cell}
                 </Table.Cell>
               ))}

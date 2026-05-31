@@ -17,9 +17,11 @@ export function JobDetailPage() {
   const followup = useFollowup(jobId ?? "");
   const stop = useStopJob(jobId ?? "");
 
-  const running = job.data?.status === "running" || job.data?.status === "queued";
+  const running =
+    job.data?.status === "running" || job.data?.status === "queued";
   const subtitleParts: string[] = [];
-  if (job.data?.kind && job.data.kind !== "ad_hoc") subtitleParts.push(job.data.kind);
+  if (job.data?.kind && job.data.kind !== "ad_hoc")
+    subtitleParts.push(job.data.kind);
   if (job.data?.status) subtitleParts.push(job.data.status);
   const subtitle = subtitleParts.join(" · ") || undefined;
 
@@ -41,7 +43,12 @@ export function JobDetailPage() {
             </Button>
           )}
           {running && (
-            <Button size="xs" variant="outline" colorPalette="red" onClick={() => stop.mutate()}>
+            <Button
+              size="xs"
+              variant="outline"
+              colorPalette="red"
+              onClick={() => stop.mutate()}
+            >
               Stop
             </Button>
           )}
@@ -59,7 +66,9 @@ export function JobDetailPage() {
       </Box>
       <StickyComposer>
         <Composer
-          placeholder={running ? "Wait for current turn..." : "Type a followup..."}
+          placeholder={
+            running ? "Wait for current turn..." : "Type a followup..."
+          }
           disabled={running}
           onSend={async (prompt) => {
             await followup.mutateAsync({ prompt });

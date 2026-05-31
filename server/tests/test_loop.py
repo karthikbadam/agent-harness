@@ -33,20 +33,14 @@ def _init_git_repo(path: Path) -> str:
     subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.email", "x@y.z"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "t"], check=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True
-    )
+    subprocess.run(["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True)
     (path / "f.txt").write_text("hi", encoding="utf-8")
     subprocess.run(["git", "-C", str(path), "add", "f.txt"], check=True)
     subprocess.run(
         ["git", "-C", str(path), "commit", "--no-gpg-sign", "-q", "-m", "init"],
         check=True,
     )
-    return (
-        subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"])
-        .decode()
-        .strip()
-    )
+    return subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"]).decode().strip()
 
 
 def _write_loop_log(log_dir: Path, text: str) -> None:
@@ -90,15 +84,17 @@ def _make_loop(s, repo: Path, spec: dict) -> tuple[str, str]:
 
 
 def _finalize_iteration(
-    tmp_path: Path, project_id: str, repo: Path, child_id: str, text: str,
+    tmp_path: Path,
+    project_id: str,
+    repo: Path,
+    child_id: str,
+    text: str,
     job_status: str = "done",
 ) -> list[str]:
     """Create a Job for the iteration child, drop a result log, finalize it,
     and return the autorun ids (the next iteration, if any)."""
     with session_scope() as s:
-        job = models.Job(
-            project_id=project_id, task_id=child_id, kind="execute", cwd=str(repo)
-        )
+        job = models.Job(project_id=project_id, task_id=child_id, kind="execute", cwd=str(repo))
         s.add(job)
         s.flush()
         jid = job.id
@@ -115,9 +111,7 @@ def test_start_loop_seeds_iteration_one(initdb: Path, tmp_path: Path) -> None:
     repo.mkdir()
     _init_git_repo(repo)
     with session_scope() as s:
-        pid, parent_id = _make_loop(
-            s, repo, {"metric_name": "val_acc", "max_iterations": 5}
-        )
+        pid, parent_id = _make_loop(s, repo, {"metric_name": "val_acc", "max_iterations": 5})
 
     child_id = planner.start_loop(parent_id)
     assert child_id is not None
@@ -167,18 +161,10 @@ def test_loop_runs_to_max_iterations(initdb: Path, tmp_path: Path) -> None:
         assert parent.status == "done"
         assert parent.loop_state["iteration"] == 3
         assert parent.loop_state["best_metric"] == 0.7  # max, from iteration 2
-        children = (
-            s.query(models.Task)
-            .filter(models.Task.parent_task_id == parent_id)
-            .all()
-        )
+        children = s.query(models.Task).filter(models.Task.parent_task_id == parent_id).all()
         assert len(children) == 3
         for c in children:
-            o = (
-                s.query(models.Outcome)
-                .filter(models.Outcome.task_id == c.id)
-                .first()
-            )
+            o = s.query(models.Outcome).filter(models.Outcome.task_id == c.id).first()
             assert o is not None and o.meta.get("metric") in metrics
         final = (
             s.query(models.Outcome)
@@ -242,7 +228,11 @@ def test_loop_stops_after_consecutive_failures(initdb: Path, tmp_path: Path) -> 
     while child_id is not None and seen < 10:
         # job failed AND no parseable metric → counts as a failure
         autorun = _finalize_iteration(
-            tmp_path, pid, repo, child_id, "crashed, no result line",
+            tmp_path,
+            pid,
+            repo,
+            child_id,
+            "crashed, no result line",
             job_status="failed",
         )
         seen += 1
@@ -330,7 +320,10 @@ async def test_loop_survives_restart(initdb: Path, tmp_path: Path) -> None:
     with session_scope() as s:
         s.get(models.Task, child1).status = "running"
         job = models.Job(
-            project_id=pid, task_id=child1, kind="execute", cwd=str(repo),
+            project_id=pid,
+            task_id=child1,
+            kind="execute",
+            cwd=str(repo),
             status="running",
         )
         s.add(job)
@@ -350,11 +343,7 @@ async def test_loop_survives_restart(initdb: Path, tmp_path: Path) -> None:
         # must not count toward the consecutive-failure stop (else repeated
         # deploys would kill a long run).
         assert parent.loop_state["consecutive_failures"] == 0
-        kids = (
-            s.query(models.Task)
-            .filter(models.Task.parent_task_id == parent_id)
-            .all()
-        )
+        kids = s.query(models.Task).filter(models.Task.parent_task_id == parent_id).all()
         assert len(kids) == 2, "interrupted iter1 + resumed iter2"
         nxt = [k for k in kids if k.status == "ready"]
         assert len(nxt) == 1 and nxt[0].order_idx == 2, "next iteration queued"
@@ -449,9 +438,7 @@ async def app_client(initdb: Path):
 async def test_create_loop_paused(app_client, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    r = await app_client.post(
-        "/api/projects", headers=AUTH, json={"name": "p", "path": str(repo)}
-    )
+    r = await app_client.post("/api/projects", headers=AUTH, json={"name": "p", "path": str(repo)})
     pid = r.json()["id"]
     # run=false so no subprocess is spawned in the test.
     r = await app_client.post(

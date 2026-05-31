@@ -43,13 +43,17 @@ def _plan_setup(repo: Path) -> tuple[str, str, str]:
         s.add(p)
         s.flush()
         t = models.Task(
-            project_id=p.id, title="Plan: x", prompt="x", status="running",
-            phase="planning", mode="plan", source="user",
+            project_id=p.id,
+            title="Plan: x",
+            prompt="x",
+            status="running",
+            phase="planning",
+            mode="plan",
+            source="user",
         )
         s.add(t)
         s.flush()
-        j = models.Job(project_id=p.id, title="plan", task_id=t.id, kind="plan",
-                       cwd=str(repo))
+        j = models.Job(project_id=p.id, title="plan", task_id=t.id, kind="plan", cwd=str(repo))
         s.add(j)
         s.flush()
         return p.id, t.id, j.id
@@ -57,8 +61,16 @@ def _plan_setup(repo: Path) -> tuple[str, str, str]:
 
 def _write_turn(log_dir: Path, idx: int, text: str) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
-    line = json.dumps({"type": "assistant_text", "job_id": "x", "turn": idx,
-                       "ts": "2026-05-31T00:00:00Z", "seq": 1, "text": text})
+    line = json.dumps(
+        {
+            "type": "assistant_text",
+            "job_id": "x",
+            "turn": idx,
+            "ts": "2026-05-31T00:00:00Z",
+            "seq": 1,
+            "text": text,
+        }
+    )
     (log_dir / f"turn-{idx}.jsonl").write_text(line + "\n", encoding="utf-8")
 
 
@@ -70,11 +82,18 @@ def test_gate_loop_plan_parks_for_review(initdb: Path, tmp_path: Path) -> None:
     repo.mkdir()
     _init_git_repo(repo)
     pid, tid, jid = _plan_setup(repo)
-    arr = json.dumps([
-        {"kind": "task", "title": "setup", "prompt": "set up", "depends_on_titles": []},
-        {"kind": "loop", "title": "optimize", "prompt": "one iteration",
-         "metric_name": "score", "depends_on_titles": ["setup"]},
-    ])
+    arr = json.dumps(
+        [
+            {"kind": "task", "title": "setup", "prompt": "set up", "depends_on_titles": []},
+            {
+                "kind": "loop",
+                "title": "optimize",
+                "prompt": "one iteration",
+                "metric_name": "score",
+                "depends_on_titles": ["setup"],
+            },
+        ]
+    )
     log = tmp_path / "logs" / jid
     _write_turn(log, 0, arr)
     autorun = task_runner.on_job_finalized(jid, "done", log_dir=log)
@@ -83,8 +102,7 @@ def test_gate_loop_plan_parks_for_review(initdb: Path, tmp_path: Path) -> None:
     with session_scope() as s:
         plan = s.get(models.Task, tid)
         assert plan.status == "running" and plan.phase == "awaiting_ack"
-        drafts = s.query(models.Task).filter(
-            models.Task.parent_task_id == tid).all()
+        drafts = s.query(models.Task).filter(models.Task.parent_task_id == tid).all()
         assert len(drafts) == 2
         assert all(d.status == "pending" for d in drafts)  # not promoted
         assert all(d.parent_task_id == tid for d in drafts)  # linked to plan
@@ -95,10 +113,12 @@ def test_gate_large_plan_parks(initdb: Path, tmp_path: Path) -> None:
     repo.mkdir()
     _init_git_repo(repo)
     pid, tid, jid = _plan_setup(repo)
-    arr = json.dumps([
-        {"title": f"t{i}", "prompt": f"do {i}", "depends_on_titles": []}
-        for i in range(10)  # == PLAN_AUTORUN_MAX → gated
-    ])
+    arr = json.dumps(
+        [
+            {"title": f"t{i}", "prompt": f"do {i}", "depends_on_titles": []}
+            for i in range(10)  # == PLAN_AUTORUN_MAX → gated
+        ]
+    )
     log = tmp_path / "logs" / jid
     _write_turn(log, 0, arr)
     autorun = task_runner.on_job_finalized(jid, "done", log_dir=log)
@@ -112,10 +132,12 @@ def test_gate_simple_plan_autoruns(initdb: Path, tmp_path: Path) -> None:
     repo.mkdir()
     _init_git_repo(repo)
     pid, tid, jid = _plan_setup(repo)
-    arr = json.dumps([
-        {"title": "a", "prompt": "do a", "mode": "research", "depends_on_titles": []},
-        {"title": "b", "prompt": "do b", "mode": "research", "depends_on_titles": []},
-    ])
+    arr = json.dumps(
+        [
+            {"title": "a", "prompt": "do a", "mode": "research", "depends_on_titles": []},
+            {"title": "b", "prompt": "do b", "mode": "research", "depends_on_titles": []},
+        ]
+    )
     log = tmp_path / "logs" / jid
     _write_turn(log, 0, arr)
     autorun = task_runner.on_job_finalized(jid, "done", log_dir=log)
@@ -134,24 +156,47 @@ def test_steering_followup_replaces_drafts(initdb: Path, tmp_path: Path) -> None
     pid, tid, jid = _plan_setup(repo)
     log = tmp_path / "logs" / jid
     # First plan (gated by the loop) → drafts A.
-    _write_turn(log, 0, json.dumps([
-        {"title": "oldsetup", "prompt": "old", "depends_on_titles": []},
-        {"kind": "loop", "title": "oldloop", "prompt": "x", "metric_name": "m",
-         "depends_on_titles": ["oldsetup"]},
-    ]))
+    _write_turn(
+        log,
+        0,
+        json.dumps(
+            [
+                {"title": "oldsetup", "prompt": "old", "depends_on_titles": []},
+                {
+                    "kind": "loop",
+                    "title": "oldloop",
+                    "prompt": "x",
+                    "metric_name": "m",
+                    "depends_on_titles": ["oldsetup"],
+                },
+            ]
+        ),
+    )
     task_runner.on_job_finalized(jid, "done", log_dir=log)
     # Steering followup turn → a revised list B (latest turn only).
-    _write_turn(log, 1, json.dumps([
-        {"kind": "loop", "title": "newloop", "prompt": "y", "metric_name": "m",
-         "depends_on_titles": []},
-    ]))
+    _write_turn(
+        log,
+        1,
+        json.dumps(
+            [
+                {
+                    "kind": "loop",
+                    "title": "newloop",
+                    "prompt": "y",
+                    "metric_name": "m",
+                    "depends_on_titles": [],
+                },
+            ]
+        ),
+    )
     task_runner.on_job_finalized(jid, "done", log_dir=log)
 
     with session_scope() as s:
         plan = s.get(models.Task, tid)
         assert plan.phase == "awaiting_ack"  # still parked for review
-        titles = {d.title for d in s.query(models.Task).filter(
-            models.Task.parent_task_id == tid).all()}
+        titles = {
+            d.title for d in s.query(models.Task).filter(models.Task.parent_task_id == tid).all()
+        }
         assert titles == {"newloop"}, "old drafts replaced by the revised list"
 
 
@@ -164,17 +209,25 @@ def test_loop_node_with_deps_is_pending(initdb: Path) -> None:
         s.add(p)
         s.flush()
         pid = p.id
-    ids = planner._insert_drafts(pid, [
-        {"title": "setup", "prompt": "build it", "depends_on_titles": []},
-        {"kind": "loop", "title": "opt", "prompt": "iterate", "metric_name": "m",
-         "depends_on_titles": ["setup"]},
-    ])
+    ids = planner._insert_drafts(
+        pid,
+        [
+            {"title": "setup", "prompt": "build it", "depends_on_titles": []},
+            {
+                "kind": "loop",
+                "title": "opt",
+                "prompt": "iterate",
+                "metric_name": "m",
+                "depends_on_titles": ["setup"],
+            },
+        ],
+    )
     with session_scope() as s:
-        loop = next(t for t in s.query(models.Task).filter(models.Task.id.in_(ids))
-                    if t.mode == "loop")
+        loop = next(
+            t for t in s.query(models.Task).filter(models.Task.id.in_(ids)) if t.mode == "loop"
+        )
         assert loop.status == "pending"  # has a dep → waits
-        deps = s.query(models.TaskDependency).filter(
-            models.TaskDependency.task_id == loop.id).all()
+        deps = s.query(models.TaskDependency).filter(models.TaskDependency.task_id == loop.id).all()
         assert len(deps) == 1  # depends on setup
 
 
@@ -197,11 +250,13 @@ async def test_run_endpoint_starts_a_loop(app_client, tmp_path: Path) -> None:
     not run the loop parent as one direct turn (the run_task bug)."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    r = await app_client.post("/api/projects", headers=AUTH,
-                              json={"name": "p", "path": str(repo)})
+    r = await app_client.post("/api/projects", headers=AUTH, json={"name": "p", "path": str(repo)})
     pid = r.json()["id"]
-    r = await app_client.post(f"/api/projects/{pid}/loops?run=false", headers=AUTH,
-                              json={"title": "loop", "prompt": "P", "metric_name": "m"})
+    r = await app_client.post(
+        f"/api/projects/{pid}/loops?run=false",
+        headers=AUTH,
+        json={"title": "loop", "prompt": "P", "metric_name": "m"},
+    )
     loop_id = r.json()["id"]
     r = await app_client.post(f"/api/tasks/{loop_id}/run", headers=AUTH)
     assert r.status_code == 200, r.text
@@ -215,17 +270,30 @@ async def test_run_endpoint_starts_a_loop(app_client, tmp_path: Path) -> None:
 async def test_confirm_launches_drafts(app_client, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    r = await app_client.post("/api/projects", headers=AUTH,
-                              json={"name": "p", "path": str(repo)})
+    r = await app_client.post("/api/projects", headers=AUTH, json={"name": "p", "path": str(repo)})
     pid = r.json()["id"]
     # Build a gated plan + draft directly, then confirm.
     with session_scope() as s:
-        plan = models.Task(project_id=pid, title="Plan", prompt="x", status="running",
-                           phase="awaiting_ack", mode="plan", source="user")
+        plan = models.Task(
+            project_id=pid,
+            title="Plan",
+            prompt="x",
+            status="running",
+            phase="awaiting_ack",
+            mode="plan",
+            source="user",
+        )
         s.add(plan)
         s.flush()
-        draft = models.Task(project_id=pid, title="d", prompt="do", status="pending",
-                            mode="research", source="planner", parent_task_id=plan.id)
+        draft = models.Task(
+            project_id=pid,
+            title="d",
+            prompt="do",
+            status="pending",
+            mode="research",
+            source="planner",
+            parent_task_id=plan.id,
+        )
         s.add(draft)
         s.flush()
         plan_id = plan.id
@@ -241,14 +309,19 @@ async def test_delete_project_with_artifacts(app_client, tmp_path: Path) -> None
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "g.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
-    r = await app_client.post("/api/projects", headers=AUTH,
-                              json={"name": "p", "path": str(repo)})
+    r = await app_client.post("/api/projects", headers=AUTH, json={"name": "p", "path": str(repo)})
     pid = r.json()["id"]
-    r = await app_client.post(f"/api/projects/{pid}/tasks", headers=AUTH,
-                              json={"title": "t", "prompt": "p", "mode": "one_shot"})
+    r = await app_client.post(
+        f"/api/projects/{pid}/tasks",
+        headers=AUTH,
+        json={"title": "t", "prompt": "p", "mode": "one_shot"},
+    )
     tid = r.json()["id"]
-    r = await app_client.post(f"/api/tasks/{tid}/artifacts", headers=AUTH,
-                              json={"kind": "graph", "path": "g.png", "name": "g.png"})
+    r = await app_client.post(
+        f"/api/tasks/{tid}/artifacts",
+        headers=AUTH,
+        json={"kind": "graph", "path": "g.png", "name": "g.png"},
+    )
     assert r.status_code == 201
     # Delete must not trip the artifacts/outcomes FK.
     r = await app_client.delete(f"/api/projects/{pid}", headers=AUTH)

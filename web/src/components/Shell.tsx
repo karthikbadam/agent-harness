@@ -49,7 +49,11 @@ function isCurrent(pathname: string, to: string): boolean {
       pathname.startsWith("/?") ||
       pathname.startsWith("/projects")
     );
-  return pathname === to || pathname.startsWith(`${to}/`) || pathname.startsWith(`${to}?`);
+  return (
+    pathname === to ||
+    pathname.startsWith(`${to}/`) ||
+    pathname.startsWith(`${to}?`)
+  );
 }
 
 export function Shell({
@@ -289,7 +293,10 @@ export function Shell({
         </Container>
       </Box>
       {mobileTabs}
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsDrawer
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
     </Flex>
   );
 }

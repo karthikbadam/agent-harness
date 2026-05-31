@@ -19,10 +19,7 @@ import { SwipeableRow } from "../components/SwipeableRow";
 import { parseServerDate } from "../api/dates";
 import { projectsApi } from "../api/projects";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  projectsKey,
-  useProjects,
-} from "../hooks/useProjects";
+import { projectsKey, useProjects } from "../hooks/useProjects";
 import { useJobs } from "../hooks/useJobs";
 import { useAllTasks } from "../hooks/useTasks";
 import type { JobOut, ProjectOut, TaskOut } from "../types";

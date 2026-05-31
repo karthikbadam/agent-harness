@@ -47,9 +47,7 @@ def list_task_outcomes(task_id: str, s: Session = Depends(get_session)) -> list[
 
 
 @router.get("/api/projects/{project_id}/outcomes", response_model=list[OutcomeOut])
-def list_project_outcomes(
-    project_id: str, s: Session = Depends(get_session)
-) -> list[OutcomeOut]:
+def list_project_outcomes(project_id: str, s: Session = Depends(get_session)) -> list[OutcomeOut]:
     if s.get(models.Project, project_id) is None:
         raise HTTPException(404, "unknown project")
     # Filter outcomes via their task's project.

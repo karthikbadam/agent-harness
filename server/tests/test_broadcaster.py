@@ -11,9 +11,7 @@ from agent_harness.schemas import AssistantTextEvent, ToolUseEvent
 
 
 def _text(job_id: str, turn: int, body: str) -> AssistantTextEvent:
-    return AssistantTextEvent(
-        job_id=job_id, turn=turn, ts=datetime.now(timezone.utc), text=body
-    )
+    return AssistantTextEvent(job_id=job_id, turn=turn, ts=datetime.now(timezone.utc), text=body)
 
 
 async def _collect(it, n: int) -> list:

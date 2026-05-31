@@ -83,6 +83,7 @@ def _augment_prompt_for_kind(s, job: "models.Job", prompt: str) -> str:
     if job.kind == "plan":
         if task is not None and task.mode == "plan":
             from .services.planner import PLANNER_INSTRUCTIONS
+
             return f"{PLANNER_INSTRUCTIONS}\n\nAsk:\n{prompt}"
         return f"{_PLANNING_PREFIX}\n\n{prompt}"
     if job.kind == "execute":
@@ -232,13 +233,11 @@ class JobManager:
             job = s.get(models.Job, job_id)
             if job is None:
                 raise ValueError(f"unknown job {job_id}")
-            idx = (
-                s.execute(
-                    select(models.Turn.idx)
-                    .where(models.Turn.job_id == job_id)
-                    .order_by(models.Turn.idx.desc())
-                ).first()
-            )
+            idx = s.execute(
+                select(models.Turn.idx)
+                .where(models.Turn.job_id == job_id)
+                .order_by(models.Turn.idx.desc())
+            ).first()
             next_idx = (idx[0] + 1) if idx else 0
             turn = models.Turn(job_id=job_id, idx=next_idx, prompt=prompt, status="queued")
             s.add(turn)
@@ -287,9 +286,7 @@ class JobManager:
                 log.error("job %s vanished before run", job_id)
                 return
             turn = s.execute(
-                select(models.Turn).where(
-                    models.Turn.job_id == job_id, models.Turn.idx == turn_idx
-                )
+                select(models.Turn).where(models.Turn.job_id == job_id, models.Turn.idx == turn_idx)
             ).scalar_one()
             project = s.get(models.Project, job.project_id)
             assert project is not None
@@ -405,9 +402,7 @@ class JobManager:
     ) -> None:
         with session_scope() as s:
             turn = s.execute(
-                select(models.Turn).where(
-                    models.Turn.job_id == job_id, models.Turn.idx == turn_idx
-                )
+                select(models.Turn).where(models.Turn.job_id == job_id, models.Turn.idx == turn_idx)
             ).scalar_one()
             turn.status = "running"
             turn.started_at = turn.started_at or started_at
@@ -445,9 +440,7 @@ class JobManager:
         # Persist DB state.
         with session_scope() as s:
             turn = s.execute(
-                select(models.Turn).where(
-                    models.Turn.job_id == job_id, models.Turn.idx == turn_idx
-                )
+                select(models.Turn).where(models.Turn.job_id == job_id, models.Turn.idx == turn_idx)
             ).scalar_one()
             turn.status = status
             turn.exit_code = exit_code
@@ -472,9 +465,7 @@ class JobManager:
         try:
             from .services import task_runner
 
-            autorun_ids = task_runner.on_job_finalized(
-                job_id, status, log_dir=broadcaster.log_dir
-            )
+            autorun_ids = task_runner.on_job_finalized(job_id, status, log_dir=broadcaster.log_dir)
         except Exception:  # noqa: BLE001
             log.exception("task_runner.on_job_finalized failed for %s", job_id)
 

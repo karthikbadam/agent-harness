@@ -210,9 +210,7 @@ def download_artifact(artifact_id: str, s: Session = Depends(get_session)) -> Fi
     return FileResponse(str(p), filename=a.name, media_type=media)
 
 
-@router.delete(
-    "/api/artifacts/{artifact_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/api/artifacts/{artifact_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_artifact(artifact_id: str, s: Session = Depends(get_session)) -> None:
     a = s.get(models.Artifact, artifact_id)
     if a is None:

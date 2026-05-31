@@ -35,13 +35,13 @@ export const tasksApi = {
   restart: (id: string) => api.post<TaskOut>(`/api/tasks/${id}/restart`, {}),
   cancel: (id: string) => api.post<TaskOut>(`/api/tasks/${id}/cancel`, {}),
   confirm: (id: string) => api.post<TaskOut[]>(`/api/tasks/${id}/confirm`, {}),
-  outcomes: (id: string) =>
-    api.get<OutcomeOut[]>(`/api/tasks/${id}/outcomes`),
+  outcomes: (id: string) => api.get<OutcomeOut[]>(`/api/tasks/${id}/outcomes`),
   plan: (projectId: string, ask: string) =>
-    api.post<{ task_ids: string[]; raw?: string | null; error?: string | null }>(
-      `/api/projects/${projectId}/plan`,
-      { ask },
-    ),
+    api.post<{
+      task_ids: string[];
+      raw?: string | null;
+      error?: string | null;
+    }>(`/api/projects/${projectId}/plan`, { ask }),
   lastPlan: (projectId: string) =>
     api.get<LastPlanOut | null>(`/api/projects/${projectId}/plan`),
 

@@ -23,10 +23,7 @@ export function StickyComposer({ children }: { children: ReactNode }) {
         md: 0,
       }}
     >
-      <Container
-        maxW={{ base: "100%", md: "85ch" }}
-        px={{ base: 0, md: 6 }}
-      >
+      <Container maxW={{ base: "100%", md: "85ch" }} px={{ base: 0, md: 6 }}>
         {children}
       </Container>
     </Box>

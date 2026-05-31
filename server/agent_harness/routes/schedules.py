@@ -94,9 +94,7 @@ def update_schedule(
 
 
 @router.delete("/{sched_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_schedule(
-    sched_id: str, request: Request, s: Session = Depends(get_session)
-) -> None:
+def delete_schedule(sched_id: str, request: Request, s: Session = Depends(get_session)) -> None:
     sched = s.get(models.Schedule, sched_id)
     if sched is None:
         raise HTTPException(404, "not found")

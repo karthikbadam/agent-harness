@@ -132,8 +132,16 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
     </Box>
   ),
   hr: () => <Box as="hr" my={3} borderTopWidth="1px" />,
-  strong: ({ children }) => <Text as="strong" fontWeight="semibold">{children}</Text>,
-  em: ({ children }) => <Text as="em" fontStyle="italic">{children}</Text>,
+  strong: ({ children }) => (
+    <Text as="strong" fontWeight="semibold">
+      {children}
+    </Text>
+  ),
+  em: ({ children }) => (
+    <Text as="em" fontStyle="italic">
+      {children}
+    </Text>
+  ),
 };
 
 export function MarkdownText({ source }: { source: string }) {

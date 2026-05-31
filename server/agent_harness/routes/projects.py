@@ -73,9 +73,7 @@ def _resolve_code_roots() -> list[str]:
     paths on APFS don't produce duplicate entries.
     """
     raw = os.environ.get("AH_CODE_ROOTS")
-    candidates = (
-        [r for r in raw.split(":") if r.strip()] if raw else ["~/Code"]
-    )
+    candidates = [r for r in raw.split(":") if r.strip()] if raw else ["~/Code"]
     seen_keys: set[tuple[int, int]] = set()
     out: list[str] = []
     for r in candidates:
@@ -101,9 +99,7 @@ def path_suggestions(s: Session = Depends(get_session)) -> list[PathSuggestion]:
     """
     existing_paths = {
         os.path.realpath(p.path)
-        for p in s.query(models.Project.path)
-        .filter(models.Project.path.isnot(None))
-        .all()
+        for p in s.query(models.Project.path).filter(models.Project.path.isnot(None)).all()
     }
     out: list[PathSuggestion] = []
     seen: set[str] = set()
@@ -149,9 +145,7 @@ def _ensure_project_dir(path: str) -> None:
     if (d / ".git").exists():
         return
     try:
-        subprocess.run(
-            ["git", "init", "-q", "-b", "main", str(d)], check=True, timeout=10
-        )
+        subprocess.run(["git", "init", "-q", "-b", "main", str(d)], check=True, timeout=10)
         gi = d / ".gitignore"
         if not gi.exists():
             gi.write_text("node_modules/\ndist/\nrun.log\n.DS_Store\n")
@@ -160,9 +154,19 @@ def _ensure_project_dir(path: str) -> None:
         env_id = ["-c", "user.email=agent-harness@local", "-c", "user.name=agent-harness"]
         subprocess.run(["git", "-C", str(d), "add", "-A"], check=True, timeout=10)
         subprocess.run(
-            ["git", "-C", str(d), *env_id, "commit", "-q", "--no-gpg-sign",
-             "-m", "init: project scaffold"],
-            check=True, timeout=10,
+            [
+                "git",
+                "-C",
+                str(d),
+                *env_id,
+                "commit",
+                "-q",
+                "--no-gpg-sign",
+                "-m",
+                "init: project scaffold",
+            ],
+            check=True,
+            timeout=10,
         )
     except Exception:  # noqa: BLE001
         # Leave whatever git state we managed; the first task/loop iteration
@@ -322,38 +326,22 @@ def delete_project(project_id: str, s: Session = Depends(get_session)) -> None:
         # Turn rows are cascade-deleted via Job.turns SQLA relationship when
         # we delete each Job, but the bulk SQL DELETE below bypasses that.
         # Wipe turns directly first.
-        s.execute(
-            models.Turn.__table__.delete().where(models.Turn.job_id.in_(job_ids))
-        )
-        s.execute(
-            models.Job.__table__.delete().where(models.Job.id.in_(job_ids))
-        )
+        s.execute(models.Turn.__table__.delete().where(models.Turn.job_id.in_(job_ids)))
+        s.execute(models.Job.__table__.delete().where(models.Job.id.in_(job_ids)))
     if task_ids:
-        s.execute(
-            models.Task.__table__.delete().where(models.Task.id.in_(task_ids))
-        )
+        s.execute(models.Task.__table__.delete().where(models.Task.id.in_(task_ids)))
+    s.execute(models.Schedule.__table__.delete().where(models.Schedule.project_id == project_id))
     s.execute(
-        models.Schedule.__table__.delete().where(
-            models.Schedule.project_id == project_id
-        )
-    )
-    s.execute(
-        models.AllowlistRule.__table__.delete().where(
-            models.AllowlistRule.project_id == project_id
-        )
+        models.AllowlistRule.__table__.delete().where(models.AllowlistRule.project_id == project_id)
     )
     # Project itself last. The SQLA relationships from Project to jobs/rules
     # would normally cascade, but we've already drained those.
-    s.execute(
-        models.Project.__table__.delete().where(models.Project.id == project_id)
-    )
+    s.execute(models.Project.__table__.delete().where(models.Project.id == project_id))
     s.commit()
 
 
 @router.get("/{project_id}/worktrees", response_model=list[WorktreeOut])
-def list_project_worktrees(
-    project_id: str, s: Session = Depends(get_session)
-) -> list[WorktreeOut]:
+def list_project_worktrees(project_id: str, s: Session = Depends(get_session)) -> list[WorktreeOut]:
     """List outstanding ``git worktree list`` entries for the project.
 
     Each entry includes the on-disk ``task_id`` if the worktree's path matches

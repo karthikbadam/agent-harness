@@ -32,9 +32,7 @@ async def test_mcp_mount_rejects_missing_token(app_client) -> None:
 
 
 async def test_mcp_mount_rejects_wrong_token(app_client) -> None:
-    r = await app_client.get(
-        "/mcp/", headers={"Authorization": "Bearer wrong"}
-    )
+    r = await app_client.get("/mcp/", headers={"Authorization": "Bearer wrong"})
     assert r.status_code == 401
 
 
@@ -42,7 +40,5 @@ async def test_mcp_mount_passes_with_correct_token(app_client) -> None:
     # We don't fully handshake MCP here — just verify the guard lets the
     # request through to the inner app, which then responds (often with a
     # 4xx/5xx for a malformed JSON-RPC body, NOT a 401).
-    r = await app_client.get(
-        "/mcp/", headers={"Authorization": "Bearer test-token"}
-    )
+    r = await app_client.get("/mcp/", headers={"Authorization": "Bearer test-token"})
     assert r.status_code != 401

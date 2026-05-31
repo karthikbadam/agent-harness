@@ -1,8 +1,4 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { tasksApi } from "../api/tasks";
 import { jobsKey, jobKey } from "./useJobs";
@@ -85,7 +81,10 @@ export function useCreateLoop(projectId: string) {
   });
 }
 
-function invalidateTasksFor(qc: ReturnType<typeof useQueryClient>, projectId: string) {
+function invalidateTasksFor(
+  qc: ReturnType<typeof useQueryClient>,
+  projectId: string,
+) {
   qc.invalidateQueries({ queryKey: tasksKey(projectId) });
 }
 

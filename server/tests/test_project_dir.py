@@ -12,20 +12,12 @@ def test_ensure_project_dir_creates_git_repo(tmp_path: Path) -> None:
     assert d.is_dir()
     assert (d / ".git").exists()
     # An initial commit means HEAD exists (loops branch from it).
-    sha = (
-        subprocess.check_output(["git", "-C", str(d), "rev-parse", "HEAD"])
-        .decode()
-        .strip()
-    )
+    sha = subprocess.check_output(["git", "-C", str(d), "rev-parse", "HEAD"]).decode().strip()
     assert len(sha) == 40
     assert (d / ".gitignore").exists()
     # Idempotent: running again on an existing repo is a no-op, no error.
     _ensure_project_dir(str(d))
-    sha2 = (
-        subprocess.check_output(["git", "-C", str(d), "rev-parse", "HEAD"])
-        .decode()
-        .strip()
-    )
+    sha2 = subprocess.check_output(["git", "-C", str(d), "rev-parse", "HEAD"]).decode().strip()
     assert sha2 == sha
 
 

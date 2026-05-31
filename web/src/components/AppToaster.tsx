@@ -10,7 +10,9 @@ export function AppToaster() {
           <Toast.Root width={{ md: "sm" }}>
             <Toast.Indicator />
             <Toast.Title>{t.title}</Toast.Title>
-            {t.description && <Toast.Description>{t.description}</Toast.Description>}
+            {t.description && (
+              <Toast.Description>{t.description}</Toast.Description>
+            )}
             <Toast.CloseTrigger />
           </Toast.Root>
         )}

@@ -86,9 +86,7 @@ async def create_job(
 
 
 def _resolve_default_project_id(s: Session) -> str:
-    row = s.execute(
-        select(models.Project.id).where(models.Project.is_default.is_(True))
-    ).first()
+    row = s.execute(select(models.Project.id).where(models.Project.is_default.is_(True))).first()
     if row is not None:
         return row[0]
     # Lazy bootstrap if startup hook didn't run (e.g. fresh DB created by a
@@ -155,9 +153,7 @@ async def followup_job(
 
 
 @router.post("/{job_id}/stop", response_model=JobOut)
-async def stop_job(
-    job_id: str, request: Request, s: Session = Depends(get_session)
-) -> JobOut:
+async def stop_job(job_id: str, request: Request, s: Session = Depends(get_session)) -> JobOut:
     mgr = _manager(request)
     j = s.get(models.Job, job_id)
     if j is None:

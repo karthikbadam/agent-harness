@@ -200,10 +200,20 @@ function NoteRow({ note }: NoteRowProps) {
   return (
     <Box bg="bg" rounded="md" px={3.5} py={3}>
       <Flex gap={2.5} align="flex-start">
-        <Box boxSize="1.5" rounded="full" bg={dotColor} mt={1.5} flexShrink={0} />
+        <Box
+          boxSize="1.5"
+          rounded="full"
+          bg={dotColor}
+          mt={1.5}
+          flexShrink={0}
+        />
         <Stack gap={0.5} flex="1" minW={0}>
           <HStack gap={2} fontSize="2xs" color="fg.muted">
-            <Text fontWeight="medium" textTransform="uppercase" letterSpacing="wider">
+            <Text
+              fontWeight="medium"
+              textTransform="uppercase"
+              letterSpacing="wider"
+            >
               {note.kind}
             </Text>
             {note.severity !== "info" && (

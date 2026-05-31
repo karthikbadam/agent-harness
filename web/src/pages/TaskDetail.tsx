@@ -1,5 +1,14 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { Box, Button, Center, Flex, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
+import {
+  Box,
+  Button,
+  Center,
+  Flex,
+  HStack,
+  Spinner,
+  Stack,
+  Text,
+} from "@chakra-ui/react";
 
 import { Shell } from "../components/Shell";
 import { ArtifactView } from "../components/ArtifactView";
@@ -55,7 +64,9 @@ export function TaskDetailPage() {
   const state = (task.data?.loop_state ?? {}) as LoopState;
   const spec = (task.data?.loop_spec ?? {}) as LoopSpec;
   const metricName = spec.metric_name ?? "metric";
-  const rows = [...(iterations ?? [])].sort((a, b) => b.iteration - a.iteration);
+  const rows = [...(iterations ?? [])].sort(
+    (a, b) => b.iteration - a.iteration,
+  );
 
   // Keep the view clean when agents name artifacts inconsistently across
   // iterations. The API returns newest-first, so we keep the first occurrence:
@@ -73,7 +84,10 @@ export function TaskDetailPage() {
       return true;
     }
     const base = a.name
-      .replace(/\s*\((?:iter(?:ation)?|step|round|v(?:ersion)?)?\s*\d+\)\s*$/i, "")
+      .replace(
+        /\s*\((?:iter(?:ation)?|step|round|v(?:ersion)?)?\s*\d+\)\s*$/i,
+        "",
+      )
       .trim()
       .toLowerCase();
     const key = `${a.kind}::${base || a.name.toLowerCase()}`;
@@ -117,7 +131,11 @@ export function TaskDetailPage() {
 
       {isLoop && (
         <HStack gap={5} fontSize="sm" wrap="wrap" mb={4}>
-          <Stat label={`best ${metricName}`} value={fmt(state.best_metric)} accent="green.fg" />
+          <Stat
+            label={`best ${metricName}`}
+            value={fmt(state.best_metric)}
+            accent="green.fg"
+          />
           <Stat
             label="iterations"
             value={
@@ -144,7 +162,12 @@ export function TaskDetailPage() {
 
       {isLoop && rows.length > 0 && (
         <Box mt={5}>
-          <Text fontSize="2xs" color="fg.subtle" textTransform="uppercase" mb={1.5}>
+          <Text
+            fontSize="2xs"
+            color="fg.subtle"
+            textTransform="uppercase"
+            mb={1.5}
+          >
             Iterations ({rows.length})
           </Text>
           <Stack gap={0.5}>
@@ -161,7 +184,12 @@ export function TaskDetailPage() {
                 _hover={{ bg: "bg.muted" }}
                 onClick={() => navigate(`/jobs?task_id=${it.task_id}`)}
               >
-                <Text color="fg.subtle" fontFamily="mono" w="3rem" flexShrink={0}>
+                <Text
+                  color="fg.subtle"
+                  fontFamily="mono"
+                  w="3rem"
+                  flexShrink={0}
+                >
                   #{it.iteration}
                 </Text>
                 <Text fontFamily="mono" w="4.5rem" flexShrink={0}>

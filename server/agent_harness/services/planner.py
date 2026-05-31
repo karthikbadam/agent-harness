@@ -297,9 +297,7 @@ def _latest_assistant_text(log_dir: Path) -> str:
                     ev = json.loads(line)
                 except Exception:  # noqa: BLE001
                     continue
-                if ev.get("type") == "assistant_text" and isinstance(
-                    ev.get("text"), str
-                ):
+                if ev.get("type") == "assistant_text" and isinstance(ev.get("text"), str):
                     pieces.append(ev["text"])
     except Exception:  # noqa: BLE001
         return ""
@@ -331,9 +329,7 @@ def parse_and_insert_from_log_dir(
     return _insert_fallback_research(project_id, ask, plan_task_id=plan_task_id)
 
 
-def replace_drafts_from_log_dir(
-    project_id: str, plan_task_id: str, log_dir: Path
-) -> list[str]:
+def replace_drafts_from_log_dir(project_id: str, plan_task_id: str, log_dir: Path) -> list[str]:
     """Steering re-plan: the planner re-ran (a followup on the plan job) and
     emitted a NEW task list. Delete this plan's still-``pending`` draft children
     (never anything that already started) and insert the fresh array. Returns
@@ -361,9 +357,7 @@ def replace_drafts_from_log_dir(
                     | (models.TaskDependency.depends_on_id.in_(draft_ids))
                 )
             )
-            s.execute(
-                models.Task.__table__.delete().where(models.Task.id.in_(draft_ids))
-            )
+            s.execute(models.Task.__table__.delete().where(models.Task.id.in_(draft_ids)))
     return _insert_drafts(project_id, parsed, plan_task_id=plan_task_id)
 
 
@@ -534,8 +528,7 @@ def _insert_drafts(
             dep_ids = [r[0] for r in dep_rows]
             if not dep_ids:
                 log.warning(
-                    "planner integrate task %s has no resolvable deps; "
-                    "leaving prompt placeholder",
+                    "planner integrate task %s has no resolvable deps; leaving prompt placeholder",
                     title,
                 )
                 continue
@@ -664,11 +657,15 @@ def _extract_json_object(text: str) -> dict | None:
 
 def _git_head(cwd: str) -> str | None:
     try:
-        return subprocess.check_output(
-            ["git", "-C", cwd, "rev-parse", "HEAD"],
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "-C", cwd, "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:  # noqa: BLE001
         return None
 
@@ -699,9 +696,7 @@ def _results_tsv_last_metric(cwd: str, metric_name: str) -> float | None:
         return None
 
 
-def _parse_iteration_result(
-    log_dir: Path | None, cwd: str, spec: dict, iteration: int
-) -> dict:
+def _parse_iteration_result(log_dir: Path | None, cwd: str, spec: dict, iteration: int) -> dict:
     """Build the iteration result dict from the agent's structured output, with
     a ``results.tsv`` + ``git HEAD`` backstop. Always returns a dict with at
     least ``iteration``; ``metric`` may be None if nothing was parseable."""
@@ -843,15 +838,15 @@ def _harness_coords_block(parent_task_id: str) -> str:
         f"  export AH_TOKEN={token}\n"
         f"  export AH_TASK_ID={parent_task_id}\n"
         "\n"
-        "  curl -s -X POST \"$AH_URL/api/tasks/$AH_TASK_ID/artifacts\" \\\n"
-        "    -H \"Authorization: Bearer $AH_TOKEN\" -H \"Content-Type: application/json\" \\\n"
-        "    -d '{\"kind\":\"graph\",\"path\":\"progress.svg\",\"name\":\"progress\"}'\n"
+        '  curl -s -X POST "$AH_URL/api/tasks/$AH_TASK_ID/artifacts" \\\n'
+        '    -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \\\n'
+        '    -d \'{"kind":"graph","path":"progress.svg","name":"progress"}\'\n'
         "\n"
         "- `path` is RELATIVE to this repo. `kind` is one of: `graph` (PNG or "
         "SVG image), `table` (CSV/TSV or a markdown table), `report` "
         "(markdown/text), `log` (text), `file` (anything else).\n"
         "- Use a STABLE `name` every iteration — do NOT put the iteration number "
-        "in it (use \"progress\", not \"progress (iter 4)\") — so each artifact "
+        'in it (use "progress", not "progress (iter 4)") — so each artifact '
         "UPDATES IN PLACE instead of piling up a new one per iteration.\n"
         "- Register the SAME small set of artifacts every iteration with the SAME "
         "`kind` AND `name` each time. Pick one kind per file and stick to it "
@@ -860,7 +855,11 @@ def _harness_coords_block(parent_task_id: str) -> str:
 
 
 def _make_iteration_task(
-    s, parent: models.Task, iteration: int, state: dict, spec: dict,
+    s,
+    parent: models.Task,
+    iteration: int,
+    state: dict,
+    spec: dict,
     meta: bool = False,
 ) -> models.Task:
     """Insert a single loop iteration child task (ready to run).
@@ -946,23 +945,17 @@ def advance_loop(
 
         # Update carried state.
         state["iteration"] = iteration
-        state["spent_usd"] = round(
-            float(state.get("spent_usd", 0.0)) + float(cost_usd or 0.0), 6
-        )
+        state["spent_usd"] = round(float(state.get("spent_usd", 0.0)) + float(cost_usd or 0.0), 6)
         metric = result.get("metric")
         succeeded = job_status == "done" and metric is not None
         if succeeded:
             state["consecutive_failures"] = 0
-            if _is_improvement(
-                spec.get("direction", "maximize"), metric, state.get("best_metric")
-            ):
+            if _is_improvement(spec.get("direction", "maximize"), metric, state.get("best_metric")):
                 state["best_metric"] = metric
                 state["best_commit"] = result.get("commit")
                 state["non_improving_streak"] = 0
             else:
-                state["non_improving_streak"] = (
-                    state.get("non_improving_streak", 0) + 1
-                )
+                state["non_improving_streak"] = state.get("non_improving_streak", 0) + 1
         elif job_status == "stopped":
             # Operational interruption (server restart / manual stop of the
             # iteration), NOT a research failure — don't penalize the loop.
@@ -988,7 +981,5 @@ def advance_loop(
             state["non_improving_streak"] = 0
             parent.loop_state = state
 
-        child = _make_iteration_task(
-            s, parent, iteration + 1, state, spec, meta=meta_next
-        )
+        child = _make_iteration_task(s, parent, iteration + 1, state, spec, meta=meta_next)
         return result, child.id, None

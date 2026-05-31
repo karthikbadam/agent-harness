@@ -69,9 +69,7 @@ async def reconcile_jobs(
     """
     with session_scope() as s:
         running_jobs = (
-            s.execute(select(models.Job).where(models.Job.status == "running"))
-            .scalars()
-            .all()
+            s.execute(select(models.Job).where(models.Job.status == "running")).scalars().all()
         )
         job_ids = [j.id for j in running_jobs]
 
@@ -91,9 +89,7 @@ async def reconcile_jobs(
                 from .services import task_runner
 
                 try:
-                    ids = task_runner.on_job_finalized(
-                        job_id, "stopped", log_dir=b.log_dir
-                    )
+                    ids = task_runner.on_job_finalized(job_id, "stopped", log_dir=b.log_dir)
                     autorun_ids.extend(ids or [])
                 except Exception:  # noqa: BLE001
                     log.exception("finalize-on-reconcile failed for %s", job_id)

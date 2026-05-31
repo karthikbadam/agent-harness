@@ -61,14 +61,13 @@ async def plan_project(
     s.commit()
     task_id = task.id
     from ..services import task_runner
+
     await task_runner.kickoff_first_phase(task_id, mgr)
     return PlanOut(task_ids=[task_id], raw=None, error=None)
 
 
 @router.get("/api/projects/{project_id}/plan", response_model=LastPlanOut | None)
-def last_plan(
-    project_id: str, s: Session = Depends(get_session)
-) -> LastPlanOut | None:
+def last_plan(project_id: str, s: Session = Depends(get_session)) -> LastPlanOut | None:
     """Return the most recent planner run for this project, if any.
 
     A planner run is a Task with ``mode='plan'``; its prompt is the user's ask
@@ -76,29 +75,23 @@ def last_plan(
     """
     if s.get(models.Project, project_id) is None:
         raise HTTPException(404, "unknown project")
-    plan_task = (
-        s.execute(
-            select(models.Task)
-            .where(
-                models.Task.project_id == project_id,
-                models.Task.mode == "plan",
-            )
-            .order_by(models.Task.created_at.desc())
-            .limit(1)
+    plan_task = s.execute(
+        select(models.Task)
+        .where(
+            models.Task.project_id == project_id,
+            models.Task.mode == "plan",
         )
-        .scalar_one_or_none()
-    )
+        .order_by(models.Task.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
     if plan_task is None:
         return None
-    job = (
-        s.execute(
-            select(models.Job)
-            .where(models.Job.task_id == plan_task.id, models.Job.kind == "plan")
-            .order_by(models.Job.created_at.desc())
-            .limit(1)
-        )
-        .scalar_one_or_none()
-    )
+    job = s.execute(
+        select(models.Job)
+        .where(models.Job.task_id == plan_task.id, models.Job.kind == "plan")
+        .order_by(models.Job.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
     raw = _assistant_text_for_job(job.id) if job is not None else ""
     # Child tasks were inserted by task_runner shortly after the plan job
     # finished; match by source='planner' inside the plan task's time window.
@@ -143,9 +136,7 @@ def _assistant_text_for_job(job_id: str) -> str:
     return "\n".join(pieces)
 
 
-def _tasks_after(
-    s: Session, project_id: str, plan_task: models.Task
-) -> list[str]:
+def _tasks_after(s: Session, project_id: str, plan_task: models.Task) -> list[str]:
     """Return planner-sourced child task ids created during this plan task's
     lifetime. ``on_job_finalized`` inserts them immediately after the plan
     job finishes, so a generous window catches them all.

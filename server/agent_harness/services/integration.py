@@ -68,8 +68,7 @@ def _build_prompt(
         f"2. Merge each branch listed above into '{target_branch}'. Use "
         "`git merge` or `git rebase` as appropriate. Resolve conflicts inline.",
         "3. Commit the merge(s).",
-        "4. If you cannot resolve a conflict, stop and explain. "
-        "Do not delete branches.",
+        "4. If you cannot resolve a conflict, stop and explain. Do not delete branches.",
     ]
     return "\n".join(lines)
 
@@ -115,13 +114,9 @@ def create_integration_task(
             if t.project_id != project_id:
                 raise ValueError(f"task {tid} not in project {project_id}")
             if t.status != "done":
-                raise ValueError(
-                    f"task {tid} status={t.status!r}; only 'done' tasks integrate"
-                )
+                raise ValueError(f"task {tid} status={t.status!r}; only 'done' tasks integrate")
             if not t.worktree_branch:
-                raise ValueError(
-                    f"task {tid} has no worktree_branch (one-shot or not built)"
-                )
+                raise ValueError(f"task {tid} has no worktree_branch (one-shot or not built)")
             inputs.append(t)
         tb = target_branch or _current_branch(project.path) or "main"
 

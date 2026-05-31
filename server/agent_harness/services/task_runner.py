@@ -39,19 +39,27 @@ def _git_head(project_path: str) -> tuple[str | None, str | None]:
     if not pdir.is_dir() or not (pdir / ".git").exists():
         return None, None
     try:
-        sha = subprocess.check_output(
-            ["git", "-C", str(pdir), "rev-parse", "HEAD"],
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).decode().strip()
+        sha = (
+            subprocess.check_output(
+                ["git", "-C", str(pdir), "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:  # noqa: BLE001
         sha = None
     try:
-        branch = subprocess.check_output(
-            ["git", "-C", str(pdir), "rev-parse", "--abbrev-ref", "HEAD"],
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).decode().strip()
+        branch = (
+            subprocess.check_output(
+                ["git", "-C", str(pdir), "rev-parse", "--abbrev-ref", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:  # noqa: BLE001
         branch = None
     return sha, branch
@@ -59,35 +67,41 @@ def _git_head(project_path: str) -> tuple[str | None, str | None]:
 
 def _branch_tip(project_path: str, branch: str) -> str | None:
     try:
-        return subprocess.check_output(
-            ["git", "-C", project_path, "rev-parse", branch],
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "-C", project_path, "rev-parse", branch],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:  # noqa: BLE001
         return None
 
 
-def _commit_reachable_from_other_branch(
-    project_path: str, sha: str, exclude_branch: str
-) -> bool:
+def _commit_reachable_from_other_branch(project_path: str, sha: str, exclude_branch: str) -> bool:
     """Return True iff ``sha`` is reachable from some local branch other than
     ``exclude_branch``. Used to verify an integration actually moved each input
     task's work somewhere persistent before we delete its task branch."""
     try:
-        names = subprocess.check_output(
-            [
-                "git",
-                "-C",
-                project_path,
-                "branch",
-                "--contains",
-                sha,
-                "--format=%(refname:short)",
-            ],
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).decode().splitlines()
+        names = (
+            subprocess.check_output(
+                [
+                    "git",
+                    "-C",
+                    project_path,
+                    "branch",
+                    "--contains",
+                    sha,
+                    "--format=%(refname:short)",
+                ],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .splitlines()
+        )
     except Exception:  # noqa: BLE001
         return False
     return any(n.strip() and n.strip() != exclude_branch for n in names)
@@ -187,9 +201,7 @@ def _last_assistant_text(log_dir: Path) -> str | None:
 
 def _deps_of(s, task_id: str) -> list[str]:
     rows = s.execute(
-        select(models.TaskDependency.depends_on_id).where(
-            models.TaskDependency.task_id == task_id
-        )
+        select(models.TaskDependency.depends_on_id).where(models.TaskDependency.task_id == task_id)
     ).all()
     return [r[0] for r in rows]
 
@@ -198,9 +210,7 @@ def _all_deps_done(s, task_id: str) -> bool:
     dep_ids = _deps_of(s, task_id)
     if not dep_ids:
         return True
-    rows = s.execute(
-        select(models.Task.status).where(models.Task.id.in_(dep_ids))
-    ).all()
+    rows = s.execute(select(models.Task.status).where(models.Task.id.in_(dep_ids))).all()
     statuses = [r[0] for r in rows]
     if len(statuses) != len(dep_ids):
         return False
@@ -213,9 +223,7 @@ def _reevaluate_downstream(s, task_id: str) -> list[tuple[str, str]]:
     """
     transitions: list[tuple[str, str]] = []
     rows = s.execute(
-        select(models.TaskDependency.task_id).where(
-            models.TaskDependency.depends_on_id == task_id
-        )
+        select(models.TaskDependency.task_id).where(models.TaskDependency.depends_on_id == task_id)
     ).all()
     for (downstream_id,) in rows:
         ds = s.get(models.Task, downstream_id)
@@ -282,23 +290,39 @@ def on_job_finalized(
                     task.status = "failed"
                     task.phase = "failed"
                     task.last_failed_at = datetime.now(timezone.utc)
-                    s.add(models.Outcome(
-                        task_id=task.id, job_id=job.id, commit_sha=None, branch=None,
-                        summary=summary, status="failed", kind="plan",
-                    ))
-                    pending_events.append((
-                        "task_failed",
-                        {"project_id": project_id, "task_id": task.id, "job_id": job.id},
-                    ))
+                    s.add(
+                        models.Outcome(
+                            task_id=task.id,
+                            job_id=job.id,
+                            commit_sha=None,
+                            branch=None,
+                            summary=summary,
+                            status="failed",
+                            kind="plan",
+                        )
+                    )
+                    pending_events.append(
+                        (
+                            "task_failed",
+                            {"project_id": project_id, "task_id": task.id, "job_id": job.id},
+                        )
+                    )
                     _emit_after(bus, pending_events)
                     return autorun_ids
 
                 # A followup on an already-finalized (auto-ran) plan is a no-op.
                 if task.status == "done":
-                    s.add(models.Outcome(
-                        task_id=task.id, job_id=job.id, commit_sha=None, branch=None,
-                        summary=summary, status="success", kind="plan",
-                    ))
+                    s.add(
+                        models.Outcome(
+                            task_id=task.id,
+                            job_id=job.id,
+                            commit_sha=None,
+                            branch=None,
+                            summary=summary,
+                            status="success",
+                            kind="plan",
+                        )
+                    )
                     _emit_after(bus, pending_events)
                     return autorun_ids
 
@@ -351,18 +375,25 @@ def on_job_finalized(
                             ds.status = "pending"
 
                 verb = "Revised" if is_steering else "Drafted"
-                plan_summary = (
-                    f"{verb} {n} task{'s' if n != 1 else ''}." if n else summary
+                plan_summary = f"{verb} {n} task{'s' if n != 1 else ''}." if n else summary
+                s.add(
+                    models.Outcome(
+                        task_id=task.id,
+                        job_id=job.id,
+                        commit_sha=None,
+                        branch=None,
+                        summary=plan_summary,
+                        status="success",
+                        kind="plan",
+                    )
                 )
-                s.add(models.Outcome(
-                    task_id=task.id, job_id=job.id, commit_sha=None, branch=None,
-                    summary=plan_summary, status="success", kind="plan",
-                ))
                 s.flush()
-                pending_events.append((
-                    event,
-                    {"project_id": project_id, "task_id": task.id, "job_id": job.id},
-                ))
+                pending_events.append(
+                    (
+                        event,
+                        {"project_id": project_id, "task_id": task.id, "job_id": job.id},
+                    )
+                )
                 _emit_after(bus, pending_events)
                 return autorun_ids
             # Per-task plan phase (mode='plan_then_execute'): park at
@@ -412,7 +443,7 @@ def on_job_finalized(
 
         if job.kind == "integrate":
             cwd = job.cwd or (project.path if project else None)
-            sha, branch = (_git_head(cwd) if cwd else (None, None))
+            sha, branch = _git_head(cwd) if cwd else (None, None)
             summary = _last_assistant_text(log_dir) if log_dir is not None else None
             dep_rows = s.execute(
                 select(models.TaskDependency.depends_on_id).where(
@@ -478,13 +509,11 @@ def on_job_finalized(
             # specified for ad-hoc.
             cwd = job.cwd or (project.path if project else None)
             summary = _last_assistant_text(log_dir) if log_dir is not None else None
-            in_worktree = bool(
-                cwd and project and cwd != project.path
-            )
+            in_worktree = bool(cwd and project and cwd != project.path)
             if job_status == "done" and in_worktree and not task.synthetic:
                 commit_msg = (task.title or "agent commit")[:72]
                 _commit_dirty_worktree(cwd, commit_msg)
-            sha, branch = (_git_head(cwd) if cwd else (None, None))
+            sha, branch = _git_head(cwd) if cwd else (None, None)
             outcome_status = "success" if job_status == "done" else "failed"
 
             # Loop iteration: hand the finished iteration to the planner's
@@ -498,12 +527,11 @@ def on_job_finalized(
             loop_stop_reason: str | None = None
             if task.source == "loop" and task.parent_task_id:
                 from . import planner as _planner
+
                 cost = _job_cost_usd(s, job.id)
                 try:
-                    loop_result, loop_next_child, loop_stop_reason = (
-                        _planner.advance_loop(
-                            task.parent_task_id, job_status, cwd or "", cost, log_dir
-                        )
+                    loop_result, loop_next_child, loop_stop_reason = _planner.advance_loop(
+                        task.parent_task_id, job_status, cwd or "", cost, log_dir
                     )
                 except Exception:  # noqa: BLE001
                     log.exception("advance_loop failed for iteration %s", task.id)
@@ -544,9 +572,7 @@ def on_job_finalized(
                 if loop_next_child is not None:
                     autorun_ids.append(loop_next_child)
                 elif loop_stop_reason is not None:
-                    _record_loop_finish(
-                        s, task.parent_task_id, job.id, loop_stop_reason
-                    )
+                    _record_loop_finish(s, task.parent_task_id, job.id, loop_stop_reason)
                     pending_events.append(
                         (
                             "task_done",
@@ -621,6 +647,7 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
         is_loop = peek.mode == "loop"
     if is_loop:
         from . import planner as _planner
+
         child_id = _planner.start_loop(task_id)
         if child_id is None:
             return None
@@ -650,9 +677,7 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
             else:
                 base_ref = _resolve_base_ref(s, t)
                 try:
-                    wt_path, wt_branch = worktrees.create(
-                        project, t, base_ref=base_ref
-                    )
+                    wt_path, wt_branch = worktrees.create(project, t, base_ref=base_ref)
                 except Exception:  # noqa: BLE001
                     log.exception(
                         "execute_only worktree create failed for task %s; "
@@ -676,8 +701,12 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
         prompt = t.prompt
         title = f"[task] {t.title}"[:256]
     jid = job_manager.create_job(
-        project_id, prompt, title=title, task_id=task_id,
-        kind=kind, cwd=cwd,
+        project_id,
+        prompt,
+        title=title,
+        task_id=task_id,
+        kind=kind,
+        cwd=cwd,
     )
     await job_manager.start(jid)
     return jid
@@ -749,9 +778,7 @@ def try_autodisable_autopilot(project_id: str) -> bool:
         leftover = s.execute(
             select(models.Task.id).where(
                 models.Task.project_id == project_id,
-                models.Task.status.in_(
-                    ["pending", "ready", "running", "failed"]
-                ),
+                models.Task.status.in_(["pending", "ready", "running", "failed"]),
             )
         ).first()
         if leftover:
@@ -858,9 +885,7 @@ def advance_to_executing(task_id: str, prompt_addendum: str = "") -> ExecuteSpaw
         if task is None:
             raise ValueError(f"unknown task {task_id}")
         if task.phase != "awaiting_ack":
-            raise ValueError(
-                f"task {task_id} is not awaiting ack (phase={task.phase!r})"
-            )
+            raise ValueError(f"task {task_id} is not awaiting ack (phase={task.phase!r})")
         project = s.get(models.Project, task.project_id)
         if project is None:
             raise ValueError(f"project {task.project_id} for task {task_id} not found")
@@ -894,11 +919,7 @@ def reconcile_on_startup() -> None:
     a user re-run) will pick it up. We only flip pending↔ready here.
     """
     with session_scope() as s:
-        rows = (
-            s.query(models.Task)
-            .filter(models.Task.status.in_(["pending", "ready"]))
-            .all()
-        )
+        rows = s.query(models.Task).filter(models.Task.status.in_(["pending", "ready"])).all()
         for t in rows:
             new = "ready" if _all_deps_done(s, t.id) else "pending"
             if t.status != new:

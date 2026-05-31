@@ -29,7 +29,8 @@ export function SettingsDrawer({ open, onClose }: Props) {
   const navigate = useNavigate();
   const setToken = useUI((s) => s.setToken);
   const projects = useProjects();
-  const defaultProject = (projects.data ?? []).find((p) => p.is_default) ?? null;
+  const defaultProject =
+    (projects.data ?? []).find((p) => p.is_default) ?? null;
   const updateProject = useUpdateProject(defaultProject?.id ?? "");
 
   const [pathDraft, setPathDraft] = useState("");
@@ -44,7 +45,11 @@ export function SettingsDrawer({ open, onClose }: Props) {
   };
 
   return (
-    <Drawer.Root open={open} onOpenChange={(e) => (e.open ? null : onClose())} placement="end">
+    <Drawer.Root
+      open={open}
+      onOpenChange={(e) => (e.open ? null : onClose())}
+      placement="end"
+    >
       <Portal>
         <Drawer.Backdrop />
         <Drawer.Positioner>
@@ -78,7 +83,10 @@ export function SettingsDrawer({ open, onClose }: Props) {
                           size="sm"
                           onClick={savePath}
                           loading={updateProject.isPending}
-                          disabled={!pathDraft.trim() || pathDraft.trim() === defaultProject.path}
+                          disabled={
+                            !pathDraft.trim() ||
+                            pathDraft.trim() === defaultProject.path
+                          }
                         >
                           Save
                         </Button>

@@ -2,8 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { driverApi } from "../api/driver";
 
-export const driverKey = (projectId: string) =>
-  ["driver", projectId] as const;
+export const driverKey = (projectId: string) => ["driver", projectId] as const;
 export const driverNotesKey = (projectId: string) =>
   ["driver-notes", projectId] as const;
 

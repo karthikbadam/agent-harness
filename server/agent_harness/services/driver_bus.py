@@ -118,9 +118,7 @@ class DriverEventBus:
     def _mode_on(self, project_id: str) -> bool:
         with session_scope() as s:
             row = s.execute(
-                select(models.Project.autopilot_mode).where(
-                    models.Project.id == project_id
-                )
+                select(models.Project.autopilot_mode).where(models.Project.id == project_id)
             ).first()
         return bool(row and row[0] == "on")
 

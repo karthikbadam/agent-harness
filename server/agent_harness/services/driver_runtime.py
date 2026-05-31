@@ -221,8 +221,7 @@ def main() -> int:
     token = _auth_token()
     if not token:
         log.error(
-            "no auth token; set AGENT_HARNESS_TOKEN or configure "
-            "~/.agent-harness/config.toml"
+            "no auth token; set AGENT_HARNESS_TOKEN or configure ~/.agent-harness/config.toml"
         )
         return 1
     runtime = DriverRuntime(base_url=_base_url(), token=token)

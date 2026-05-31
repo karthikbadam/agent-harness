@@ -208,10 +208,7 @@ class TaskCreate(BaseModel):
     # - ``loop``: autoresearch loop parent. Spawns one iteration child task at a
     #   time until a stop condition. Created by ``POST /api/projects/{id}/loops``.
     mode: (
-        Literal[
-            "plan_then_execute", "one_shot", "execute_only", "research", "plan", "loop"
-        ]
-        | None
+        Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan", "loop"] | None
     ) = None
     # Per-task idle-timeout override (seconds). null = inherit project/global.
     # 0 disables the watchdog for this task (long unattended training turns).
@@ -224,10 +221,7 @@ class TaskUpdate(BaseModel):
     depends_on: list[str] | None = None
     order_idx: int | None = None
     mode: (
-        Literal[
-            "plan_then_execute", "one_shot", "execute_only", "research", "plan", "loop"
-        ]
-        | None
+        Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan", "loop"] | None
     ) = None
     idle_timeout_seconds: int | None = None
 
