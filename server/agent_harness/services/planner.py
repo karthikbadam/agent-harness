@@ -530,6 +530,44 @@ def _insert_drafts(
                 s.add(models.TaskDependency(task_id=tid, depends_on_id=dep_id))
         s.flush()
 
+        # Safety guard against a DETACHED LOOP. A loop runs at the project root
+        # the instant it has no unmet deps; if the planner emits it with an
+        # empty `depends_on_titles` while the graph ALSO has build tasks, the
+        # loop starts concurrently with (and re-scaffolds over) that foundation.
+        # The planner does this intermittently despite explicit instructions and
+        # the damage is severe, so wire it deterministically: a depless loop is
+        # made to depend on the foundation "sinks" — the non-loop tasks that
+        # nothing else builds on (typically the final integrate/merge node).
+        loop_ids = [title_to_id[t] for t, k in title_to_kind.items() if k == "loop"]
+        non_loop_ids = [title_to_id[t] for t, k in title_to_kind.items() if k != "loop"]
+        if loop_ids and non_loop_ids:
+            dep_rows = s.execute(
+                select(models.TaskDependency.depends_on_id).where(
+                    models.TaskDependency.task_id.in_(non_loop_ids)
+                )
+            ).all()
+            depended_on = {r[0] for r in dep_rows}
+            sinks = [i for i in non_loop_ids if i not in depended_on]
+            for loop_id in loop_ids:
+                already = s.execute(
+                    select(models.TaskDependency.depends_on_id).where(
+                        models.TaskDependency.task_id == loop_id
+                    )
+                ).first()
+                if already is not None:
+                    continue  # planner wired it correctly — respect that
+                wired = [sink for sink in sinks if sink != loop_id]
+                for sink in wired:
+                    s.add(models.TaskDependency(task_id=loop_id, depends_on_id=sink))
+                if wired:
+                    log.warning(
+                        "planner emitted a detached loop %s; auto-wired it to "
+                        "foundation sink(s) %s so it waits for the build",
+                        loop_id,
+                        wired,
+                    )
+            s.flush()
+
         # Build the integrate prompts now that we know dep ids → branch names.
         for idx, item in enumerate(parsed):
             if not isinstance(item, dict):

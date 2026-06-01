@@ -231,6 +231,58 @@ def test_loop_node_with_deps_is_pending(initdb: Path) -> None:
         assert len(deps) == 1  # depends on setup
 
 
+def test_detached_loop_is_auto_wired_to_foundation(initdb: Path) -> None:
+    """A loop emitted with NO deps alongside build tasks must be auto-wired to
+    the foundation sink (the integrate node) so it can't start before the
+    foundation exists."""
+    with session_scope() as s:
+        p = models.Project(name="r", path="/tmp")
+        s.add(p)
+        s.flush()
+        pid = p.id
+    ids = planner._insert_drafts(
+        pid,
+        [
+            {"title": "scaffold", "prompt": "scaffold", "depends_on_titles": []},
+            {
+                "title": "moduleA",
+                "prompt": "a",
+                "mode": "execute_only",
+                "depends_on_titles": ["scaffold"],
+            },
+            {
+                "title": "moduleB",
+                "prompt": "b",
+                "mode": "execute_only",
+                "depends_on_titles": ["scaffold"],
+            },
+            {
+                "title": "integ",
+                "kind": "integrate",
+                "target_branch": "main",
+                "depends_on_titles": ["moduleA", "moduleB"],
+            },
+            # The bug: a loop with NO deps, even though a foundation exists.
+            {
+                "kind": "loop",
+                "title": "optimize",
+                "prompt": "iterate",
+                "metric_name": "m",
+                "depends_on_titles": [],
+            },
+        ],
+    )
+    with session_scope() as s:
+        loop = next(
+            t for t in s.query(models.Task).filter(models.Task.id.in_(ids)) if t.mode == "loop"
+        )
+        integ = next(t for t in s.query(models.Task).filter(models.Task.id.in_(ids)) if t.synthetic)
+        deps = s.query(models.TaskDependency).filter(models.TaskDependency.task_id == loop.id).all()
+        dep_ids = {d.depends_on_id for d in deps}
+        assert dep_ids == {integ.id}, "loop should be wired to the integrate sink"
+        assert loop.status == "pending"  # now has a dep → waits for the build
+
+
 # ------------------------------- API -------------------------------------- #
 
 
