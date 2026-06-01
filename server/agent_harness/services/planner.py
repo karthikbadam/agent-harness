@@ -192,6 +192,16 @@ outputs of parallel worktree tasks MUST be `kind: "integrate"` with a
 `depends_on` several worktree tasks in order to "merge"/"assemble"/"combine"
 them, convert it to `kind: "integrate"`.
 
+**INVARIANT — the finished deliverable MUST land on `main`.** Worktree tasks
+(`execute_only` / `plan_then_execute`) commit only to their own `task/<id>`
+branch, and an `integrate` with a fresh `target_branch` (e.g.
+`feat/<slug>-foundation`) leaves the result on THAT branch. If the graph ends
+there, `main` is never updated and the user sees an empty default branch. So
+whenever any worktree task ran, the graph MUST end with a terminal
+`kind: "integrate"` node whose **`target_branch` is `"main"`** that merges the
+final work onto the default branch. (A loop already forces this, since it runs
+on `main`; a pure wave with no loop needs an explicit final integrate-to-`main`.)
+
 Use waves only when the foundation is actually shared. If the ask is small
 or the tasks are truly independent (disjoint files), one or a few siblings
 with no deps is best — the harness will run them in parallel, which is
