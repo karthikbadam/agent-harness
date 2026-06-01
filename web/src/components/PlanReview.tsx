@@ -18,6 +18,11 @@ export function PlanReview({ task }: { task: TaskOut }) {
   const drafts = (allTasks ?? [])
     .filter((t) => t.parent_task_id === task.id)
     .sort((a, b) => a.order_idx - b.order_idx);
+  const titleById = new Map((allTasks ?? []).map((t) => [t.id, t.title]));
+  const depNames = (d: TaskOut) =>
+    (d.depends_on ?? [])
+      .map((id) => titleById.get(id) ?? id.slice(0, 6))
+      .join(", ");
   const planJob = (jobs ?? [])
     .filter((j) => j.task_id === task.id)
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
@@ -39,38 +44,55 @@ export function PlanReview({ task }: { task: TaskOut }) {
         </Text>
         <Stack gap={1.5}>
           {drafts.map((d) => (
-            <Flex
+            <Stack
               key={d.id}
-              align="center"
-              gap={2}
+              gap={1}
               fontSize="sm"
               px={2.5}
               py={2}
               rounded="md"
               bg="bg.muted"
             >
-              <Text
-                fontFamily="mono"
-                fontSize="2xs"
-                color={d.mode === "loop" ? "blue.fg" : "fg.subtle"}
-                w="5.5rem"
-                flexShrink={0}
-              >
-                {d.mode === "loop"
-                  ? "⟳ loop"
-                  : d.synthetic
-                    ? "integrate"
-                    : d.mode}
-              </Text>
-              <Text flex="1" minW={0} truncate>
-                {d.title}
-              </Text>
-              {(d.depends_on ?? []).length > 0 && (
-                <Text fontSize="2xs" color="fg.subtle" flexShrink={0}>
-                  ↳ {(d.depends_on ?? []).length} dep
+              <Flex align="center" gap={2}>
+                <Text
+                  fontFamily="mono"
+                  fontSize="2xs"
+                  color={d.mode === "loop" ? "blue.fg" : "fg.subtle"}
+                  w="5.5rem"
+                  flexShrink={0}
+                >
+                  {d.mode === "loop"
+                    ? "⟳ loop"
+                    : d.synthetic
+                      ? "⤚ integrate"
+                      : d.mode}
                 </Text>
+                <Text flex="1" minW={0} truncate>
+                  {d.title}
+                </Text>
+              </Flex>
+              {(d.depends_on ?? []).length > 0 ? (
+                <Text fontSize="2xs" color="fg.subtle" pl="6rem" truncate>
+                  ↳ after {depNames(d)}
+                </Text>
+              ) : (
+                // A loop or integrate that builds on a foundation but has no
+                // deps would start immediately, before the foundation exists —
+                // the failure mode that's otherwise invisible at review time.
+                (d.mode === "loop" || d.synthetic) &&
+                drafts.length > 1 && (
+                  <Text
+                    fontSize="2xs"
+                    color="orange.fg"
+                    pl="6rem"
+                    fontWeight="medium"
+                  >
+                    ⚠ no dependencies — starts immediately, before any
+                    foundation is built
+                  </Text>
+                )
               )}
-            </Flex>
+            </Stack>
           ))}
           {drafts.length === 0 && (
             <Text fontSize="sm" color="fg.muted">
