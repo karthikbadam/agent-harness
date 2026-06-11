@@ -63,7 +63,7 @@ export function NewProjectComposer() {
       <Composer
         placeholder={placeholder}
         disabled={!ready || create.isPending}
-        onSend={async (ask) => {
+        onSend={async (ask, attachmentIds) => {
           if (!ready) return;
           const body = isNew
             ? {
@@ -71,7 +71,7 @@ export function NewProjectComposer() {
                 path: `${NEW_FOLDER_BASE}${newName}`,
                 create_dir: true,
                 permission_mode: "acceptEdits" as const,
-                dangerously_skip: true, // fresh folder for an agent to drive
+                dangerously_skip: true,
                 is_default: false,
               }
             : {
@@ -84,10 +84,12 @@ export function NewProjectComposer() {
               };
           const p = await create.mutateAsync(body);
           navigate(`/projects/${p.id}`);
-          if (ask.trim()) {
-            tasksApi.plan(p.id, ask.trim()).catch((err) => {
-              console.error("planner failed for new project:", err);
-            });
+          if (ask.trim() || attachmentIds.length > 0) {
+            tasksApi
+              .plan(p.id, ask.trim() || "Explore the project", attachmentIds)
+              .catch((err) => {
+                console.error("planner failed for new project:", err);
+              });
           }
           setSelected(null);
           setNewFolder(null);

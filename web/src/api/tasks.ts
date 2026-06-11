@@ -36,12 +36,12 @@ export const tasksApi = {
   cancel: (id: string) => api.post<TaskOut>(`/api/tasks/${id}/cancel`, {}),
   confirm: (id: string) => api.post<TaskOut[]>(`/api/tasks/${id}/confirm`, {}),
   outcomes: (id: string) => api.get<OutcomeOut[]>(`/api/tasks/${id}/outcomes`),
-  plan: (projectId: string, ask: string) =>
+  plan: (projectId: string, ask: string, attachmentIds: string[] = []) =>
     api.post<{
       task_ids: string[];
       raw?: string | null;
       error?: string | null;
-    }>(`/api/projects/${projectId}/plan`, { ask }),
+    }>(`/api/projects/${projectId}/plan`, { ask, attachment_ids: attachmentIds }),
   lastPlan: (projectId: string) =>
     api.get<LastPlanOut | null>(`/api/projects/${projectId}/plan`),
 

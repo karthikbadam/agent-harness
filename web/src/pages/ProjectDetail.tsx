@@ -112,8 +112,9 @@ export function ProjectDetailPage() {
           <Composer
             placeholder="Plan a new task — describe what should happen"
             disabled={plan.isPending}
-            onSend={async (prompt) => {
-              await plan.mutateAsync(prompt);
+            projectId={projectId}
+            onSend={async (prompt, attachmentIds) => {
+              await plan.mutateAsync({ ask: prompt, attachmentIds });
             }}
           />
         </StickyComposer>

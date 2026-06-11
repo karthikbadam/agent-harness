@@ -124,10 +124,12 @@ export function JobsPage() {
       <StickyComposer>
         <Composer
           placeholder="Start an ad-hoc job…"
-          onSend={async (prompt) => {
+          projectId={projectFilter || undefined}
+          onSend={async (prompt, attachmentIds) => {
             const job = await createJob.mutateAsync({
               prompt,
               project_id: projectFilter || undefined,
+              attachment_ids: attachmentIds,
             });
             navigate(`/jobs/${job.id}`);
           }}

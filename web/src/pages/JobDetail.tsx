@@ -70,8 +70,9 @@ export function JobDetailPage() {
             running ? "Wait for current turn..." : "Type a followup..."
           }
           disabled={running}
-          onSend={async (prompt) => {
-            await followup.mutateAsync({ prompt });
+          projectId={job.data?.project_id}
+          onSend={async (prompt, attachmentIds) => {
+            await followup.mutateAsync({ prompt, attachment_ids: attachmentIds });
           }}
         />
       </StickyComposer>

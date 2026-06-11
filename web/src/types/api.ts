@@ -1049,6 +1049,26 @@ export interface components {
             /** Open Notes */
             open_notes: number;
         };
+        /** AttachmentOut */
+        AttachmentOut: {
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /** Filename */
+            filename: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Url */
+            url: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** FollowupCreate */
         FollowupCreate: {
             /**
@@ -1056,6 +1076,11 @@ export interface components {
              * @default
              */
             prompt: string;
+            /**
+             * Attachment Ids
+             * @default []
+             */
+            attachment_ids: string[];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1104,6 +1129,11 @@ export interface components {
             project_id?: string | null;
             /** Title */
             title?: string | null;
+            /**
+             * Attachment Ids
+             * @default []
+             */
+            attachment_ids: string[];
         };
         /** JobOut */
         JobOut: {
@@ -1302,6 +1332,11 @@ export interface components {
         PlanCreate: {
             /** Ask */
             ask: string;
+            /**
+             * Attachment Ids
+             * @default []
+             */
+            attachment_ids: string[];
         };
         /** PlanOut */
         PlanOut: {
@@ -1377,6 +1412,8 @@ export interface components {
             skills?: string[];
             /** Context Paths */
             context_paths?: string[];
+            /** Cover Url */
+            cover_url?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1699,6 +1736,11 @@ export interface components {
             started_at?: string | null;
             /** Ended At */
             ended_at?: string | null;
+            /**
+             * Attachment Ids
+             * @default []
+             */
+            attachment_ids: string[];
         };
         /** ValidationError */
         ValidationError: {

@@ -179,7 +179,13 @@ export function useConfirmPlan(projectId: string) {
 export function usePlan(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (ask: string) => tasksApi.plan(projectId, ask),
+    mutationFn: ({
+      ask,
+      attachmentIds = [],
+    }: {
+      ask: string;
+      attachmentIds?: string[];
+    }) => tasksApi.plan(projectId, ask, attachmentIds),
     onSuccess: () => invalidateTasksFor(qc, projectId),
   });
 }
