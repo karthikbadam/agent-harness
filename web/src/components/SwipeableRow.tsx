@@ -234,11 +234,7 @@ function DesktopDeleteButton({
       color="fg.subtle"
       alignSelf="center"
       disabled={disabled}
-      _hover={
-        disabled
-          ? undefined
-          : { color: "red.fg", bg: "red.subtle" }
-      }
+      _hover={disabled ? undefined : { color: "red.fg", bg: "red.subtle" }}
       onClick={(e) => {
         e.stopPropagation();
         if (disabled) return;

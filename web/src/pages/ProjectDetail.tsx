@@ -140,14 +140,16 @@ function PlanDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
             <Drawer.Header>
               <Stack gap={1}>
                 <Drawer.Title>Project plan</Drawer.Title>
-                {plan && (() => {
-                  const n = plan.task_ids?.length ?? 0;
-                  return (
-                    <Text fontSize="xs" color="fg.muted">
-                      Planned {relativeTime(parseServerDate(plan.created_at))} · {n} task{n === 1 ? "" : "s"}
-                    </Text>
-                  );
-                })()}
+                {plan &&
+                  (() => {
+                    const n = plan.task_ids?.length ?? 0;
+                    return (
+                      <Text fontSize="xs" color="fg.muted">
+                        Planned {relativeTime(parseServerDate(plan.created_at))}{" "}
+                        · {n} task{n === 1 ? "" : "s"}
+                      </Text>
+                    );
+                  })()}
               </Stack>
             </Drawer.Header>
             <Drawer.Body>
@@ -168,7 +170,11 @@ function PlanDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
                       Ask
                     </Text>
                     <Box bg="bg" rounded="md" px={3.5} py={3}>
-                      <Text fontSize="sm" lineHeight="1.55" whiteSpace="pre-wrap">
+                      <Text
+                        fontSize="sm"
+                        lineHeight="1.55"
+                        whiteSpace="pre-wrap"
+                      >
                         {plan.ask}
                       </Text>
                     </Box>
@@ -183,13 +189,7 @@ function PlanDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
                     >
                       Planner findings & task list
                     </Text>
-                    <Box
-                      bg="bg"
-                      rounded="md"
-                      px={3.5}
-                      py={3}
-                      fontSize="sm"
-                    >
+                    <Box bg="bg" rounded="md" px={3.5} py={3} fontSize="sm">
                       <MarkdownText source={plan.raw || "(empty)"} />
                     </Box>
                   </Box>

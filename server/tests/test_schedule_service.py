@@ -49,8 +49,14 @@ async def test_start_loads_enabled_from_db(initdb: Path) -> None:
         p = models.Project(name="p", path="/tmp")
         s.add(p)
         s.flush()
-        s.add(models.Schedule(project_id=p.id, name="on", cron="0 9 * * *", prompt="x", enabled=True))
-        s.add(models.Schedule(project_id=p.id, name="off", cron="0 10 * * *", prompt="y", enabled=False))
+        s.add(
+            models.Schedule(project_id=p.id, name="on", cron="0 9 * * *", prompt="x", enabled=True)
+        )
+        s.add(
+            models.Schedule(
+                project_id=p.id, name="off", cron="0 10 * * *", prompt="y", enabled=False
+            )
+        )
 
     reg = BroadcasterRegistry(initdb / "logs")
     mgr = JobManager(reg, claude_path=str(SHIM))

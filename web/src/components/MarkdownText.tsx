@@ -98,9 +98,26 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
   tbody: ({ children }) => <Table.Body>{children}</Table.Body>,
   tr: ({ children }) => <Table.Row>{children}</Table.Row>,
   th: ({ children }) => (
-    <Table.ColumnHeader fontWeight="semibold">{children}</Table.ColumnHeader>
+    <Table.ColumnHeader
+      fontWeight="semibold"
+      minW="7rem"
+      verticalAlign="top"
+      whiteSpace="normal"
+    >
+      {children}
+    </Table.ColumnHeader>
   ),
-  td: ({ children }) => <Table.Cell>{children}</Table.Cell>,
+  td: ({ children }) => (
+    <Table.Cell
+      minW="7rem"
+      maxW="18rem"
+      verticalAlign="top"
+      whiteSpace="normal"
+      css={{ overflowWrap: "anywhere" }}
+    >
+      {children}
+    </Table.Cell>
+  ),
   blockquote: ({ children }) => (
     <Box
       borderLeftWidth="3px"
@@ -115,8 +132,16 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
     </Box>
   ),
   hr: () => <Box as="hr" my={3} borderTopWidth="1px" />,
-  strong: ({ children }) => <Text as="strong" fontWeight="semibold">{children}</Text>,
-  em: ({ children }) => <Text as="em" fontStyle="italic">{children}</Text>,
+  strong: ({ children }) => (
+    <Text as="strong" fontWeight="semibold">
+      {children}
+    </Text>
+  ),
+  em: ({ children }) => (
+    <Text as="em" fontStyle="italic">
+      {children}
+    </Text>
+  ),
 };
 
 export function MarkdownText({ source }: { source: string }) {

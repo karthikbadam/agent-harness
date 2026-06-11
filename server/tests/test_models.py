@@ -128,9 +128,7 @@ def test_schedule_inserts(initdb: Path) -> None:
         proj = models.Project(name="book", path="/tmp/book")
         s.add(proj)
         s.flush()
-        sched = models.Schedule(
-            project_id=proj.id, name="daily", cron="0 9 * * *", prompt="write"
-        )
+        sched = models.Schedule(project_id=proj.id, name="daily", cron="0 9 * * *", prompt="write")
         s.add(sched)
         s.flush()
         assert sched.enabled is True

@@ -86,7 +86,9 @@ async def test_followup_resumes_with_session_id(initdb: Path) -> None:
     await mgr.wait(jid)
 
     captured_resume: list[str | None] = []
-    real_init = __import__("agent_harness.claude", fromlist=["ClaudeRunner"]).ClaudeRunner.__post_init__
+    real_init = __import__(
+        "agent_harness.claude", fromlist=["ClaudeRunner"]
+    ).ClaudeRunner.__post_init__
 
     def spy_init(self):  # type: ignore[no-untyped-def]
         captured_resume.append(self.resume_session_id)
@@ -114,7 +116,11 @@ async def test_followup_resumes_with_session_id(initdb: Path) -> None:
 
 async def test_stop_kills_running_turn(initdb: Path) -> None:
     pid = _make_project()
-    mgr = _make_manager(initdb, "text_only.jsonl")
+    # Use a fixture with NO result event: a turn that delivers its result is
+    # finalized 'done' the moment the result arrives (it's complete), so to
+    # exercise stopping a genuinely *running* turn the shim must hang without
+    # ever emitting a result.
+    mgr = _make_manager(initdb, "silent.jsonl")
     # Make the shim hang after streaming.
     mgr._fixture_env["FAKE_CLAUDE_HANG"] = "1"  # type: ignore[attr-defined]
 

@@ -58,9 +58,7 @@ async def test_wrong_token_401(app_client) -> None:
 async def test_projects_crud(app_client) -> None:
     client, _ = app_client
     auth = {"Authorization": "Bearer test-token"}
-    r = await client.post(
-        "/api/projects", json={"name": "book", "path": "/tmp/book"}, headers=auth
-    )
+    r = await client.post("/api/projects", json={"name": "book", "path": "/tmp/book"}, headers=auth)
     assert r.status_code == 201
     pid = r.json()["id"]
     assert r.json()["permission_mode"] == "acceptEdits"
@@ -72,9 +70,7 @@ async def test_projects_crud(app_client) -> None:
     assert r.status_code == 200
     assert any(p["id"] == pid for p in r.json())
 
-    r = await client.patch(
-        f"/api/projects/{pid}", json={"dangerously_skip": True}, headers=auth
-    )
+    r = await client.patch(f"/api/projects/{pid}", json={"dangerously_skip": True}, headers=auth)
     assert r.status_code == 200
     assert r.json()["dangerously_skip"] is True
 
@@ -123,9 +119,7 @@ async def test_create_job_runs_to_completion(app_client) -> None:
     auth = {"Authorization": "Bearer test-token"}
     r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
     pid = r.json()["id"]
-    r = await client.post(
-        "/api/jobs", json={"project_id": pid, "prompt": "hello"}, headers=auth
-    )
+    r = await client.post("/api/jobs", json={"project_id": pid, "prompt": "hello"}, headers=auth)
     assert r.status_code == 201
     jid = r.json()["id"]
     await app.state.job_manager.wait(jid)
@@ -140,15 +134,11 @@ async def test_followup_and_stop(app_client, monkeypatch: pytest.MonkeyPatch) ->
     auth = {"Authorization": "Bearer test-token"}
     r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
     pid = r.json()["id"]
-    r = await client.post(
-        "/api/jobs", json={"project_id": pid, "prompt": "first"}, headers=auth
-    )
+    r = await client.post("/api/jobs", json={"project_id": pid, "prompt": "first"}, headers=auth)
     jid = r.json()["id"]
     await app.state.job_manager.wait(jid)
 
-    r = await client.post(
-        f"/api/jobs/{jid}/followup", json={"prompt": "second"}, headers=auth
-    )
+    r = await client.post(f"/api/jobs/{jid}/followup", json={"prompt": "second"}, headers=auth)
     assert r.status_code == 200
     await app.state.job_manager.wait(jid)
     r = await client.get(f"/api/jobs/{jid}", headers=auth)
@@ -233,9 +223,7 @@ async def test_tasks_crud_and_status(app_client) -> None:
     assert t2["depends_on"] == [t1["id"]]
 
     # Cycle detection: t1 cannot depend on t2.
-    r = await client.patch(
-        f"/api/tasks/{t1['id']}", json={"depends_on": [t2["id"]]}, headers=auth
-    )
+    r = await client.patch(f"/api/tasks/{t1['id']}", json={"depends_on": [t2["id"]]}, headers=auth)
     assert r.status_code == 400
 
     # Delete works only when no jobs reference the task.
@@ -366,9 +354,7 @@ async def test_project_skills_become_allowlist_entries(app_client) -> None:
         headers=auth,
     )
     pid = r.json()["id"]
-    r = await client.post(
-        "/api/allowlist", json={"rule": "Bash(pytest:*)"}, headers=auth
-    )
+    r = await client.post("/api/allowlist", json={"rule": "Bash(pytest:*)"}, headers=auth)
     assert r.status_code == 201
 
     merged = _gather_allowlist(pid)

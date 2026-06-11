@@ -1,12 +1,8 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { tasksApi } from "../api/tasks";
 import { jobsKey, jobKey } from "./useJobs";
-import type { TaskCreate, TaskUpdate } from "../types";
+import type { LoopCreate, TaskCreate, TaskUpdate } from "../types";
 
 export const tasksKey = (projectId: string) => ["tasks", projectId] as const;
 export const allTasksKey = ["tasks"] as const;
@@ -14,6 +10,8 @@ export const taskKey = (id: string) => ["task", id] as const;
 export const taskOutcomesKey = (id: string) => ["task-outcomes", id] as const;
 export const lastPlanKey = (projectId: string) =>
   ["last-plan", projectId] as const;
+export const iterationsKey = (id: string) => ["iterations", id] as const;
+export const artifactsKey = (id: string) => ["artifacts", id] as const;
 
 export function useAllTasks() {
   return useQuery({
@@ -57,7 +55,36 @@ export function useTaskOutcomes(id: string | undefined) {
   });
 }
 
-function invalidateTasksFor(qc: ReturnType<typeof useQueryClient>, projectId: string) {
+export function useIterations(id: string | undefined, live = true) {
+  return useQuery({
+    queryKey: iterationsKey(id ?? ""),
+    queryFn: () => tasksApi.listIterations(id!),
+    enabled: Boolean(id),
+    refetchInterval: live ? 3_000 : false,
+  });
+}
+
+export function useArtifacts(id: string | undefined, live = true) {
+  return useQuery({
+    queryKey: artifactsKey(id ?? ""),
+    queryFn: () => tasksApi.listArtifacts(id!),
+    enabled: Boolean(id),
+    refetchInterval: live ? 4_000 : false,
+  });
+}
+
+export function useCreateLoop(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: LoopCreate) => tasksApi.createLoop(projectId, body),
+    onSuccess: () => invalidateTasksFor(qc, projectId),
+  });
+}
+
+function invalidateTasksFor(
+  qc: ReturnType<typeof useQueryClient>,
+  projectId: string,
+) {
   qc.invalidateQueries({ queryKey: tasksKey(projectId) });
 }
 
@@ -137,6 +164,14 @@ export function useCancelTask(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => tasksApi.cancel(id),
+    onSuccess: () => invalidateTasksFor(qc, projectId),
+  });
+}
+
+export function useConfirmPlan(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => tasksApi.confirm(id),
     onSuccess: () => invalidateTasksFor(qc, projectId),
   });
 }

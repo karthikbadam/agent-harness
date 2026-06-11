@@ -34,9 +34,7 @@ def render_block(project: models.Project) -> str:
     if skills:
         lines.append("## Skills")
         lines.append("")
-        lines.append(
-            "Auto-allowed for this project (no permission prompt for these):"
-        )
+        lines.append("Auto-allowed for this project (no permission prompt for these):")
         lines.append("")
         for s in skills:
             lines.append(f"- `Skill({s})`")

@@ -38,9 +38,7 @@ def _add_dep(s: Session, task_id: str, depends_on: str) -> None:
 
 def _deps(s: Session, task_id: str) -> set[str]:
     rows = s.execute(
-        models.TaskDependency.__table__.select().where(
-            models.TaskDependency.task_id == task_id
-        )
+        models.TaskDependency.__table__.select().where(models.TaskDependency.task_id == task_id)
     ).all()
     return {r[1] for r in rows}  # (task_id, depends_on_id)
 
@@ -117,9 +115,7 @@ def test_merge_unions_deps_and_rewires_downstream(initdb: Path) -> None:
         _add_dep(s, down, b)
 
     with session_scope() as s:
-        merged = merge_tasks(
-            MergeIn(task_ids=[a, b], title="AB", prompt="combined"), s
-        )
+        merged = merge_tasks(MergeIn(task_ids=[a, b], title="AB", prompt="combined"), s)
     merged_id = merged.id
 
     with session_scope() as s:
@@ -142,9 +138,7 @@ def test_merge_rejects_input_depending_on_other_input(initdb: Path) -> None:
 
     with session_scope() as s:
         with pytest.raises(HTTPException) as exc:
-            merge_tasks(
-                MergeIn(task_ids=[a, b], title="AB", prompt="x"), s
-            )
+            merge_tasks(MergeIn(task_ids=[a, b], title="AB", prompt="x"), s)
         assert exc.value.status_code == 400
 
 

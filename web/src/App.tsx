@@ -16,6 +16,7 @@ import { JobsPage } from "./pages/Jobs";
 import { JobDetailPage } from "./pages/JobDetail";
 import { ProjectsPage } from "./pages/Projects";
 import { ProjectDetailPage } from "./pages/ProjectDetail";
+import { TaskDetailPage } from "./pages/TaskDetail";
 import { SchedulesPage } from "./pages/Schedules";
 
 function RequireAuth({ children }: { children: ReactElement }) {
@@ -74,6 +75,14 @@ export function App() {
           element={
             <RequireAuth>
               <ProjectDetailPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/tasks/:taskId"
+          element={
+            <RequireAuth>
+              <TaskDetailPage />
             </RequireAuth>
           }
         />

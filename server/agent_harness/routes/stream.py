@@ -41,13 +41,12 @@ schema_router = APIRouter(prefix="/api/_codegen", tags=["codegen"], include_in_s
 def stream_event_schema() -> StreamEvent:  # pragma: no cover - codegen-only
     raise HTTPException(404, "codegen-only endpoint")
 
+
 HEARTBEAT_SECONDS = 15
 
 
 def _format_event(seq: int, event_type: str, data_json: str) -> bytes:
-    return (
-        f"id: {seq}\nevent: {event_type}\ndata: {data_json}\n\n"
-    ).encode("utf-8")
+    return (f"id: {seq}\nevent: {event_type}\ndata: {data_json}\n\n").encode("utf-8")
 
 
 @router.get("/{job_id}/stream", dependencies=[Depends(require_auth)])

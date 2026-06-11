@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"sess_slow","model":"claude","cwd":"/tmp","tools":["Bash"]}
+{"type":"assistant","session_id":"sess_slow","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Starting long training."},{"type":"tool_use","id":"toolu_slow","name":"Bash","input":{"command":"sleep 3"}}]}}
+# sleep 3
+{"type":"user","session_id":"sess_slow","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_slow","content":"done\n","is_error":false}]}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":3000,"total_cost_usd":0.01,"session_id":"sess_slow","num_turns":1,"result":"ok"}

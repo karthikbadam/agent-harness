@@ -82,6 +82,18 @@ def _apply_column_migrations(engine: Engine) -> None:
         ("tasks", "phase", "VARCHAR(16)"),
         ("jobs", "kind", "VARCHAR(12) NOT NULL DEFAULT 'ad_hoc'"),
         ("jobs", "cwd", "TEXT NOT NULL DEFAULT ''"),
+        # agent-loop: per-task idle timeout override (null = inherit project/global)
+        ("tasks", "idle_timeout_seconds", "INTEGER"),
+        # agent-loop Tier 2: native loop task (F4). parent_task_id groups loop
+        # iteration children; loop_spec/loop_state live on the mode='loop'
+        # parent; outcomes.meta carries each iteration's parsed result.
+        ("tasks", "parent_task_id", "VARCHAR(12)"),
+        ("tasks", "loop_spec", "JSON"),
+        ("tasks", "loop_state", "JSON"),
+        ("outcomes", "meta", "JSON"),
+        # Tier 3: loop stuck-detection runs a "rethink" iteration, optionally
+        # on a stronger model, via a per-task model override.
+        ("tasks", "model_override", "VARCHAR(64)"),
     ]
 
     with engine.begin() as conn:

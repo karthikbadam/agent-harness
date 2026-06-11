@@ -30,6 +30,7 @@ from .reconcile import reconcile_jobs
 from .schedule_service import ScheduleService
 from .services import claude_md, orchestrator_mcp, task_runner
 from .routes import allowlist as allowlist_routes
+from .routes import artifacts as artifacts_routes
 from .routes import driver as driver_routes
 from .routes import jobs as jobs_routes
 from .routes import outcomes as outcomes_routes
@@ -76,7 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.broadcasters = registry
     app.state.job_manager = manager
     app.state.owned_drivers = {}
-    await reconcile_jobs(registry)
+    await reconcile_jobs(registry, manager)
     schedules = ScheduleService(manager)
     schedules.start()
     app.state.schedules = schedules
@@ -88,9 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with AsyncExitStack() as stack:
         mcp_app = getattr(app.state, "mcp_http_app", None)
         if mcp_app is not None:
-            await stack.enter_async_context(
-                mcp_app.router.lifespan_context(mcp_app)
-            )
+            await stack.enter_async_context(mcp_app.router.lifespan_context(mcp_app))
         try:
             yield
         finally:
@@ -127,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(allowlist_routes.router)
     app.include_router(tasks_routes.router)
     app.include_router(outcomes_routes.router)
+    app.include_router(artifacts_routes.router)
     app.include_router(plans_routes.router)
     app.include_router(stream_routes.router)
     app.include_router(stream_routes.schema_router)
@@ -179,11 +179,10 @@ class _BearerGuard:
             await self._inner(scope, receive, send)
             return
         headers = {
-            k.decode("latin-1").lower(): v.decode("latin-1")
-            for k, v in scope.get("headers", [])
+            k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])
         }
         auth = headers.get("authorization", "")
-        ok = auth.startswith("Bearer ") and auth[len("Bearer "):] == required
+        ok = auth.startswith("Bearer ") and auth[len("Bearer ") :] == required
         if not ok:
             if scope["type"] == "http":
                 body = b'{"detail":"unauthorized"}'

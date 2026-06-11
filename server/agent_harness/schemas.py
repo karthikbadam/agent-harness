@@ -75,6 +75,10 @@ StreamEvent = Annotated[
 class ProjectCreate(BaseModel):
     name: str
     path: str
+    # When true, create the directory if it doesn't exist and `git init` it
+    # (with an initial commit) so a fresh project is immediately usable —
+    # lets the UI start a project in a brand-new folder.
+    create_dir: bool = False
     permission_mode: Literal["acceptEdits", "plan", "default"] = "acceptEdits"
     dangerously_skip: bool = False
     extra_claude_args: list[str] = Field(default_factory=list)
@@ -201,10 +205,14 @@ class TaskCreate(BaseModel):
     #   worktree, no commits; the final assistant message is the deliverable.
     # - ``plan``: top-level planner task. Decomposes the user's ask into child
     #   tasks. Created by ``POST /api/projects/{id}/plan``.
+    # - ``loop``: autoresearch loop parent. Spawns one iteration child task at a
+    #   time until a stop condition. Created by ``POST /api/projects/{id}/loops``.
     mode: (
-        Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan"]
-        | None
+        Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan", "loop"] | None
     ) = None
+    # Per-task idle-timeout override (seconds). null = inherit project/global.
+    # 0 disables the watchdog for this task (long unattended training turns).
+    idle_timeout_seconds: int | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -213,9 +221,9 @@ class TaskUpdate(BaseModel):
     depends_on: list[str] | None = None
     order_idx: int | None = None
     mode: (
-        Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan"]
-        | None
+        Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan", "loop"] | None
     ) = None
+    idle_timeout_seconds: int | None = None
 
 
 class TaskOut(BaseModel):
@@ -232,6 +240,12 @@ class TaskOut(BaseModel):
     worktree_branch: str | None = None
     integration_status: str | None = None
     synthetic: bool = False
+    idle_timeout_seconds: int | None = None
+    # Loop fields: parent_task_id set on iteration children; loop_spec/loop_state
+    # set on the mode='loop' parent (null elsewhere).
+    parent_task_id: str | None = None
+    loop_spec: dict | None = None
+    loop_state: dict | None = None
     depends_on: list[str] = Field(default_factory=list)
     latest_outcome_id: str | None = None
     created_at: datetime
@@ -247,6 +261,70 @@ class OutcomeOut(BaseModel):
     summary: str | None
     status: str
     kind: str = "execute"
+    meta: dict = Field(default_factory=dict)
+    created_at: datetime
+
+
+class LoopCreate(BaseModel):
+    """Create an autoresearch loop (a ``mode='loop'`` parent task).
+
+    ``prompt`` is the standing instruction shared by every iteration (the
+    ``program.md`` body, or a reference to it). The harness wraps it per
+    iteration with the carried state header. Caps are all optional; omit for an
+    open-ended loop bounded only by ``max_iterations``.
+    """
+
+    title: str
+    prompt: str
+    metric_name: str = "metric"
+    direction: Literal["maximize", "minimize"] = "maximize"
+    max_iterations: int = 50
+    target_metric: float | None = None
+    max_cost_usd: float | None = None
+    max_wall_clock_s: int | None = None
+    max_consecutive_failures: int = 3
+    # Stuck-detection: after this many consecutive non-improving iterations,
+    # run a "rethink" iteration that reviews everything and proposes a
+    # fundamentally different direction. null = disabled.
+    stuck_after: int | None = None
+    # Optional stronger model to run those rethink iterations on (e.g.
+    # "claude-opus-4-8"). null = same model as normal iterations.
+    escalate_model: str | None = None
+    idle_timeout_seconds: int | None = 0  # iterations train long; disable by default
+
+
+class IterationOut(BaseModel):
+    """One loop iteration child, flattened with its result for the UI series."""
+
+    task_id: str
+    iteration: int
+    status: str
+    metric: float | None = None
+    kept: bool | None = None
+    description: str | None = None
+    commit_sha: str | None = None
+    duration_s: float | None = None  # wall-clock of the iteration's job
+    created_at: datetime
+
+
+class ArtifactCreate(BaseModel):
+    # Path the agent wrote, relative to the job's cwd (worktree/project) or
+    # absolute. The handler copies it into AH_HOME/artifacts/<task_id>/.
+    path: str
+    name: str | None = None  # display name; defaults to basename(path)
+    kind: Literal["graph", "table", "report", "checkpoint", "log", "file"] = "file"
+    meta: dict = Field(default_factory=dict)
+    job_id: str | None = None
+
+
+class ArtifactOut(BaseModel):
+    id: str
+    task_id: str
+    job_id: str | None = None
+    kind: str
+    name: str
+    meta: dict = Field(default_factory=dict)
+    download_url: str
     created_at: datetime
 
 

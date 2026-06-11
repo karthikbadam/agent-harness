@@ -14,14 +14,23 @@ There is no auto-run: the user explicitly kicks each ready task via
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models
 from ..auth import require_auth
 from ..db import get_session
 from ..jobs import JobManager
-from ..schemas import JobOut, MergeIn, SplitIn, TaskCreate, TaskOut, TaskUpdate
+from ..schemas import (
+    IterationOut,
+    JobOut,
+    LoopCreate,
+    MergeIn,
+    SplitIn,
+    TaskCreate,
+    TaskOut,
+    TaskUpdate,
+)
 from ..routes.jobs import _to_out as _job_to_out
 
 router = APIRouter(tags=["tasks"], dependencies=[Depends(require_auth)])
@@ -36,9 +45,7 @@ def _manager(request: Request) -> JobManager:
 
 def _deps_of(s: Session, task_id: str) -> list[str]:
     rows = s.execute(
-        select(models.TaskDependency.depends_on_id).where(
-            models.TaskDependency.task_id == task_id
-        )
+        select(models.TaskDependency.depends_on_id).where(models.TaskDependency.task_id == task_id)
     ).all()
     return [r[0] for r in rows]
 
@@ -67,6 +74,10 @@ def _to_out(s: Session, t: models.Task) -> TaskOut:
         worktree_branch=t.worktree_branch,
         integration_status=t.integration_status,
         synthetic=t.synthetic,
+        idle_timeout_seconds=t.idle_timeout_seconds,
+        parent_task_id=t.parent_task_id,
+        loop_spec=t.loop_spec,
+        loop_state=t.loop_state,
         depends_on=_deps_of(s, t.id),
         latest_outcome_id=_latest_outcome_id(s, t.id),
         created_at=t.created_at,
@@ -78,9 +89,7 @@ def _all_deps_done(s: Session, task_id: str) -> bool:
     dep_ids = _deps_of(s, task_id)
     if not dep_ids:
         return True
-    rows = (
-        s.execute(select(models.Task.status).where(models.Task.id.in_(dep_ids))).all()
-    )
+    rows = s.execute(select(models.Task.status).where(models.Task.id.in_(dep_ids))).all()
     statuses = [r[0] for r in rows]
     if len(statuses) != len(dep_ids):
         return False  # one or more deps missing
@@ -94,9 +103,7 @@ def _initial_status(s: Session, task_id: str) -> str:
 def _reevaluate_downstream(s: Session, task_id: str) -> None:
     """Flip `pending` downstream tasks to `ready` when their deps are all done."""
     rows = s.execute(
-        select(models.TaskDependency.task_id).where(
-            models.TaskDependency.depends_on_id == task_id
-        )
+        select(models.TaskDependency.task_id).where(models.TaskDependency.depends_on_id == task_id)
     ).all()
     for (downstream_id,) in rows:
         ds = s.get(models.Task, downstream_id)
@@ -110,9 +117,7 @@ def _validate_deps(s: Session, project_id: str, dep_ids: list[str]) -> None:
     if not dep_ids:
         return
     rows = s.execute(
-        select(models.Task.id, models.Task.project_id).where(
-            models.Task.id.in_(dep_ids)
-        )
+        select(models.Task.id, models.Task.project_id).where(models.Task.id.in_(dep_ids))
     ).all()
     found = {r[0]: r[1] for r in rows}
     for d in dep_ids:
@@ -136,9 +141,7 @@ def _detect_cycle(s: Session, task_id: str, new_deps: list[str]) -> None:
             continue
         visited.add(cur)
         rows = s.execute(
-            select(models.TaskDependency.depends_on_id).where(
-                models.TaskDependency.task_id == cur
-            )
+            select(models.TaskDependency.depends_on_id).where(models.TaskDependency.task_id == cur)
         ).all()
         stack.extend(r[0] for r in rows)
 
@@ -176,6 +179,8 @@ async def create_task(
     )
     if body.mode is not None:
         task_kwargs["mode"] = body.mode
+    if body.idle_timeout_seconds is not None:
+        task_kwargs["idle_timeout_seconds"] = body.idle_timeout_seconds
     t = models.Task(**task_kwargs)
     s.add(t)
     s.flush()
@@ -198,6 +203,110 @@ async def create_task(
             await task_runner.kickoff_first_phase(t.id, _manager(request))
             s.refresh(t)
     return _to_out(s, t)
+
+
+@router.post(
+    "/api/projects/{project_id}/loops",
+    response_model=TaskOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_loop(
+    project_id: str,
+    body: LoopCreate,
+    request: Request,
+    run: bool = True,
+    s: Session = Depends(get_session),
+) -> TaskOut:
+    """Create an autoresearch loop — a ``mode='loop'`` parent task that spawns
+    one iteration child at a time until a stop condition (max_iterations /
+    target_metric / cost / wall-clock / consecutive failures).
+
+    Defaults to ``?run=true``: the loop starts immediately (seeds iteration #1).
+    Pass ``?run=false`` to create it paused (status ``ready``; kick later with
+    ``POST /tasks/{id}/run``).
+    """
+    if s.get(models.Project, project_id) is None:
+        raise HTTPException(404, "unknown project")
+    spec = {
+        "metric_name": body.metric_name,
+        "direction": body.direction,
+        "max_iterations": body.max_iterations,
+        "target_metric": body.target_metric,
+        "max_cost_usd": body.max_cost_usd,
+        "max_wall_clock_s": body.max_wall_clock_s,
+        "max_consecutive_failures": body.max_consecutive_failures,
+        "stuck_after": body.stuck_after,
+        "escalate_model": body.escalate_model,
+    }
+    t = models.Task(
+        project_id=project_id,
+        title=body.title,
+        prompt=body.prompt,
+        source="manual",
+        status="ready",  # no deps; ready to start
+        mode="loop",
+        loop_spec=spec,
+        idle_timeout_seconds=body.idle_timeout_seconds,
+    )
+    s.add(t)
+    s.commit()
+    s.refresh(t)
+    from ..services import driver_bus
+
+    driver_bus.get_bus().emit("task_ready", project_id, task_id=t.id)
+    if run:
+        from ..services import task_runner
+
+        await task_runner.kickoff_first_phase(t.id, _manager(request))
+        s.refresh(t)
+    return _to_out(s, t)
+
+
+@router.get("/api/tasks/{task_id}/iterations", response_model=list[IterationOut])
+def list_iterations(task_id: str, s: Session = Depends(get_session)) -> list[IterationOut]:
+    """The iteration children of a loop parent, flattened with each one's
+    parsed result (metric, kept) for the UI series. Ordered by iteration."""
+    if s.get(models.Task, task_id) is None:
+        raise HTTPException(404, "unknown task")
+    children = (
+        s.query(models.Task)
+        .filter(models.Task.parent_task_id == task_id)
+        .order_by(models.Task.order_idx)
+        .all()
+    )
+    out: list[IterationOut] = []
+    for c in children:
+        # Latest execute outcome carries the parsed result in meta.
+        row = s.execute(
+            select(models.Outcome)
+            .where(models.Outcome.task_id == c.id)
+            .order_by(models.Outcome.created_at.desc())
+        ).first()
+        meta = (row[0].meta or {}) if row else {}
+        commit = row[0].commit_sha if row else None
+        # Wall-clock of the iteration's job: first turn start → last turn end.
+        span = s.execute(
+            select(func.min(models.Turn.started_at), func.max(models.Turn.ended_at))
+            .join(models.Job, models.Job.id == models.Turn.job_id)
+            .where(models.Job.task_id == c.id)
+        ).first()
+        duration_s = None
+        if span and span[0] and span[1]:
+            duration_s = max(0.0, (span[1] - span[0]).total_seconds())
+        out.append(
+            IterationOut(
+                task_id=c.id,
+                iteration=c.order_idx,
+                status=c.status,
+                metric=meta.get("metric"),
+                kept=meta.get("kept"),
+                description=meta.get("description"),
+                commit_sha=commit,
+                duration_s=duration_s,
+                created_at=c.created_at,
+            )
+        )
+    return out
 
 
 @router.get("/api/projects/{project_id}/tasks", response_model=list[TaskOut])
@@ -234,9 +343,7 @@ def get_task(task_id: str, s: Session = Depends(get_session)) -> TaskOut:
 
 
 @router.patch("/api/tasks/{task_id}", response_model=TaskOut)
-def update_task(
-    task_id: str, body: TaskUpdate, s: Session = Depends(get_session)
-) -> TaskOut:
+def update_task(task_id: str, body: TaskUpdate, s: Session = Depends(get_session)) -> TaskOut:
     t = s.get(models.Task, task_id)
     if t is None:
         raise HTTPException(404, "not found")
@@ -250,12 +357,13 @@ def update_task(
         t.order_idx = body.order_idx
     if body.mode is not None:
         t.mode = body.mode
+    # Use fields_set so an explicit null clears the override back to inherit.
+    if "idle_timeout_seconds" in body.model_fields_set:
+        t.idle_timeout_seconds = body.idle_timeout_seconds
     if body.depends_on is not None:
         _validate_deps(s, t.project_id, body.depends_on)
         _detect_cycle(s, t.id, body.depends_on)
-        s.query(models.TaskDependency).filter(
-            models.TaskDependency.task_id == t.id
-        ).delete()
+        s.query(models.TaskDependency).filter(models.TaskDependency.task_id == t.id).delete()
         s.flush()
         for d in body.depends_on:
             s.add(models.TaskDependency(task_id=t.id, depends_on_id=d))
@@ -285,60 +393,91 @@ def delete_task(task_id: str, s: Session = Depends(get_session)) -> None:
         (models.TaskDependency.task_id == task_id)
         | (models.TaskDependency.depends_on_id == task_id)
     ).delete()
+    # Drain rows that FK to this task (artifacts/outcomes registered against it)
+    # and clear child links (loop iterations point here via parent_task_id), or
+    # the delete trips a FOREIGN KEY constraint.
+    s.query(models.Artifact).filter(models.Artifact.task_id == task_id).delete()
+    s.query(models.Outcome).filter(models.Outcome.task_id == task_id).delete()
+    s.query(models.Task).filter(models.Task.parent_task_id == task_id).update(
+        {models.Task.parent_task_id: None}
+    )
     s.delete(t)
     s.commit()
 
 
 @router.post("/api/tasks/{task_id}/run", response_model=JobOut)
-async def run_task(
-    task_id: str, request: Request, s: Session = Depends(get_session)
-) -> JobOut:
-    """Kick a ready Task. Spawns the first phase's Job:
-    - plan / plan_then_execute → Plan Job (kind=plan, cwd=project.path)
-    - research / one_shot non-synthetic → Execute Job (kind=execute, cwd=project.path)
-    - synthetic (integration) → Integrate Job (kind=integrate, cwd=project.path)
-    """
+async def run_task(task_id: str, request: Request, s: Session = Depends(get_session)) -> JobOut:
+    """Kick a ready Task by spawning its first phase via the single canonical
+    path, ``task_runner.kickoff_first_phase`` — which knows every mode/kind
+    (loop→start_loop, execute_only→worktree, synthetic→integrate, plan→plan).
+    Spawning a job directly here would bypass that (e.g. run a loop as one
+    direct turn, or run an execute_only task at the project root with no
+    worktree)."""
+    from ..services import task_runner
+
     t = s.get(models.Task, task_id)
     if t is None:
         raise HTTPException(404, "not found")
     if t.status != "ready":
         raise HTTPException(409, f"task status is {t.status!r}; only 'ready' may run")
-    project = s.get(models.Project, t.project_id)
-    if project is None:
-        raise HTTPException(500, "project missing")
-    mgr = _manager(request)
-    title = f"[task] {t.title}"[:256]
-    if t.synthetic:
-        phase = "integrating"
-        kind = "integrate"
-    elif t.mode in ("plan", "plan_then_execute"):
-        phase = "planning"
-        kind = "plan"
-    else:
-        phase = "executing"
-        kind = "execute"
-    t.status = "running"
-    t.phase = phase
-    s.commit()
-    jid = mgr.create_job(
-        t.project_id,
-        t.prompt,
-        title=title,
-        task_id=t.id,
-        kind=kind,
-        cwd=project.path,
-    )
-    await mgr.start(jid)
+    jid = await task_runner.kickoff_first_phase(task_id, _manager(request))
+    if jid is None:
+        raise HTTPException(500, "failed to start task")
     s.expire_all()
     job = s.get(models.Job, jid)
     assert job is not None
     return _job_to_out(job)
 
 
-@router.post("/api/tasks/{task_id}/ack", response_model=JobOut)
-async def ack_task(
+@router.post("/api/tasks/{task_id}/confirm", response_model=list[TaskOut])
+async def confirm_plan(
     task_id: str, request: Request, s: Session = Depends(get_session)
-) -> JobOut:
+) -> list[TaskOut]:
+    """Confirm a drafted plan parked at ``awaiting_ack``: promote its draft
+    children to runnable and launch the graph. No Claude turn — the no-unmet-dep
+    drafts are kicked via ``kickoff_first_phase`` and the rest sequence through
+    the normal dependency/autorun flow."""
+    from ..services import task_runner
+
+    plan = s.get(models.Task, task_id)
+    if plan is None:
+        raise HTTPException(404, "not found")
+    if plan.mode != "plan":
+        raise HTTPException(409, "not a plan task")
+    if plan.phase != "awaiting_ack":
+        raise HTTPException(409, f"plan is not awaiting review (phase={plan.phase!r})")
+    drafts = (
+        s.query(models.Task)
+        .filter(
+            models.Task.parent_task_id == task_id,
+            models.Task.source == "planner",
+            models.Task.status == "pending",
+        )
+        .all()
+    )
+    ready_ids: list[str] = []
+    for d in drafts:
+        d.status = _initial_status(s, d.id)  # ready iff its deps are all done
+        if d.status == "ready":
+            ready_ids.append(d.id)
+    plan.status = "done"
+    plan.phase = "done"
+    s.commit()
+    mgr = _manager(request)
+    for tid in ready_ids:
+        await task_runner.kickoff_first_phase(tid, mgr)
+    s.expire_all()
+    rows = (
+        s.query(models.Task)
+        .filter(models.Task.parent_task_id == task_id)
+        .order_by(models.Task.order_idx)
+        .all()
+    )
+    return [_to_out(s, t) for t in rows]
+
+
+@router.post("/api/tasks/{task_id}/ack", response_model=JobOut)
+async def ack_task(task_id: str, request: Request, s: Session = Depends(get_session)) -> JobOut:
     """Advance a Task from ``awaiting_ack`` to ``executing``.
 
     Creates the per-task git worktree (if not already present), flips
@@ -377,9 +516,7 @@ async def ack_task(
 
 
 @router.post("/api/tasks/{task_id}/split", response_model=list[TaskOut])
-def split_task(
-    task_id: str, body: SplitIn, s: Session = Depends(get_session)
-) -> list[TaskOut]:
+def split_task(task_id: str, body: SplitIn, s: Session = Depends(get_session)) -> list[TaskOut]:
     """Replace ``task_id`` with N new tasks. Pure DAG surgery — no jobs touched.
 
     Allowed only when the task is ``pending`` or ``ready``. If
@@ -392,9 +529,7 @@ def split_task(
     if t is None:
         raise HTTPException(404, "not found")
     if t.status not in {"pending", "ready"}:
-        raise HTTPException(
-            409, f"can only split pending/ready tasks (status={t.status!r})"
-        )
+        raise HTTPException(409, f"can only split pending/ready tasks (status={t.status!r})")
     if not body.new_tasks:
         raise HTTPException(400, "new_tasks must be non-empty")
 
@@ -501,9 +636,7 @@ def merge_tasks(body: MergeIn, s: Session = Depends(get_session)) -> TaskOut:
                 continue
             seen.add(cur)
             if cur in id_set:
-                raise HTTPException(
-                    400, f"task {t.id} depends on {cur}; cannot collapse"
-                )
+                raise HTTPException(400, f"task {t.id} depends on {cur}; cannot collapse")
             stack.extend(_deps_of(s, cur))
 
     project_id = next(iter(project_ids))
@@ -515,9 +648,7 @@ def merge_tasks(body: MergeIn, s: Session = Depends(get_session)) -> TaskOut:
             if d not in id_set:
                 incoming.add(d)
         rows = s.execute(
-            select(models.TaskDependency.task_id).where(
-                models.TaskDependency.depends_on_id == t.id
-            )
+            select(models.TaskDependency.task_id).where(models.TaskDependency.depends_on_id == t.id)
         ).all()
         for (down,) in rows:
             if down not in id_set:
@@ -525,8 +656,7 @@ def merge_tasks(body: MergeIn, s: Session = Depends(get_session)) -> TaskOut:
 
     for t in tasks:
         s.query(models.TaskDependency).filter(
-            (models.TaskDependency.task_id == t.id)
-            | (models.TaskDependency.depends_on_id == t.id)
+            (models.TaskDependency.task_id == t.id) | (models.TaskDependency.depends_on_id == t.id)
         ).delete()
         s.flush()
         s.delete(t)
@@ -564,9 +694,7 @@ def merge_tasks(body: MergeIn, s: Session = Depends(get_session)) -> TaskOut:
 
 
 @router.post("/api/tasks/{task_id}/retry", response_model=JobOut)
-async def retry_task(
-    task_id: str, request: Request, s: Session = Depends(get_session)
-) -> JobOut:
+async def retry_task(task_id: str, request: Request, s: Session = Depends(get_session)) -> JobOut:
     """Retry a failed Task. Replays from the failed phase, not from scratch.
 
     Behavior depends on the failing phase:
@@ -586,17 +714,18 @@ async def retry_task(
     if t.status != "failed":
         raise HTTPException(409, f"task status is {t.status!r}; only 'failed' may retry")
     mgr = _manager(request)
-    title = f"[task] {t.title}"[:256]
-    failed_phase = t.phase
     project = s.get(models.Project, t.project_id)
     if project is None:
         raise HTTPException(500, "project missing")
     t.retries = (t.retries or 0) + 1
 
-    if failed_phase == "executing" and t.worktree_path:
-        # Keep the worktree and re-run the execute Job only.
-        from ..services import task_runner
+    from ..services import task_runner
 
+    # Resume in place when the task already has a worktree carrying partial work
+    # (a failed execute task keeps its worktree). NOTE: we key on the worktree,
+    # not failed_phase — finalize sets phase='failed', so the old
+    # ``failed_phase == 'executing'`` guard never matched.
+    if t.worktree_path:
         t.phase = "awaiting_ack"
         t.status = "running"
         t.integration_status = None
@@ -619,34 +748,21 @@ async def retry_task(
         assert job is not None
         return _job_to_out(job)
 
-    # Default: clear worktree and replay from the first phase.
-    if t.worktree_path or t.worktree_branch:
+    # Default: replay from the first phase via the canonical kickoff path (which
+    # creates worktrees / starts loops correctly — a raw create_job here would
+    # run loops as one turn and execute_only tasks at the project root).
+    if t.worktree_branch:
         from ..services import worktrees
 
         worktrees.remove(project, t)
-        t.worktree_path = None
         t.worktree_branch = None
     t.integration_status = None
-    if t.synthetic:
-        t.phase = "integrating"
-        kind = "integrate"
-    elif t.mode in ("plan", "plan_then_execute"):
-        t.phase = "planning"
-        kind = "plan"
-    else:
-        t.phase = "executing"
-        kind = "execute"
-    t.status = "running"
+    t.phase = None
+    t.status = "ready"
     s.commit()
-    jid = mgr.create_job(
-        t.project_id,
-        t.prompt,
-        title=title,
-        task_id=t.id,
-        kind=kind,
-        cwd=project.path,
-    )
-    await mgr.start(jid)
+    jid = await task_runner.kickoff_first_phase(task_id, mgr)
+    if jid is None:
+        raise HTTPException(500, "retry failed to start task")
     s.expire_all()
     job = s.get(models.Job, jid)
     assert job is not None
@@ -690,13 +806,29 @@ async def restart_task(
 
 
 @router.post("/api/tasks/{task_id}/cancel", response_model=TaskOut)
-async def cancel_task(
-    task_id: str, request: Request, s: Session = Depends(get_session)
-) -> TaskOut:
+async def cancel_task(task_id: str, request: Request, s: Session = Depends(get_session)) -> TaskOut:
     t = s.get(models.Task, task_id)
     if t is None:
         raise HTTPException(404, "not found")
     if t.status == "running":
+        mgr = _manager(request)
+        # Loop parent runs no job of its own — its work lives in the currently
+        # running iteration child. Mark the parent canceled FIRST so the child's
+        # finalize (advance_loop) sees a non-running parent and stops, then stop
+        # the child's job.
+        if t.mode == "loop":
+            t.status = "canceled"
+            s.commit()
+            child_job = s.execute(
+                select(models.Job.id)
+                .join(models.Task, models.Task.id == models.Job.task_id)
+                .where(models.Task.parent_task_id == task_id)
+                .order_by(models.Job.created_at.desc())
+            ).first()
+            if child_job is not None:
+                await mgr.stop(child_job[0])
+            s.refresh(t)
+            return _to_out(s, t)
         # Stop the most recent task-bound job.
         job_row = s.execute(
             select(models.Job.id)
@@ -704,7 +836,6 @@ async def cancel_task(
             .order_by(models.Job.created_at.desc())
         ).first()
         if job_row is not None:
-            mgr = _manager(request)
             await mgr.stop(job_row[0])
     # GC the worktree if one was created for this task.
     if t.worktree_path or t.worktree_branch:

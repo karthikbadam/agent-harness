@@ -26,7 +26,7 @@ def test_extract_json_array_in_fence() -> None:
 
 
 def test_extract_json_array_bracket_fallback() -> None:
-    text = "preamble [\n  {\"title\":\"c\",\"prompt\":\"x\"}\n] postamble"
+    text = 'preamble [\n  {"title":"c","prompt":"x"}\n] postamble'
     parsed = planner._extract_json_array(text)
     assert parsed is not None and parsed[0]["title"] == "c"
 
@@ -50,9 +50,7 @@ async def app_client(initdb: Path, monkeypatch: pytest.MonkeyPatch):
 async def test_plan_endpoint_inserts_drafts_and_auto_kicks_root(app_client) -> None:
     client, app = app_client
     auth = {"Authorization": "Bearer test-token"}
-    r = await client.post(
-        "/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth
-    )
+    r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
     pid = r.json()["id"]
     r = await client.post(
         f"/api/projects/{pid}/plan",

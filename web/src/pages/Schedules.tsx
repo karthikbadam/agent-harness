@@ -46,7 +46,12 @@ export function SchedulesPage() {
     <Shell
       title="Schedules"
       right={
-        <Button size="xs" colorPalette="blue" onClick={() => setOpen(true)} gap={1.5}>
+        <Button
+          size="xs"
+          colorPalette="blue"
+          onClick={() => setOpen(true)}
+          gap={1.5}
+        >
           <LuPlus />
           New
         </Button>
@@ -153,7 +158,10 @@ function ScheduleRow({ schedule }: { schedule: ScheduleOut }) {
                 rounded="full"
                 bg={schedule.enabled ? "green.solid" : "border"}
               />
-              <Text fontWeight="medium" color={schedule.enabled ? "fg" : "fg.muted"}>
+              <Text
+                fontWeight="medium"
+                color={schedule.enabled ? "fg" : "fg.muted"}
+              >
                 {schedule.enabled ? "Enabled" : "Disabled"}
               </Text>
               <Text>·</Text>
@@ -194,7 +202,13 @@ function ScheduleRow({ schedule }: { schedule: ScheduleOut }) {
   );
 }
 
-function NewScheduleDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+function NewScheduleDrawer({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const projects = useProjects();
   const create = useCreateSchedule();
   const [name, setName] = useState("");

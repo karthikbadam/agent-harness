@@ -76,13 +76,13 @@ class Job(Base):
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(256), default="")
-    status: Mapped[str] = mapped_column(String(16), default="queued")  # queued|running|done|failed|stopped
+    status: Mapped[str] = mapped_column(
+        String(16), default="queued"
+    )  # queued|running|done|failed|stopped
     session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     schedule_id: Mapped[Optional[str]] = mapped_column(ForeignKey("schedules.id"), nullable=True)
     task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
-    kind: Mapped[str] = mapped_column(
-        String(12), default="ad_hoc"
-    )  # ad_hoc|plan|execute|integrate
+    kind: Mapped[str] = mapped_column(String(12), default="ad_hoc")  # ad_hoc|plan|execute|integrate
     cwd: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
@@ -169,17 +169,32 @@ class Task(Base):
     phase: Mapped[Optional[str]] = mapped_column(
         String(16), nullable=True
     )  # planning|awaiting_ack|executing|integrating|done; null until first run
-    source: Mapped[str] = mapped_column(String(16), default="manual")  # manual|planner
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # manual|planner|loop
     order_idx: Mapped[int] = mapped_column(Integer, default=0)
     mode: Mapped[str] = mapped_column(
         String(24), default="plan_then_execute"
-    )  # plan_then_execute|execute_only|one_shot|research|plan
+    )  # plan_then_execute|execute_only|one_shot|research|plan|loop
+    # Loop grouping: an iteration task (source='loop') points at its loop
+    # parent (mode='loop'). Null for everything else. Lets the UI group a
+    # loop's iteration children and lets advance_loop find the parent.
+    parent_task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    # Loop definition + live state — set only on the mode='loop' parent.
+    # loop_spec: {metric_name, direction, iter_prompt_template, max_iterations,
+    #   target_metric?, max_cost_usd?, max_wall_clock_s?, max_consecutive_failures}
+    # loop_state: {iteration, best_metric, best_commit, consecutive_failures,
+    #   started_at, spent_usd}
+    loop_spec: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    loop_state: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Per-task model override (passed as ``--model`` at spawn). Used by the
+    # loop's stuck-detection to run a "rethink" iteration on a stronger model.
+    model_override: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     worktree_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     worktree_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     integration_status: Mapped[Optional[str]] = mapped_column(
         String(16), nullable=True
     )  # pending|integrated|conflict; null for one_shot and synthetic tasks
     synthetic: Mapped[bool] = mapped_column(default=False)
+    idle_timeout_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     retries: Mapped[int] = mapped_column(Integer, default=0)
     last_failed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
@@ -214,6 +229,28 @@ class DriverNote(Base):
     acknowledged_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
 
+class Artifact(Base):
+    """A file an agent produced and registered against a task — a graph, a
+    results table, a report, a checkpoint pointer, a log. The harness copies
+    the file into ``AH_HOME/artifacts/<task_id>/<name>`` so it survives
+    worktree cleanup, and surfaces it on the task page (PNG inline, others as
+    downloads). This is how the autoresearch loop's ``progress.png`` and
+    ``citations.md`` reach the phone."""
+
+    __tablename__ = "artifacts"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    job_id: Mapped[Optional[str]] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(
+        String(16), default="file"
+    )  # graph|table|report|checkpoint|log|file
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)  # stored path under AH_HOME
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class Outcome(Base):
     __tablename__ = "outcomes"
 
@@ -224,5 +261,9 @@ class Outcome(Base):
     branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="success")  # success|failed
-    kind: Mapped[str] = mapped_column(String(16), default="execute")  # plan|execute|integrate
+    kind: Mapped[str] = mapped_column(String(16), default="execute")  # plan|execute|integrate|loop
+    # Free-form per-outcome metadata. For loop iterations this carries the
+    # parsed result: {iteration, metric, kept, description, citation}. Lets the
+    # UI render the iteration series straight off the git-checkpoint rows.
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

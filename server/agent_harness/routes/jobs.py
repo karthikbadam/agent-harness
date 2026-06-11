@@ -86,9 +86,7 @@ async def create_job(
 
 
 def _resolve_default_project_id(s: Session) -> str:
-    row = s.execute(
-        select(models.Project.id).where(models.Project.is_default.is_(True))
-    ).first()
+    row = s.execute(select(models.Project.id).where(models.Project.is_default.is_(True))).first()
     if row is not None:
         return row[0]
     # Lazy bootstrap if startup hook didn't run (e.g. fresh DB created by a
@@ -115,11 +113,14 @@ async def followup_job(
     j = s.get(models.Job, job_id)
     if j is None:
         raise HTTPException(404, "not found")
-    # Back-compat: a followup on a Plan Job whose Task is parked at
-    # awaiting_ack means "ack the plan". Forward to the Task-level ack path.
+    # Back-compat: a followup on a plan_then_execute Task parked at awaiting_ack
+    # means "ack the plan" → advance to executing. A top-level planner task
+    # (mode='plan') parked at awaiting_ack is a GATED DRAFT — a followup there
+    # is a steering re-plan, so let it fall through to the normal followup turn
+    # (which re-runs the planner and replaces the drafts).
     if j.kind == "plan" and j.task_id is not None:
         task = s.get(models.Task, j.task_id)
-        if task is not None and task.phase == "awaiting_ack":
+        if task is not None and task.mode == "plan_then_execute" and task.phase == "awaiting_ack":
             from ..services import task_runner
 
             try:
@@ -155,9 +156,7 @@ async def followup_job(
 
 
 @router.post("/{job_id}/stop", response_model=JobOut)
-async def stop_job(
-    job_id: str, request: Request, s: Session = Depends(get_session)
-) -> JobOut:
+async def stop_job(job_id: str, request: Request, s: Session = Depends(get_session)) -> JobOut:
     mgr = _manager(request)
     j = s.get(models.Job, job_id)
     if j is None:

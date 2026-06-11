@@ -1,7 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { Badge, Box, Button, Code, Flex, HStack, Stack, Text } from "@chakra-ui/react";
+import {
+  Badge,
+  Box,
+  Button,
+  Code,
+  Flex,
+  HStack,
+  Stack,
+  Text,
+} from "@chakra-ui/react";
 
-import type { JobOut, StreamEvent, ToolResultEvent, TurnDoneEvent, TurnOut } from "../types";
+import type {
+  JobOut,
+  StreamEvent,
+  ToolResultEvent,
+  TurnDoneEvent,
+  TurnOut,
+} from "../types";
 import { MarkdownText } from "./MarkdownText";
 import { StatusPill } from "./StatusPill";
 import { ToolUseEventCard } from "./ToolUseEvent";
@@ -32,11 +47,17 @@ export function TurnTranscript({ events, job }: Props) {
         <Stack key={t.idx} gap={3}>
           <UserPromptCard turn={t} />
           {(eventsByTurn.get(t.idx) ?? []).map((ev) => (
-            <EventCard key={ev.seq ?? `${ev.turn}-${ev.ts}-${ev.type}`} event={ev} />
+            <EventCard
+              key={ev.seq ?? `${ev.turn}-${ev.ts}-${ev.type}`}
+              event={ev}
+            />
           ))}
-          {(eventsByTurn.get(t.idx) ?? []).length === 0 && t.status === "queued" && (
-            <Text fontSize="xs" color="fg.muted">…queued, waiting for runner</Text>
-          )}
+          {(eventsByTurn.get(t.idx) ?? []).length === 0 &&
+            t.status === "queued" && (
+              <Text fontSize="xs" color="fg.muted">
+                …queued, waiting for runner
+              </Text>
+            )}
         </Stack>
       ))}
       <div ref={bottomRef} />
@@ -131,14 +152,19 @@ function ToolResultCard({ event }: { event: ToolResultEvent }) {
 function TurnDoneCard({ event }: { event: TurnDoneEvent }) {
   return (
     <HStack gap={2} pt={2} fontSize="xs" color="fg.muted" wrap="wrap">
-      <Badge variant="subtle" colorPalette={event.exit_code === 0 ? "green" : "red"}>
+      <Badge
+        variant="subtle"
+        colorPalette={event.exit_code === 0 ? "green" : "red"}
+      >
         exit {event.exit_code}
       </Badge>
       {event.cost_usd != null && (
         <Badge variant="outline">${event.cost_usd.toFixed(4)}</Badge>
       )}
       {event.duration_ms != null && (
-        <Badge variant="outline">{(event.duration_ms / 1000).toFixed(1)}s</Badge>
+        <Badge variant="outline">
+          {(event.duration_ms / 1000).toFixed(1)}s
+        </Badge>
       )}
     </HStack>
   );

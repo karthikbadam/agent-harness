@@ -61,8 +61,13 @@ def test_argv_with_resume_and_allowed_tools() -> None:
 
 def test_argv_dangerously_skip_overrides_permission_flags() -> None:
     r = ClaudeRunner(
-        job_id="j", turn=0, prompt="hi", cwd="/tmp", claude_path=str(SHIM),
-        dangerously_skip=True, allowed_tools=["Bash(*)"],
+        job_id="j",
+        turn=0,
+        prompt="hi",
+        cwd="/tmp",
+        claude_path=str(SHIM),
+        dangerously_skip=True,
+        allowed_tools=["Bash(*)"],
     )
     argv = r.build_argv()
     assert "--dangerously-skip-permissions" in argv

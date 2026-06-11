@@ -82,12 +82,8 @@ async def test_react_dispatches_ack_for_awaiting_ack_task(
     repo_path = ah_home() / "repo-driver-test"
     repo_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo_path)], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo_path), "config", "user.email", "x@y.z"], check=True
-    )
-    subprocess.run(
-        ["git", "-C", str(repo_path), "config", "user.name", "t"], check=True
-    )
+    subprocess.run(["git", "-C", str(repo_path), "config", "user.email", "x@y.z"], check=True)
+    subprocess.run(["git", "-C", str(repo_path), "config", "user.name", "t"], check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "commit.gpgsign", "false"],
         check=True,
@@ -103,8 +99,13 @@ async def test_react_dispatches_ack_for_awaiting_ack_task(
         s.add(models.Project(id="pb", name="r", path=str(repo_path)))
         s.flush()
         t = models.Task(
-            id="tb1", project_id="pb", title="t", prompt="do",
-            status="running", phase="awaiting_ack", mode="plan_then_execute",
+            id="tb1",
+            project_id="pb",
+            title="t",
+            prompt="do",
+            status="running",
+            phase="awaiting_ack",
+            mode="plan_then_execute",
         )
         s.add(t)
 
@@ -125,11 +126,7 @@ async def test_dispatch_409_is_silent(live_client: httpx.AsyncClient) -> None:
         s.add(models.Project(id="pc", name="r", path="/tmp"))
         s.flush()
         # task in 'running' status → /run returns 409
-        s.add(
-            models.Task(
-                id="tc1", project_id="pc", title="t", prompt="x", status="running"
-            )
-        )
+        s.add(models.Task(id="tc1", project_id="pc", title="t", prompt="x", status="running"))
 
     await runtime._dispatch(
         live_client,
@@ -152,9 +149,7 @@ async def test_consume_409_on_second_subscriber(live_client: httpx.AsyncClient) 
     bus = driver_bus.get_bus()
     bus.subscribe()
     try:
-        runtime = driver_runtime.DriverRuntime(
-            base_url="http://test", token="test-token"
-        )
+        runtime = driver_runtime.DriverRuntime(base_url="http://test", token="test-token")
         with pytest.raises(httpx.HTTPStatusError) as exc:
             await runtime._consume(live_client)
         assert exc.value.response.status_code == 409

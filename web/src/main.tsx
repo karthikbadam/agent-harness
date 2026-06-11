@@ -15,7 +15,11 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <ThemeProvider attribute="class" defaultTheme="system" disableTransitionOnChange>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      disableTransitionOnChange
+    >
       <ChakraProvider value={defaultSystem}>
         <QueryClientProvider client={queryClient}>
           <BrowserRouter>
@@ -24,5 +28,5 @@ createRoot(document.getElementById("root") as HTMLElement).render(
         </QueryClientProvider>
       </ChakraProvider>
     </ThemeProvider>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

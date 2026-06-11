@@ -16,6 +16,6 @@ export const useUI = create<UIState>()(
       token: null,
       setToken: (t) => set({ token: t }),
     }),
-    { name: "ah-ui" }
-  )
+    { name: "ah-ui" },
+  ),
 );

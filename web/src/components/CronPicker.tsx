@@ -46,7 +46,10 @@ export function CronPicker({ value, onChange }: CronPickerProps) {
       </Field.Root>
       <Box fontSize="xs" color="fg.muted">
         <Text>Server timezone is UTC.</Text>
-        <Text>Examples: "*/5 * * * *" every 5m, "0 9-17 * * 1-5" hourly weekdays 9–5.</Text>
+        <Text>
+          Examples: "*/5 * * * *" every 5m, "0 9-17 * * 1-5" hourly weekdays
+          9–5.
+        </Text>
       </Box>
     </Stack>
   );

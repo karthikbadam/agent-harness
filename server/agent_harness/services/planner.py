@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import subprocess
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from pathlib import Path
@@ -47,11 +49,86 @@ investigate or change (not the answers). Then emit a strict JSON array
       "title": "<imperative title, <= 80 chars>",
       "prompt": "<the exact prompt the agent will run when this task executes — name specific files and the concrete change>",
       "depends_on_titles": ["<earlier task title>", ...],
-      "kind": "task" | "integrate",                                    // optional, default "task"
+      "kind": "task" | "integrate" | "loop",                           // optional, default "task"
       "mode": "plan_then_execute" | "execute_only" | "research"        // optional, default "plan_then_execute"
     },
     ...
   ]
+
+## Loop tasks — for open-ended, iterative asks
+
+Some asks are not "do X once" but "keep improving/accumulating toward a goal
+over many small steps." Those are **loops**, and you emit ONE entry with
+`kind: "loop"`. The harness then runs it autonomously: each iteration is its own
+fresh agent turn that does ONE unit of work, reports a metric, and the harness
+spawns the next — keeping/advancing via git, detecting plateaus, and stopping at
+a target or cap. You do NOT decompose a loop into many tasks; you emit a single
+loop entry and let the harness iterate.
+
+Recognize a loop when the ask is iterative/unbounded with a sense of "better"
+over time, e.g.:
+- optimize a metric ("train a model to maximize accuracy", autoresearch);
+- accumulate a corpus ("build a knowledge base / literature survey on X");
+- incrementally build something to match a spec ("procedurally build a Milky
+  Way galaxy in WebGL, researching and reproducing its real characteristics");
+- "keep doing X until Y", "iterate on", "explore approaches to".
+
+A loop entry has these fields (in addition to `title`):
+
+  {
+    "kind": "loop",
+    "title": "<short title>",
+    "prompt": "<the PER-ITERATION program: what ONE iteration should do, the metric definition, and the quality bar. The harness automatically prepends the iteration header + a LOOP_RESULT contract + artifact-registration coordinates, so you do NOT need to include those — just describe one iteration's job clearly and how it commits/keeps work. Tell the first iteration to scaffold anything it needs.>",
+    "metric_name": "<the thing being maximized, e.g. val_acc | papers | characteristics>",
+    "direction": "maximize" | "minimize",          // default maximize
+    "max_iterations": <int>,                         // a sane cap, e.g. 25
+    "target_metric": <number or null>,               // stop when reached (optional)
+    "stuck_after": <int or null>                     // after this many non-improving iters, the harness runs a "rethink" iteration (optional, e.g. 3)
+  }
+
+The per-iteration `prompt` is the loop's "program": make it self-contained for a
+single iteration (pick one sub-goal, do it, commit, define the metric). The
+harness owns the looping, keep/discard, plateau-detection, and stopping.
+
+### Composing a graph: giving a loop a foundation
+
+The task list is a **graph** — any node may `depends_on_titles` others — and a
+loop is just a node in it. So a "set up a foundation, then iteratively optimize"
+ask is naturally **setup node(s) → loop**. Two facts constrain how the
+foundation reaches the loop:
+
+- A loop runs at the **project root**, and its iterations do NOT use worktrees.
+- So whatever the loop builds on must already be on the loop's branch (the
+  project root / `main`) before it starts.
+
+You have three ways to compose this — pick the simplest that fits:
+
+1. **Self-contained loop** (no setup nodes): the loop's FIRST iteration scaffolds
+   what it needs. Best when setup is light or tightly coupled to the iteration.
+2. **Serial setup → loop**: emit one or a few `one_shot` setup tasks at the
+   project root, chained via `depends_on_titles` (each on the previous), that
+   commit the foundation directly to the root; the loop `depends_on_titles` the
+   last. No worktrees, no merge.
+3. **Parallel wave → integrate → loop**: build genuinely independent foundation
+   pieces in parallel (`mode: "execute_only"`, worktrees), join them with a
+   `kind: "integrate"` node whose **`target_branch` is `"main"`**, and have the
+   loop depend on that integrate. The integrate merges the foundation onto the
+   root so the loop sees it. (For loops the integrate target MUST be the root
+   branch the loop runs on — unlike a pure wave feeding worktree dependents.)
+
+When a loop has setup nodes, its per-iteration `prompt` must ASSUME the
+foundation already exists (do NOT re-scaffold each iteration).
+
+**INVARIANT — never emit a detached loop alongside foundation nodes.** If the
+graph contains ANY other task the loop builds on (scaffold / setup / wave /
+integrate nodes), the loop MUST list its foundation in `depends_on_titles` —
+normally the final `integrate`/merge node (pattern 3) or the last serial setup
+task (pattern 2). A loop with `depends_on_titles: []` starts IMMEDIATELY and
+runs at the project root **concurrently with your build tasks**, re-scaffolding
+over them and corrupting the foundation. The ONLY graph where a loop has no
+deps is pattern 1 (self-contained) — where there are NO other foundation nodes
+and iteration 1 does the scaffolding itself. So: if you emitted any scaffold /
+wave / integrate node, you are NOT in pattern 1 — the loop MUST depend on it.
 
 ## Modes
 
@@ -104,6 +181,26 @@ branch name like `feat/<slug>-foundation`). The harness builds the merge
 prompt automatically — leave `prompt` off integrate entries; it's ignored.
 Downstream tasks that depend on this integrate task will start their
 worktrees from `target_branch`, so they see all the merged work.
+
+**INVARIANT — merging worktree branches REQUIRES `kind: "integrate"`.** A
+`one_shot` / `execute_only` / `plan_then_execute` task CANNOT merge another
+task's work: each runs in its own worktree (or the bare root) and does not know
+the sibling `task/<id>` branch names, so a regular task titled "Integrate …" or
+"Merge … to main" silently merges NOTHING. Any node whose job is to combine the
+outputs of parallel worktree tasks MUST be `kind: "integrate"` with a
+`target_branch`. If you catch yourself writing a non-integrate task that
+`depends_on` several worktree tasks in order to "merge"/"assemble"/"combine"
+them, convert it to `kind: "integrate"`.
+
+**INVARIANT — the finished deliverable MUST land on `main`.** Worktree tasks
+(`execute_only` / `plan_then_execute`) commit only to their own `task/<id>`
+branch, and an `integrate` with a fresh `target_branch` (e.g.
+`feat/<slug>-foundation`) leaves the result on THAT branch. If the graph ends
+there, `main` is never updated and the user sees an empty default branch. So
+whenever any worktree task ran, the graph MUST end with a terminal
+`kind: "integrate"` node whose **`target_branch` is `"main"`** that merges the
+final work onto the default branch. (A loop already forces this, since it runs
+on `main`; a pure wave with no loop needs an explicit final integrate-to-`main`.)
 
 Use waves only when the foundation is actually shared. If the ask is small
 or the tasks are truly independent (disjoint files), one or a few siblings
@@ -202,6 +299,42 @@ def _all_assistant_text(log_dir: Path) -> str:
     return "\n".join(pieces)
 
 
+def _latest_assistant_text(log_dir: Path) -> str:
+    """assistant_text from only the HIGHEST-numbered turn file. A steering
+    re-plan is a followup turn, so its revised task array lives in the latest
+    turn; reading all turns would concatenate it with the prior plan and parse
+    the wrong array."""
+    if not log_dir.is_dir():
+        return ""
+    turns = list(log_dir.glob("turn-*.jsonl"))
+    if not turns:
+        return ""
+
+    def _idx(p: Path) -> int:
+        try:
+            return int(p.stem.split("-")[1])
+        except (IndexError, ValueError):
+            return -1
+
+    last = max(turns, key=_idx)
+    pieces: list[str] = []
+    try:
+        with last.open("rb") as fh:
+            for raw in fh:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line or '"assistant_text"' not in line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                if ev.get("type") == "assistant_text" and isinstance(ev.get("text"), str):
+                    pieces.append(ev["text"])
+    except Exception:  # noqa: BLE001
+        return ""
+    return "\n".join(pieces)
+
+
 def parse_and_insert_from_log_dir(
     project_id: str, plan_task_id: str, log_dir: Path, ask: str
 ) -> list[str]:
@@ -217,17 +350,51 @@ def parse_and_insert_from_log_dir(
     raw = _all_assistant_text(log_dir)
     parsed = _extract_json_array(raw)
     if parsed and isinstance(parsed, list):
-        ids = _insert_drafts(project_id, parsed)
+        ids = _insert_drafts(project_id, parsed, plan_task_id=plan_task_id)
         if ids:
             return ids
     log.info(
         "planner emitted no usable tasks for %s; inserting fallback research task",
         plan_task_id,
     )
-    return _insert_fallback_research(project_id, ask)
+    return _insert_fallback_research(project_id, ask, plan_task_id=plan_task_id)
 
 
-def _insert_fallback_research(project_id: str, ask: str) -> list[str]:
+def replace_drafts_from_log_dir(project_id: str, plan_task_id: str, log_dir: Path) -> list[str]:
+    """Steering re-plan: the planner re-ran (a followup on the plan job) and
+    emitted a NEW task list. Delete this plan's still-``pending`` draft children
+    (never anything that already started) and insert the fresh array. Returns
+    the new draft ids, or [] (keeping the old drafts) if nothing parseable came
+    back.
+    """
+    parsed = _extract_json_array(_latest_assistant_text(log_dir))
+    if not (parsed and isinstance(parsed, list)):
+        return []
+    with session_scope() as s:
+        draft_ids = [
+            r[0]
+            for r in s.execute(
+                select(models.Task.id).where(
+                    models.Task.parent_task_id == plan_task_id,
+                    models.Task.source == "planner",
+                    models.Task.status == "pending",
+                )
+            ).all()
+        ]
+        if draft_ids:
+            s.execute(
+                models.TaskDependency.__table__.delete().where(
+                    (models.TaskDependency.task_id.in_(draft_ids))
+                    | (models.TaskDependency.depends_on_id.in_(draft_ids))
+                )
+            )
+            s.execute(models.Task.__table__.delete().where(models.Task.id.in_(draft_ids)))
+    return _insert_drafts(project_id, parsed, plan_task_id=plan_task_id)
+
+
+def _insert_fallback_research(
+    project_id: str, ask: str, plan_task_id: str | None = None
+) -> list[str]:
     """Insert a single ``research`` task carrying the original ask.
 
     Used when the planner failed to produce a task array. Lands ``ready`` so
@@ -243,18 +410,23 @@ def _insert_fallback_research(project_id: str, ask: str) -> list[str]:
             source="planner",
             order_idx=0,
             mode="research",
+            parent_task_id=plan_task_id,
         )
         s.add(t)
         s.flush()
         return [t.id]
 
 
-def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
+def _insert_drafts(
+    project_id: str, parsed: list[dict], plan_task_id: str | None = None
+) -> list[str]:
     """Insert planner-drafted tasks, resolving depends_on_titles to ids.
 
     Drafts land as ``source='planner'``. Tasks with no deps are inserted as
     ``ready`` so they auto-run; tasks with deps stay ``pending`` until their
-    predecessors finish. Skips entries missing a title or prompt.
+    predecessors finish. Skips entries missing a title or prompt. When
+    ``plan_task_id`` is given, every draft is linked to it via
+    ``parent_task_id`` so the plan owns its drafts (grouping + steering-replace).
 
     Entries with ``kind: "integrate"`` are created as synthetic, one-shot
     integrate tasks. Their prompt is auto-built from the dep ``task/<id>``
@@ -292,6 +464,7 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
                     order_idx=idx,
                     mode="one_shot",
                     synthetic=True,
+                    parent_task_id=plan_task_id,
                 )
                 s.add(t)
                 s.flush()
@@ -299,6 +472,29 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
                 title_to_kind[title] = "integrate"
                 # Stash target on a side dict for pass 2.
                 t.prompt = _integrate_prompt_placeholder(target_branch)
+                created_ids.append(t.id)
+                continue
+            if kind == "loop":
+                prompt = item.get("prompt")
+                if not isinstance(prompt, str) or not prompt.strip():
+                    log.warning("planner loop entry %r missing prompt; skipping", title)
+                    continue
+                t = models.Task(
+                    project_id=project_id,
+                    title=title[:256],
+                    prompt=prompt,
+                    status="pending",
+                    source="planner",
+                    order_idx=idx,
+                    mode="loop",
+                    loop_spec=_loop_spec_from_item(item),
+                    idle_timeout_seconds=0,  # iterations may run long
+                    parent_task_id=plan_task_id,
+                )
+                s.add(t)
+                s.flush()
+                title_to_id[title] = t.id
+                title_to_kind[title] = "loop"
                 created_ids.append(t.id)
                 continue
             prompt = item.get("prompt")
@@ -315,6 +511,7 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
                 source="planner",
                 order_idx=idx,
                 mode=mode,
+                parent_task_id=plan_task_id,
             )
             s.add(t)
             s.flush()
@@ -343,6 +540,44 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
                 s.add(models.TaskDependency(task_id=tid, depends_on_id=dep_id))
         s.flush()
 
+        # Safety guard against a DETACHED LOOP. A loop runs at the project root
+        # the instant it has no unmet deps; if the planner emits it with an
+        # empty `depends_on_titles` while the graph ALSO has build tasks, the
+        # loop starts concurrently with (and re-scaffolds over) that foundation.
+        # The planner does this intermittently despite explicit instructions and
+        # the damage is severe, so wire it deterministically: a depless loop is
+        # made to depend on the foundation "sinks" — the non-loop tasks that
+        # nothing else builds on (typically the final integrate/merge node).
+        loop_ids = [title_to_id[t] for t, k in title_to_kind.items() if k == "loop"]
+        non_loop_ids = [title_to_id[t] for t, k in title_to_kind.items() if k != "loop"]
+        if loop_ids and non_loop_ids:
+            dep_rows = s.execute(
+                select(models.TaskDependency.depends_on_id).where(
+                    models.TaskDependency.task_id.in_(non_loop_ids)
+                )
+            ).all()
+            depended_on = {r[0] for r in dep_rows}
+            sinks = [i for i in non_loop_ids if i not in depended_on]
+            for loop_id in loop_ids:
+                already = s.execute(
+                    select(models.TaskDependency.depends_on_id).where(
+                        models.TaskDependency.task_id == loop_id
+                    )
+                ).first()
+                if already is not None:
+                    continue  # planner wired it correctly — respect that
+                wired = [sink for sink in sinks if sink != loop_id]
+                for sink in wired:
+                    s.add(models.TaskDependency(task_id=loop_id, depends_on_id=sink))
+                if wired:
+                    log.warning(
+                        "planner emitted a detached loop %s; auto-wired it to "
+                        "foundation sink(s) %s so it waits for the build",
+                        loop_id,
+                        wired,
+                    )
+            s.flush()
+
         # Build the integrate prompts now that we know dep ids → branch names.
         for idx, item in enumerate(parsed):
             if not isinstance(item, dict):
@@ -362,8 +597,7 @@ def _insert_drafts(project_id: str, parsed: list[dict]) -> list[str]:
             dep_ids = [r[0] for r in dep_rows]
             if not dep_ids:
                 log.warning(
-                    "planner integrate task %s has no resolvable deps; "
-                    "leaving prompt placeholder",
+                    "planner integrate task %s has no resolvable deps; leaving prompt placeholder",
                     title,
                 )
                 continue
@@ -403,3 +637,427 @@ def _integrate_prompt_placeholder(target_branch: str) -> str:
         f"(planner integrate — will merge dep task branches into "
         f"'{target_branch}' once deps resolve)"
     )
+
+
+def _loop_spec_from_item(item: dict) -> dict:
+    """Build a loop_spec from a planner ``kind: "loop"`` entry, filling in safe
+    defaults for anything the planner omitted."""
+    metric = item.get("metric_name")
+    metric = metric.strip() if isinstance(metric, str) and metric.strip() else "metric"
+    direction = item.get("direction")
+    if direction not in ("maximize", "minimize"):
+        direction = "maximize"
+    max_iter = item.get("max_iterations")
+    if not isinstance(max_iter, int) or max_iter <= 0:
+        max_iter = 25
+    stuck = item.get("stuck_after")
+    if not isinstance(stuck, int) or stuck <= 0:
+        stuck = 4
+    target = item.get("target_metric")
+    if not isinstance(target, (int, float)):
+        target = None
+    return {
+        "metric_name": metric,
+        "direction": direction,
+        "max_iterations": max_iter,
+        "target_metric": target,
+        "max_cost_usd": None,
+        "max_wall_clock_s": None,
+        "max_consecutive_failures": 3,
+        "stuck_after": stuck,
+        "escalate_model": None,
+    }
+
+
+# ============================ Loop (iterate) strategy ======================= #
+#
+# The planner's second task-generation strategy. Where the decompose path turns
+# one job into a parallel DAG, the iterate path turns each finished iteration
+# into (at most) one successor, carrying state and honoring stop conditions —
+# an autoresearch loop. ``start_loop`` seeds iteration #1; ``advance_loop`` is
+# called by ``task_runner.on_job_finalized`` when a ``source='loop'`` iteration
+# finishes, and decides whether to spawn the next one or end the loop.
+
+
+def _default_loop_state() -> dict:
+    return {
+        "iteration": 0,  # count of COMPLETED iterations
+        "best_metric": None,
+        "best_commit": None,
+        "consecutive_failures": 0,
+        # Consecutive successful-but-not-improving iterations. Drives
+        # stuck-detection: when it reaches spec.stuck_after the next iteration
+        # is a "rethink" (meta) iteration.
+        "non_improving_streak": 0,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "spent_usd": 0.0,
+    }
+
+
+def _extract_json_object(text: str) -> dict | None:
+    """Find the iteration's ``LOOP_RESULT: { ... }`` line and parse the object.
+
+    Tolerant of the object appearing without the prefix, in a fence, or with
+    surrounding prose. Returns None if nothing parseable is found.
+    """
+    if not text:
+        return None
+    # Prefer an explicit LOOP_RESULT: marker, last occurrence wins (the agent
+    # may print intermediate ones).
+    marks = list(re.finditer(r"LOOP_RESULT:\s*(\{.*?\})", text, re.DOTALL))
+    for m in reversed(marks):
+        try:
+            obj = json.loads(m.group(1))
+            if isinstance(obj, dict):
+                return obj
+        except Exception:  # noqa: BLE001
+            continue
+    # Fenced object fallback.
+    fence = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text)
+    if fence:
+        try:
+            obj = json.loads(fence.group(1))
+            if isinstance(obj, dict):
+                return obj
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
+def _git_head(cwd: str) -> str | None:
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "-C", cwd, "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .strip()
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _results_tsv_last_metric(cwd: str, metric_name: str) -> float | None:
+    """Backstop metric source: read the last data row of ``results.tsv`` in the
+    loop's working dir and pull the ``metric_name`` column. Returns None if the
+    file/column/row is missing or unparseable."""
+    p = Path(cwd) / "results.tsv"
+    if not p.is_file():
+        return None
+    try:
+        lines = [ln for ln in p.read_text().splitlines() if ln.strip()]
+    except Exception:  # noqa: BLE001
+        return None
+    if len(lines) < 2:
+        return None
+    header = lines[0].split("\t")
+    if metric_name not in header:
+        return None
+    col = header.index(metric_name)
+    last = lines[-1].split("\t")
+    if col >= len(last):
+        return None
+    try:
+        return float(last[col])
+    except ValueError:
+        return None
+
+
+def _parse_iteration_result(log_dir: Path | None, cwd: str, spec: dict, iteration: int) -> dict:
+    """Build the iteration result dict from the agent's structured output, with
+    a ``results.tsv`` + ``git HEAD`` backstop. Always returns a dict with at
+    least ``iteration``; ``metric`` may be None if nothing was parseable."""
+    metric_name = spec.get("metric_name", "metric")
+    obj = _extract_json_object(_all_assistant_text(log_dir)) if log_dir else None
+    metric: float | None = None
+    kept: bool | None = None
+    description: str | None = None
+    citation: str | None = None
+    if obj is not None:
+        m = obj.get("metric")
+        if isinstance(m, (int, float)):
+            metric = float(m)
+        if isinstance(obj.get("kept"), bool):
+            kept = obj["kept"]
+        if isinstance(obj.get("description"), str):
+            description = obj["description"][:500]
+        if isinstance(obj.get("citation"), str):
+            citation = obj["citation"][:300]
+    if metric is None:
+        metric = _results_tsv_last_metric(cwd, metric_name)
+    commit = _git_head(cwd)
+    return {
+        "iteration": iteration,
+        "metric": metric,
+        "kept": kept,
+        "description": description,
+        "citation": citation,
+        "commit": commit,
+    }
+
+
+def _is_improvement(direction: str, new: float, best: float | None) -> bool:
+    if best is None:
+        return True
+    return new > best if direction == "maximize" else new < best
+
+
+def _loop_stop_reason(spec: dict, state: dict, job_status: str) -> str | None:
+    """Return the first triggered stop condition, or None to keep looping.
+
+    Priority: consecutive failures → target reached → max iterations →
+    cost budget → wall-clock budget.
+    """
+    if state["consecutive_failures"] >= spec.get("max_consecutive_failures", 3):
+        return "max-consecutive-failures"
+    tgt = spec.get("target_metric")
+    best = state.get("best_metric")
+    if tgt is not None and best is not None:
+        direction = spec.get("direction", "maximize")
+        hit = best >= tgt if direction == "maximize" else best <= tgt
+        if hit:
+            return "target-reached"
+    if state["iteration"] >= spec.get("max_iterations", 50):
+        return "max-iterations"
+    max_cost = spec.get("max_cost_usd")
+    if max_cost is not None and state.get("spent_usd", 0.0) >= max_cost:
+        return "max-cost"
+    max_wall = spec.get("max_wall_clock_s")
+    if max_wall is not None:
+        try:
+            started = datetime.fromisoformat(state["started_at"])
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        except Exception:  # noqa: BLE001
+            elapsed = 0.0
+        if elapsed >= max_wall:
+            return "max-wall-clock"
+    return None
+
+
+def _build_iteration_prompt(
+    parent: models.Task, iteration: int, state: dict, spec: dict, meta: bool = False
+) -> str:
+    """Synthesize iteration N's prompt from the standing instruction
+    (``parent.prompt`` — the program.md body) plus the carried state header.
+    This is the "task generated on the go": the prompt evolves with the run.
+
+    When ``meta`` is set (stuck-detection fired), the header tells the agent to
+    step back, review the whole run, and try a fundamentally different
+    direction instead of another local variation."""
+    metric_name = spec.get("metric_name", "metric")
+    direction = spec.get("direction", "maximize")
+    best = state.get("best_metric")
+    best_commit = state.get("best_commit")
+    if meta:
+        streak = spec.get("stuck_after", "several")
+        standing = (
+            f"⟲ RETHINK ITERATION {iteration}. The loop has plateaued — about "
+            f"{streak} iterations in a row failed to improve {metric_name} "
+            f"(best is {best}). STOP iterating on recent variations. Read ALL of "
+            f"results.tsv and the git log, and explicitly reason about WHY "
+            f"progress stalled: which families of ideas have been exhausted, "
+            f"what assumption might be wrong. Then try ONE fundamentally "
+            f"different approach this iteration — a different mechanism, not a "
+            f"tweak of the last few. Be bold; this is the move that breaks the "
+            f"plateau."
+        )
+    elif best is None:
+        standing = (
+            f"This is iteration {iteration} — the FIRST one. Establish the "
+            f"baseline: run the experiment as-is and record {metric_name}."
+        )
+    else:
+        standing = (
+            f"You are iteration {iteration}. Best {metric_name} so far: "
+            f"{best} (at commit {best_commit}). The goal is to {direction} "
+            f"{metric_name}. Read results.tsv for what's already been tried and "
+            f"pick a NEW idea — do not repeat a prior experiment."
+        )
+    contract = (
+        "Run exactly ONE experiment this iteration, keep/discard via git as the "
+        "standing instructions describe, regenerate the progress graph, and "
+        "register artifacts. When finished, print EXACTLY one line:\n"
+        'LOOP_RESULT: {"metric": <number>, "kept": <true|false>, '
+        '"description": "<≤10 words>", "citation": "<paper or empty>"}'
+    )
+    # Inject the harness coordinates so the iteration's artifact curls target the
+    # LOOP PARENT, not this iteration child. Registering progress.png/results.tsv
+    # against the parent (F3 re-registers same-name in place) means the parent
+    # task always shows one current graph across the whole run.
+    coords = _harness_coords_block(parent.id)
+    return f"{coords}\n\n{standing}\n\n{contract}\n\n---\n\n{parent.prompt}"
+
+
+def _harness_coords_block(parent_task_id: str) -> str:
+    """Env exports the iteration agent should `export` before registering
+    artifacts. AH_TASK_ID points at the loop parent so the graph lands there."""
+    from ..config import get_settings
+
+    s = get_settings()
+    token = s.auth_token or ""
+    base = "http://127.0.0.1:8765"
+    return (
+        "## Registering artifacts (graphs / tables / reports for the dashboard)\n"
+        "Artifacts attach to the loop parent so its page shows one current view. "
+        "Export these, then POST each artifact file with the EXACT recipe below "
+        "— do not try to discover the API yourself:\n"
+        f"  export AH_URL={base}\n"
+        f"  export AH_TOKEN={token}\n"
+        f"  export AH_TASK_ID={parent_task_id}\n"
+        "\n"
+        '  curl -s -X POST "$AH_URL/api/tasks/$AH_TASK_ID/artifacts" \\\n'
+        '    -H "Authorization: Bearer $AH_TOKEN" -H "Content-Type: application/json" \\\n'
+        '    -d \'{"kind":"graph","path":"progress.svg","name":"progress"}\'\n'
+        "\n"
+        "- `path` is RELATIVE to this repo. `kind` is one of: `graph` (PNG or "
+        "SVG image), `table` (CSV/TSV or a markdown table), `report` "
+        "(markdown/text), `log` (text), `file` (anything else).\n"
+        "- Use a STABLE `name` every iteration — do NOT put the iteration number "
+        'in it (use "progress", not "progress (iter 4)") — so each artifact '
+        "UPDATES IN PLACE instead of piling up a new one per iteration.\n"
+        "- Register the SAME small set of artifacts every iteration with the SAME "
+        "`kind` AND `name` each time. Pick one kind per file and stick to it "
+        "(don't register the same document as both a `table` and a `report`)."
+    )
+
+
+def _make_iteration_task(
+    s,
+    parent: models.Task,
+    iteration: int,
+    state: dict,
+    spec: dict,
+    meta: bool = False,
+) -> models.Task:
+    """Insert a single loop iteration child task (ready to run).
+
+    ``meta`` marks a stuck-detection "rethink" iteration: a different prompt
+    and, if ``spec.escalate_model`` is set, a stronger model for that run.
+    """
+    model_override = spec.get("escalate_model") if meta else None
+    child = models.Task(
+        project_id=parent.project_id,
+        # Short, self-describing title. Retitled with the experiment's
+        # description once it reports (see task_runner loop branch), so the
+        # list reads like "Iteration 11 · Adam lr 0.01" rather than echoing
+        # the parent's full name on every row.
+        title=f"Iteration {iteration}{' · rethink' if meta else ''}",
+        prompt=_build_iteration_prompt(parent, iteration, state, spec, meta=meta),
+        status="ready",
+        source="loop",
+        order_idx=iteration,
+        mode="one_shot",  # project root, no worktree, agent self-commits
+        parent_task_id=parent.id,
+        idle_timeout_seconds=parent.idle_timeout_seconds,
+        model_override=model_override,
+    )
+    s.add(child)
+    s.flush()
+    return child
+
+
+def start_loop(parent_task_id: str) -> str | None:
+    """Seed a loop: init the parent's ``loop_state``, flip it to ``running``,
+    and insert iteration #1. Returns the child task id to kick, or None if the
+    parent is missing or not a runnable loop.
+
+    Called from ``task_runner.kickoff_first_phase`` for ``mode='loop'`` tasks.
+    """
+    with session_scope() as s:
+        parent = s.get(models.Task, parent_task_id)
+        if parent is None or parent.mode != "loop":
+            return None
+        spec = parent.loop_spec or {}
+        state = _default_loop_state()
+        next_iter = state["iteration"] + 1  # 1
+        child = _make_iteration_task(s, parent, next_iter, state, spec)
+        parent.loop_state = state
+        parent.status = "running"
+        parent.phase = "executing"
+        return child.id
+
+
+def advance_loop(
+    parent_task_id: str,
+    job_status: str,
+    cwd: str,
+    cost_usd: float | None,
+    log_dir: Path | None,
+) -> tuple[dict, str | None, str | None]:
+    """Process a finished loop iteration and decide what's next.
+
+    Returns ``(result, next_child_id, stop_reason)``:
+      - ``result``: the parsed iteration result, to be stored on the iteration's
+        ``Outcome.meta`` by the caller.
+      - ``next_child_id``: the id of the next iteration task (caller appends it
+        to ``autorun_ids`` for inline kickoff), or None if the loop is ending.
+      - ``stop_reason``: non-None iff the loop is ending (caller marks the
+        parent done with a summary).
+
+    Owns the ``loop_state`` update and the next-task insertion in its own
+    session — mirroring how the decompose path owns ``_insert_drafts``. The
+    caller keeps the iteration ``Outcome`` write.
+    """
+    with session_scope() as s:
+        parent = s.get(models.Task, parent_task_id)
+        if parent is None:
+            return {}, None, "parent-missing"
+        # A cancel flips the parent off 'running'; respect it and stop.
+        if parent.status != "running":
+            return {}, None, "canceled"
+        spec = parent.loop_spec or {}
+        state = dict(parent.loop_state or _default_loop_state())
+        iteration = state["iteration"] + 1
+        result = _parse_iteration_result(log_dir, cwd, spec, iteration)
+
+        # Update carried state.
+        state["iteration"] = iteration
+        state["spent_usd"] = round(float(state.get("spent_usd", 0.0)) + float(cost_usd or 0.0), 6)
+        metric = result.get("metric")
+        kept = result.get("kept")
+        succeeded = job_status == "done" and metric is not None
+        if succeeded:
+            state["consecutive_failures"] = 0
+            # Only an iteration the agent actually KEPT can become the new best.
+            # If kept is False the experiment was reverted out of the tree, so
+            # recording its metric/commit as "best" would point best_commit at a
+            # reverted commit and diverge the harness's best_metric from what
+            # later iterations read back from the tree / benchmark history.
+            improved = _is_improvement(
+                spec.get("direction", "maximize"), metric, state.get("best_metric")
+            )
+            if kept is not False and improved:
+                state["best_metric"] = metric
+                state["best_commit"] = result.get("commit")
+                state["non_improving_streak"] = 0
+            else:
+                state["non_improving_streak"] = state.get("non_improving_streak", 0) + 1
+        elif job_status == "stopped":
+            # Operational interruption (server restart / manual stop of the
+            # iteration), NOT a research failure — don't penalize the loop.
+            # The iteration is recorded as failed but the run continues.
+            pass
+        else:
+            state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
+
+        stop_reason = _loop_stop_reason(spec, state, job_status)
+        parent.loop_state = state  # reassign so SQLAlchemy flags the JSON dirty
+
+        if stop_reason is not None:
+            parent.status = "done"
+            parent.phase = "done"
+            return result, None, stop_reason
+
+        # Stuck-detection: if we've gone stuck_after iterations without
+        # improving, make the NEXT iteration a "rethink" and reset the streak
+        # so the new direction gets a fresh window before we escalate again.
+        stuck_after = spec.get("stuck_after")
+        meta_next = bool(stuck_after) and state["non_improving_streak"] >= stuck_after
+        if meta_next:
+            state["non_improving_streak"] = 0
+            parent.loop_state = state
+
+        child = _make_iteration_task(s, parent, iteration + 1, state, spec, meta=meta_next)
+        return result, child.id, None

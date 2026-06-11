@@ -14,20 +14,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from sqlalchemy import select
 
 from .broadcaster import BroadcasterRegistry, make_status_event
 from .claude import ClaudeRunner
-from .config import get_settings
 from .db import session_scope
 from . import models
-from .schemas import StreamEvent, TurnDoneEvent
+from .schemas import StreamEvent, ToolResultEvent, ToolUseEvent, TurnDoneEvent
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +83,7 @@ def _augment_prompt_for_kind(s, job: "models.Job", prompt: str) -> str:
     if job.kind == "plan":
         if task is not None and task.mode == "plan":
             from .services.planner import PLANNER_INSTRUCTIONS
+
             return f"{PLANNER_INSTRUCTIONS}\n\nAsk:\n{prompt}"
         return f"{_PLANNING_PREFIX}\n\n{prompt}"
     if job.kind == "execute":
@@ -235,13 +233,11 @@ class JobManager:
             job = s.get(models.Job, job_id)
             if job is None:
                 raise ValueError(f"unknown job {job_id}")
-            idx = (
-                s.execute(
-                    select(models.Turn.idx)
-                    .where(models.Turn.job_id == job_id)
-                    .order_by(models.Turn.idx.desc())
-                ).first()
-            )
+            idx = s.execute(
+                select(models.Turn.idx)
+                .where(models.Turn.job_id == job_id)
+                .order_by(models.Turn.idx.desc())
+            ).first()
             next_idx = (idx[0] + 1) if idx else 0
             turn = models.Turn(job_id=job_id, idx=next_idx, prompt=prompt, status="queued")
             s.add(turn)
@@ -290,9 +286,7 @@ class JobManager:
                 log.error("job %s vanished before run", job_id)
                 return
             turn = s.execute(
-                select(models.Turn).where(
-                    models.Turn.job_id == job_id, models.Turn.idx == turn_idx
-                )
+                select(models.Turn).where(models.Turn.job_id == job_id, models.Turn.idx == turn_idx)
             ).scalar_one()
             project = s.get(models.Project, job.project_id)
             assert project is not None
@@ -304,11 +298,19 @@ class JobManager:
             project_id = project.id
             kind = job.kind
             project_extra = list(project.extra_claude_args or [])
-            idle_timeout = (
-                project.idle_timeout_seconds
-                if project.idle_timeout_seconds is not None
-                else self.default_idle_timeout_seconds
-            )
+            # Idle-timeout resolution: task override → project override →
+            # global default. A task can set 0 to disable the watchdog
+            # entirely (long unattended training turns); the watchdog treats
+            # <= 0 as "never fire".
+            task = s.get(models.Task, job.task_id) if job.task_id else None
+            if task is not None and task.idle_timeout_seconds is not None:
+                idle_timeout = task.idle_timeout_seconds
+            elif project.idle_timeout_seconds is not None:
+                idle_timeout = project.idle_timeout_seconds
+            else:
+                idle_timeout = self.default_idle_timeout_seconds
+            # Per-task model override (loop "rethink" iterations may escalate).
+            model_override = task.model_override if task is not None else None
 
         allowed = _gather_allowlist(project_id, kind=kind)
         broadcaster.start_turn(turn_idx)
@@ -323,7 +325,11 @@ class JobManager:
             permission_mode=permission_mode if not dangerously_skip else None,
             allowed_tools=allowed if not dangerously_skip else [],
             dangerously_skip=dangerously_skip,
-            extra_args=self.default_extra_args + project_extra,
+            extra_args=(
+                self.default_extra_args
+                + project_extra
+                + (["--model", model_override] if model_override else [])
+            ),
             claude_path=self.claude_path,
         )
         self._runners[job_id] = runner
@@ -333,9 +339,15 @@ class JobManager:
         last_event: Optional[StreamEvent] = None
         last_event_at = time.monotonic()
         timed_out = False
+        # Inflight tool-call count. The watchdog ignores idle ticks while >0
+        # so a long Bash call (e.g. `python train.py` for 5 min) doesn't get
+        # SIGTERM'd just because Claude is quiet between tool_use and
+        # tool_result. Parallel tool_use blocks → multiple increments,
+        # matched by their tool_result decrements.
+        inflight_tools = 0
 
         async def watchdog() -> None:
-            nonlocal timed_out
+            nonlocal timed_out, last_event_at
             if idle_timeout <= 0:
                 return
             check_every = min(5.0, max(0.1, idle_timeout / 4))
@@ -343,6 +355,12 @@ class JobManager:
                 await asyncio.sleep(check_every)
                 if runner.returncode is not None:
                     return
+                if inflight_tools > 0:
+                    # Tool call in flight — keep the timer pinned to "now"
+                    # so when the result arrives we resume from a clean
+                    # baseline.
+                    last_event_at = time.monotonic()
+                    continue
                 idle = time.monotonic() - last_event_at
                 if idle >= idle_timeout:
                     log.warning(
@@ -361,6 +379,10 @@ class JobManager:
                 if runner.pid and last_event is None:
                     self._mark_turn_running(job_id, turn_idx, pid=runner.pid, started_at=start_ts)
                 await broadcaster.publish(ev)
+                if isinstance(ev, ToolUseEvent):
+                    inflight_tools += 1
+                elif isinstance(ev, ToolResultEvent):
+                    inflight_tools = max(0, inflight_tools - 1)
                 last_event = ev
                 last_event_at = time.monotonic()
         except Exception as e:  # noqa: BLE001
@@ -380,9 +402,7 @@ class JobManager:
     ) -> None:
         with session_scope() as s:
             turn = s.execute(
-                select(models.Turn).where(
-                    models.Turn.job_id == job_id, models.Turn.idx == turn_idx
-                )
+                select(models.Turn).where(models.Turn.job_id == job_id, models.Turn.idx == turn_idx)
             ).scalar_one()
             turn.status = "running"
             turn.started_at = turn.started_at or started_at
@@ -410,7 +430,13 @@ class JobManager:
             cost = last_event.cost_usd
             duration = last_event.duration_ms
 
-        if timed_out or runner.stop_requested:
+        if isinstance(last_event, TurnDoneEvent):
+            # A delivered result is authoritative. If the idle watchdog fired
+            # late because the process lingered after the result (a tool left a
+            # backgrounded child holding the pipe), still honor the result's
+            # exit code rather than mis-recording a completed turn as stopped.
+            status = "done" if exit_code == 0 else "failed"
+        elif timed_out or runner.stop_requested:
             status = "stopped"
         elif exit_code == 0:
             status = "done"
@@ -420,9 +446,7 @@ class JobManager:
         # Persist DB state.
         with session_scope() as s:
             turn = s.execute(
-                select(models.Turn).where(
-                    models.Turn.job_id == job_id, models.Turn.idx == turn_idx
-                )
+                select(models.Turn).where(models.Turn.job_id == job_id, models.Turn.idx == turn_idx)
             ).scalar_one()
             turn.status = status
             turn.exit_code = exit_code
@@ -447,9 +471,7 @@ class JobManager:
         try:
             from .services import task_runner
 
-            autorun_ids = task_runner.on_job_finalized(
-                job_id, status, log_dir=broadcaster.log_dir
-            )
+            autorun_ids = task_runner.on_job_finalized(job_id, status, log_dir=broadcaster.log_dir)
         except Exception:  # noqa: BLE001
             log.exception("task_runner.on_job_finalized failed for %s", job_id)
 

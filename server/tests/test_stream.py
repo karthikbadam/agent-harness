@@ -48,9 +48,7 @@ async def test_stream_replays_persisted_events(app_client) -> None:
     auth = {"Authorization": "Bearer T"}
     r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
     pid = r.json()["id"]
-    r = await client.post(
-        "/api/jobs", json={"project_id": pid, "prompt": "hello"}, headers=auth
-    )
+    r = await client.post("/api/jobs", json={"project_id": pid, "prompt": "hello"}, headers=auth)
     jid = r.json()["id"]
     await app.state.job_manager.wait(jid)
 
@@ -80,15 +78,11 @@ async def test_stream_honors_last_event_id_query(app_client) -> None:
     auth = {"Authorization": "Bearer T"}
     r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
     pid = r.json()["id"]
-    r = await client.post(
-        "/api/jobs", json={"project_id": pid, "prompt": "x"}, headers=auth
-    )
+    r = await client.post("/api/jobs", json={"project_id": pid, "prompt": "x"}, headers=auth)
     jid = r.json()["id"]
     await app.state.job_manager.wait(jid)
 
-    async with client.stream(
-        "GET", f"/api/jobs/{jid}/stream?token=T&last_event_id=4"
-    ) as resp:
+    async with client.stream("GET", f"/api/jobs/{jid}/stream?token=T&last_event_id=4") as resp:
         buf = ""
         events: list[dict] = []
         async for chunk in resp.aiter_text():
@@ -111,9 +105,7 @@ async def test_stream_auth_required(app_client) -> None:
     auth = {"Authorization": "Bearer T"}
     r = await client.post("/api/projects", json={"name": "p", "path": "/tmp"}, headers=auth)
     pid = r.json()["id"]
-    r = await client.post(
-        "/api/jobs", json={"project_id": pid, "prompt": "x"}, headers=auth
-    )
+    r = await client.post("/api/jobs", json={"project_id": pid, "prompt": "x"}, headers=auth)
     jid = r.json()["id"]
     r = await client.get(f"/api/jobs/{jid}/stream")
     assert r.status_code == 401

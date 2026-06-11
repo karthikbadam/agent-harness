@@ -42,9 +42,7 @@ def _now() -> datetime:
 
 
 def _retry_backoff(retries: int) -> timedelta:
-    return timedelta(
-        seconds=RETRY_BACKOFF_BASE_SECONDS * (RETRY_BACKOFF_FACTOR**retries)
-    )
+    return timedelta(seconds=RETRY_BACKOFF_BASE_SECONDS * (RETRY_BACKOFF_FACTOR**retries))
 
 
 def _aware(dt: datetime) -> datetime:
@@ -81,15 +79,11 @@ def _integration_in_flight(s: Session, project_id: str) -> bool:
     )
 
 
-def _ancestors_all_integrated(
-    s: Session, task_id: str, visited: set[str] | None = None
-) -> bool:
+def _ancestors_all_integrated(s: Session, task_id: str, visited: set[str] | None = None) -> bool:
     """True if every dep-chain ancestor is integrated (or a done synthetic)."""
     visited = visited if visited is not None else set()
     deps = s.execute(
-        select(models.TaskDependency.depends_on_id).where(
-            models.TaskDependency.task_id == task_id
-        )
+        select(models.TaskDependency.depends_on_id).where(models.TaskDependency.task_id == task_id)
     ).all()
     for (dep_id,) in deps:
         if dep_id in visited:

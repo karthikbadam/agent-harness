@@ -13,9 +13,7 @@ def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.email", "x@y.z"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "t"], check=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True
-    )
+    subprocess.run(["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True)
     (path / "f.txt").write_text("hi", encoding="utf-8")
     subprocess.run(["git", "-C", str(path), "add", "f.txt"], check=True)
     subprocess.run(
@@ -24,7 +22,9 @@ def _init_git_repo(path: Path) -> None:
     )
 
 
-def _proj_and_task(repo: Path, task_id: str = "tabc123def456") -> tuple[models.Project, models.Task]:
+def _proj_and_task(
+    repo: Path, task_id: str = "tabc123def456"
+) -> tuple[models.Project, models.Task]:
     proj = models.Project(name="r", path=str(repo))
     task = models.Task(id=task_id, project_id="p", title="t", prompt="p")
     return proj, task
@@ -42,9 +42,7 @@ def test_create_makes_worktree_and_branch(ah_home: Path, tmp_path: Path) -> None
     assert Path(path) == ah_home / "worktrees" / task.id
     assert branch == f"task/{task.id}"
     # branch exists on the source repo
-    out = subprocess.check_output(
-        ["git", "-C", str(repo), "branch", "--list", branch]
-    ).decode()
+    out = subprocess.check_output(["git", "-C", str(repo), "branch", "--list", branch]).decode()
     assert branch in out
 
 
@@ -70,9 +68,11 @@ def test_remove_cleans_worktree_and_branch(ah_home: Path, tmp_path: Path) -> Non
     worktrees.remove(proj, task)
 
     assert not Path(path).exists()
-    out = subprocess.check_output(
-        ["git", "-C", str(repo), "branch", "--list", branch]
-    ).decode().strip()
+    out = (
+        subprocess.check_output(["git", "-C", str(repo), "branch", "--list", branch])
+        .decode()
+        .strip()
+    )
     assert out == ""
 
 

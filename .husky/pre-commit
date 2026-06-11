@@ -1,0 +1,4 @@
+# Format/lint staged files (ruff for server, prettier for web). Skips quietly
+# if node/npx isn't on PATH (e.g. a non-interactive shell) rather than blocking
+# the commit.
+command -v npx >/dev/null 2>&1 && npx lint-staged

@@ -52,9 +52,7 @@ class _StubClient:
     def __exit__(self, *exc: Any) -> None:  # noqa: ANN401
         return None
 
-    def _respond(
-        self, method: str, url: str, body: dict[str, Any] | None = None
-    ) -> httpx.Response:
+    def _respond(self, method: str, url: str, body: dict[str, Any] | None = None) -> httpx.Response:
         self.calls.append((method, url, body))
         payload = self._canned.get((method, url), [])
         req = httpx.Request(method, url)
@@ -114,15 +112,11 @@ def test_list_outcomes_requires_exactly_one_of_task_or_project() -> None:
         with pytest.raises(ToolError, match="task_id or project_id"):
             asyncio.run(mcp.call_tool("list_outcomes", {}))
         with pytest.raises(ToolError, match="exactly one"):
-            asyncio.run(
-                mcp.call_tool("list_outcomes", {"task_id": "x", "project_id": "y"})
-            )
+            asyncio.run(mcp.call_tool("list_outcomes", {"task_id": "x", "project_id": "y"}))
 
 
 def test_integrate_calls_project_integrate_route() -> None:
-    stub = _StubClient(
-        canned={("POST", "/api/projects/p1/integrate"): {"id": "synth-1"}}
-    )
+    stub = _StubClient(canned={("POST", "/api/projects/p1/integrate"): {"id": "synth-1"}})
     mcp = orchestrator_mcp.build_mcp()
     with patch.object(orchestrator_mcp, "_client", lambda: stub):
         asyncio.run(

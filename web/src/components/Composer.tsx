@@ -12,7 +12,11 @@ const MIN_HEIGHT = 44;
 const MAX_HEIGHT = 240;
 const HINT_AT = 200;
 
-export function Composer({ placeholder = "Tell claude...", disabled, onSend }: Props) {
+export function Composer({
+  placeholder = "Tell claude...",
+  disabled,
+  onSend,
+}: Props) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -52,7 +56,12 @@ export function Composer({ placeholder = "Tell claude...", disabled, onSend }: P
   const showCount = value.length >= HINT_AT;
 
   return (
-    <Box px={3} pt={3} pb="max(env(safe-area-inset-bottom), 10px)" bg="bg.subtle">
+    <Box
+      px={3}
+      pt={3}
+      pb="max(env(safe-area-inset-bottom), 10px)"
+      bg="bg.subtle"
+    >
       <Flex
         align="flex-end"
         gap={2}
@@ -105,7 +114,13 @@ export function Composer({ placeholder = "Tell claude...", disabled, onSend }: P
         </IconButton>
       </Flex>
       {(showHint || showCount) && (
-        <Flex justify="space-between" px={2} pt={1} fontSize="xs" color="fg.muted">
+        <Flex
+          justify="space-between"
+          px={2}
+          pt={1}
+          fontSize="xs"
+          color="fg.muted"
+        >
           <Text>{showHint ? "↵ for newline · ⌘↵ to send" : ""}</Text>
           {showCount && <Text>{value.length} chars</Text>}
         </Flex>

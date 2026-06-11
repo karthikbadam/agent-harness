@@ -5,7 +5,10 @@
 import { useUI } from "../stores/ui";
 
 export class ApiError extends Error {
-  constructor(public status: number, public detail: string) {
+  constructor(
+    public status: number,
+    public detail: string,
+  ) {
     super(`${status}: ${detail}`);
   }
 }
@@ -31,29 +34,31 @@ async function handle<T>(resp: Response): Promise<T> {
 }
 
 export const api = {
-  get: async <T,>(path: string): Promise<T> =>
+  get: async <T>(path: string): Promise<T> =>
     handle<T>(await fetch(path, { headers: { ...authHeader() } })),
 
-  post: async <T,>(path: string, body?: unknown): Promise<T> =>
+  post: async <T>(path: string, body?: unknown): Promise<T> =>
     handle<T>(
       await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader() },
         body: body !== undefined ? JSON.stringify(body) : undefined,
-      })
+      }),
     ),
 
-  patch: async <T,>(path: string, body?: unknown): Promise<T> =>
+  patch: async <T>(path: string, body?: unknown): Promise<T> =>
     handle<T>(
       await fetch(path, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...authHeader() },
         body: body !== undefined ? JSON.stringify(body) : undefined,
-      })
+      }),
     ),
 
   del: async (path: string): Promise<void> =>
-    handle<void>(await fetch(path, { method: "DELETE", headers: { ...authHeader() } })),
+    handle<void>(
+      await fetch(path, { method: "DELETE", headers: { ...authHeader() } }),
+    ),
 };
 
 export function sseUrl(path: string): string {

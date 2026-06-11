@@ -20,13 +20,17 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .. import models
 from ..db import session_scope
 from . import driver_bus, worktrees
 
 log = logging.getLogger(__name__)
+
+# A plan auto-runs only if it's simple: no loop nodes and fewer than this many
+# tasks. Anything heavier parks as a reviewable draft (gate + steer + confirm).
+PLAN_AUTORUN_MAX = 10
 
 
 def _git_head(project_path: str) -> tuple[str | None, str | None]:
@@ -35,19 +39,27 @@ def _git_head(project_path: str) -> tuple[str | None, str | None]:
     if not pdir.is_dir() or not (pdir / ".git").exists():
         return None, None
     try:
-        sha = subprocess.check_output(
-            ["git", "-C", str(pdir), "rev-parse", "HEAD"],
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).decode().strip()
+        sha = (
+            subprocess.check_output(
+                ["git", "-C", str(pdir), "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:  # noqa: BLE001
         sha = None
     try:
-        branch = subprocess.check_output(
-            ["git", "-C", str(pdir), "rev-parse", "--abbrev-ref", "HEAD"],
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).decode().strip()
+        branch = (
+            subprocess.check_output(
+                ["git", "-C", str(pdir), "rev-parse", "--abbrev-ref", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:  # noqa: BLE001
         branch = None
     return sha, branch
@@ -55,35 +67,41 @@ def _git_head(project_path: str) -> tuple[str | None, str | None]:
 
 def _branch_tip(project_path: str, branch: str) -> str | None:
     try:
-        return subprocess.check_output(
-            ["git", "-C", project_path, "rev-parse", branch],
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "-C", project_path, "rev-parse", branch],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:  # noqa: BLE001
         return None
 
 
-def _commit_reachable_from_other_branch(
-    project_path: str, sha: str, exclude_branch: str
-) -> bool:
+def _commit_reachable_from_other_branch(project_path: str, sha: str, exclude_branch: str) -> bool:
     """Return True iff ``sha`` is reachable from some local branch other than
     ``exclude_branch``. Used to verify an integration actually moved each input
     task's work somewhere persistent before we delete its task branch."""
     try:
-        names = subprocess.check_output(
-            [
-                "git",
-                "-C",
-                project_path,
-                "branch",
-                "--contains",
-                sha,
-                "--format=%(refname:short)",
-            ],
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).decode().splitlines()
+        names = (
+            subprocess.check_output(
+                [
+                    "git",
+                    "-C",
+                    project_path,
+                    "branch",
+                    "--contains",
+                    sha,
+                    "--format=%(refname:short)",
+                ],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            .decode()
+            .splitlines()
+        )
     except Exception:  # noqa: BLE001
         return False
     return any(n.strip() and n.strip() != exclude_branch for n in names)
@@ -183,9 +201,7 @@ def _last_assistant_text(log_dir: Path) -> str | None:
 
 def _deps_of(s, task_id: str) -> list[str]:
     rows = s.execute(
-        select(models.TaskDependency.depends_on_id).where(
-            models.TaskDependency.task_id == task_id
-        )
+        select(models.TaskDependency.depends_on_id).where(models.TaskDependency.task_id == task_id)
     ).all()
     return [r[0] for r in rows]
 
@@ -194,9 +210,7 @@ def _all_deps_done(s, task_id: str) -> bool:
     dep_ids = _deps_of(s, task_id)
     if not dep_ids:
         return True
-    rows = s.execute(
-        select(models.Task.status).where(models.Task.id.in_(dep_ids))
-    ).all()
+    rows = s.execute(select(models.Task.status).where(models.Task.id.in_(dep_ids))).all()
     statuses = [r[0] for r in rows]
     if len(statuses) != len(dep_ids):
         return False
@@ -209,9 +223,7 @@ def _reevaluate_downstream(s, task_id: str) -> list[tuple[str, str]]:
     """
     transitions: list[tuple[str, str]] = []
     rows = s.execute(
-        select(models.TaskDependency.task_id).where(
-            models.TaskDependency.depends_on_id == task_id
-        )
+        select(models.TaskDependency.task_id).where(models.TaskDependency.depends_on_id == task_id)
     ).all()
     for (downstream_id,) in rows:
         ds = s.get(models.Task, downstream_id)
@@ -268,27 +280,102 @@ def on_job_finalized(
             # mark itself done. Distinct from the per-task planning phase
             # (mode='plan_then_execute') which parks at awaiting_ack.
             if task.mode == "plan":
+                # The planner job decomposed the ask into a task GRAPH. Three
+                # outcomes: failed; first plan (insert + gate auto-run vs draft);
+                # or a steering re-plan (a followup turn while parked at
+                # awaiting_ack → replace the draft list, stay parked).
+                from . import planner as _planner
+
+                if job_status != "done":
+                    task.status = "failed"
+                    task.phase = "failed"
+                    task.last_failed_at = datetime.now(timezone.utc)
+                    s.add(
+                        models.Outcome(
+                            task_id=task.id,
+                            job_id=job.id,
+                            commit_sha=None,
+                            branch=None,
+                            summary=summary,
+                            status="failed",
+                            kind="plan",
+                        )
+                    )
+                    pending_events.append(
+                        (
+                            "task_failed",
+                            {"project_id": project_id, "task_id": task.id, "job_id": job.id},
+                        )
+                    )
+                    _emit_after(bus, pending_events)
+                    return autorun_ids
+
+                # A followup on an already-finalized (auto-ran) plan is a no-op.
+                if task.status == "done":
+                    s.add(
+                        models.Outcome(
+                            task_id=task.id,
+                            job_id=job.id,
+                            commit_sha=None,
+                            branch=None,
+                            summary=summary,
+                            status="success",
+                            kind="plan",
+                        )
+                    )
+                    _emit_after(bus, pending_events)
+                    return autorun_ids
+
+                is_steering = task.phase == "awaiting_ack"
                 child_ids: list[str] = []
-                if job_status == "done" and log_dir is not None:
-                    from . import planner as _planner
-                    try:
+                try:
+                    if is_steering:
+                        child_ids = _planner.replace_drafts_from_log_dir(
+                            project_id, task.id, log_dir
+                        )
+                    elif log_dir is not None:
                         child_ids = _planner.parse_and_insert_from_log_dir(
                             project_id, task.id, log_dir, task.prompt
                         )
-                    except Exception:  # noqa: BLE001
-                        log.exception(
-                            "planner insert failed for task %s", task.id
-                        )
-                outcome_status = "success" if job_status == "done" else "failed"
-                plan_summary = (
-                    f"Created {len(child_ids)} task{'s' if len(child_ids) != 1 else ''}."
-                    if child_ids
-                    else summary
-                )
-                task.status = "done" if job_status == "done" else "failed"
-                task.phase = "done" if job_status == "done" else "failed"
-                if task.status == "failed":
-                    task.last_failed_at = datetime.now(timezone.utc)
+                except Exception:  # noqa: BLE001
+                    log.exception("planner insert/replace failed for task %s", task.id)
+
+                # Gate: auto-run only simple plans (no loops, < PLAN_AUTORUN_MAX
+                # tasks). A steering re-plan always re-parks for review.
+                has_loop = False
+                n = 0
+                for cid in child_ids:
+                    ds = s.get(models.Task, cid)
+                    if ds is None:
+                        continue
+                    n += 1
+                    if ds.mode == "loop":
+                        has_loop = True
+                auto_run = (not has_loop) and (n < PLAN_AUTORUN_MAX)
+
+                if not is_steering and auto_run:
+                    task.status = "done"
+                    task.phase = "done"
+                    event = "task_done"
+                    for cid in child_ids:
+                        ds = s.get(models.Task, cid)
+                        if ds is not None and ds.status == "ready" and ds.source == "planner":
+                            autorun_ids.append(cid)
+                else:
+                    # Park as a reviewable draft: the plan stays running at
+                    # awaiting_ack. Hold ALL drafts uniformly at 'pending'
+                    # (override the no-dep→ready promotion in _insert_drafts) so
+                    # steer-replace and confirm operate on a uniform set.
+                    task.status = "running"
+                    task.phase = "awaiting_ack"
+                    event = "plan_ready"
+                    for cid in child_ids:
+                        ds = s.get(models.Task, cid)
+                        if ds is not None and ds.source == "planner":
+                            ds.status = "pending"
+
+                verb = "Revised" if is_steering else "Drafted"
+                plan_summary = f"{verb} {n} task{'s' if n != 1 else ''}." if n else summary
                 s.add(
                     models.Outcome(
                         task_id=task.id,
@@ -296,22 +383,14 @@ def on_job_finalized(
                         commit_sha=None,
                         branch=None,
                         summary=plan_summary,
-                        status=outcome_status,
+                        status="success",
                         kind="plan",
                     )
                 )
                 s.flush()
-                # Newly-inserted child tasks that landed 'ready' (no unmet
-                # deps) auto-run. They aren't downstream of the plan task in
-                # the DAG — _insert_drafts created them with source='planner'
-                # and the existing autorun path handles them.
-                for cid in child_ids:
-                    ds = s.get(models.Task, cid)
-                    if ds is not None and ds.status == "ready" and ds.source == "planner":
-                        autorun_ids.append(cid)
                 pending_events.append(
                     (
-                        "task_done" if task.status == "done" else "task_failed",
+                        event,
                         {"project_id": project_id, "task_id": task.id, "job_id": job.id},
                     )
                 )
@@ -364,7 +443,7 @@ def on_job_finalized(
 
         if job.kind == "integrate":
             cwd = job.cwd or (project.path if project else None)
-            sha, branch = (_git_head(cwd) if cwd else (None, None))
+            sha, branch = _git_head(cwd) if cwd else (None, None)
             summary = _last_assistant_text(log_dir) if log_dir is not None else None
             dep_rows = s.execute(
                 select(models.TaskDependency.depends_on_id).where(
@@ -430,14 +509,40 @@ def on_job_finalized(
             # specified for ad-hoc.
             cwd = job.cwd or (project.path if project else None)
             summary = _last_assistant_text(log_dir) if log_dir is not None else None
-            in_worktree = bool(
-                cwd and project and cwd != project.path
-            )
+            in_worktree = bool(cwd and project and cwd != project.path)
             if job_status == "done" and in_worktree and not task.synthetic:
                 commit_msg = (task.title or "agent commit")[:72]
                 _commit_dirty_worktree(cwd, commit_msg)
-            sha, branch = (_git_head(cwd) if cwd else (None, None))
+            sha, branch = _git_head(cwd) if cwd else (None, None)
             outcome_status = "success" if job_status == "done" else "failed"
+
+            # Loop iteration: hand the finished iteration to the planner's
+            # iterate strategy, which parses the result, updates the parent's
+            # loop_state, and decides whether to spawn the next iteration or
+            # stop. Done BEFORE we add this iteration's Outcome so the separate
+            # session writes don't contend (same ordering the decompose path
+            # uses). The returned result is stored on the Outcome's meta.
+            loop_result: dict = {}
+            loop_next_child: str | None = None
+            loop_stop_reason: str | None = None
+            if task.source == "loop" and task.parent_task_id:
+                from . import planner as _planner
+
+                cost = _job_cost_usd(s, job.id)
+                try:
+                    loop_result, loop_next_child, loop_stop_reason = _planner.advance_loop(
+                        task.parent_task_id, job_status, cwd or "", cost, log_dir
+                    )
+                except Exception:  # noqa: BLE001
+                    log.exception("advance_loop failed for iteration %s", task.id)
+                # Retitle the finished iteration with what it tried, so the task
+                # list reads like the experiment log it is.
+                desc = (loop_result or {}).get("description")
+                if isinstance(desc, str) and desc.strip():
+                    n = (loop_result or {}).get("iteration")
+                    prefix = f"Iteration {n}" if n is not None else (task.title or "Iteration")
+                    task.title = f"{prefix} · {desc.strip()}"[:256]
+
             s.add(
                 models.Outcome(
                     task_id=task.id,
@@ -447,6 +552,7 @@ def on_job_finalized(
                     summary=summary,
                     status=outcome_status,
                     kind="execute",
+                    meta=loop_result or {},
                 )
             )
             task.status = "done" if job_status == "done" else "failed"
@@ -459,6 +565,24 @@ def on_job_finalized(
                 and task.mode in ("plan_then_execute", "execute_only")
             ):
                 task.integration_status = "pending"
+
+            # Loop bookkeeping: spawn the next iteration (autorun), or, when the
+            # loop ended, record a final checkpoint Outcome on the parent.
+            if task.source == "loop" and task.parent_task_id:
+                if loop_next_child is not None:
+                    autorun_ids.append(loop_next_child)
+                elif loop_stop_reason is not None:
+                    _record_loop_finish(s, task.parent_task_id, job.id, loop_stop_reason)
+                    pending_events.append(
+                        (
+                            "task_done",
+                            {
+                                "project_id": project_id,
+                                "task_id": task.parent_task_id,
+                                "job_id": job.id,
+                            },
+                        )
+                    )
             s.flush()
             transitions = _reevaluate_downstream(s, task.id)
             event = "task_done" if task.status == "done" else "task_failed"
@@ -508,7 +632,27 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
       - ``one_shot`` → execute job at project path, no worktree, cannot
         be integrated. Used for narrow one-off edits that should not
         produce a branch.
+      - ``loop`` → the parent runs NO Claude job. ``planner.start_loop``
+        seeds iteration #1 (a ``source='loop'`` one_shot child) and flips the
+        parent to ``running``; we then kick that child. Each iteration's
+        finalize spawns the next via ``planner.advance_loop`` until a stop
+        condition (see ``on_job_finalized``).
     """
+    # Loop parent: delegate to the planner's iterate strategy and kick the
+    # first iteration child instead of spawning a job for the parent itself.
+    with session_scope() as s:
+        peek = s.get(models.Task, task_id)
+        if peek is None or peek.status != "ready":
+            return None
+        is_loop = peek.mode == "loop"
+    if is_loop:
+        from . import planner as _planner
+
+        child_id = _planner.start_loop(task_id)
+        if child_id is None:
+            return None
+        return await kickoff_first_phase(child_id, job_manager)
+
     with session_scope() as s:
         t = s.get(models.Task, task_id)
         if t is None or t.status != "ready":
@@ -533,9 +677,7 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
             else:
                 base_ref = _resolve_base_ref(s, t)
                 try:
-                    wt_path, wt_branch = worktrees.create(
-                        project, t, base_ref=base_ref
-                    )
+                    wt_path, wt_branch = worktrees.create(project, t, base_ref=base_ref)
                 except Exception:  # noqa: BLE001
                     log.exception(
                         "execute_only worktree create failed for task %s; "
@@ -559,8 +701,12 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
         prompt = t.prompt
         title = f"[task] {t.title}"[:256]
     jid = job_manager.create_job(
-        project_id, prompt, title=title, task_id=task_id,
-        kind=kind, cwd=cwd,
+        project_id,
+        prompt,
+        title=title,
+        task_id=task_id,
+        kind=kind,
+        cwd=cwd,
     )
     await job_manager.start(jid)
     return jid
@@ -569,6 +715,49 @@ async def kickoff_first_phase(task_id: str, job_manager) -> str | None:
 def _emit_after(bus: "driver_bus.DriverEventBus", events: list[tuple[str, dict]]) -> None:
     for event, kw in events:
         bus.emit(event, **kw)
+
+
+def _job_cost_usd(s, job_id: str) -> float:
+    """Total cost across a job's turns — fed into the loop's spend budget."""
+    row = s.execute(
+        select(func.coalesce(func.sum(models.Turn.cost_usd), 0.0)).where(
+            models.Turn.job_id == job_id
+        )
+    ).first()
+    return float(row[0]) if row and row[0] is not None else 0.0
+
+
+def _record_loop_finish(s, parent_id: str, job_id: str, stop_reason: str) -> None:
+    """Write a final checkpoint Outcome on the loop parent when it ends.
+
+    ``advance_loop`` already flipped the parent to ``done`` (in its own
+    session); this records the human-readable summary + best result so the
+    parent has a terminal Outcome row like every other task.
+    """
+    parent = s.get(models.Task, parent_id)
+    if parent is None:
+        return
+    state = dict(parent.loop_state or {})
+    spec = parent.loop_spec or {}
+    metric_name = spec.get("metric_name", "metric")
+    best = state.get("best_metric")
+    iters = state.get("iteration")
+    summary = (
+        f"Loop finished ({stop_reason}). Best {metric_name}={best} "
+        f"at {state.get('best_commit')} after {iters} iteration(s)."
+    )
+    s.add(
+        models.Outcome(
+            task_id=parent_id,
+            job_id=job_id,
+            commit_sha=state.get("best_commit"),
+            branch=None,
+            summary=summary,
+            status="success",
+            kind="loop",
+            meta={"stop_reason": stop_reason, **state},
+        )
+    )
 
 
 def try_autodisable_autopilot(project_id: str) -> bool:
@@ -589,9 +778,7 @@ def try_autodisable_autopilot(project_id: str) -> bool:
         leftover = s.execute(
             select(models.Task.id).where(
                 models.Task.project_id == project_id,
-                models.Task.status.in_(
-                    ["pending", "ready", "running", "failed"]
-                ),
+                models.Task.status.in_(["pending", "ready", "running", "failed"]),
             )
         ).first()
         if leftover:
@@ -698,9 +885,7 @@ def advance_to_executing(task_id: str, prompt_addendum: str = "") -> ExecuteSpaw
         if task is None:
             raise ValueError(f"unknown task {task_id}")
         if task.phase != "awaiting_ack":
-            raise ValueError(
-                f"task {task_id} is not awaiting ack (phase={task.phase!r})"
-            )
+            raise ValueError(f"task {task_id} is not awaiting ack (phase={task.phase!r})")
         project = s.get(models.Project, task.project_id)
         if project is None:
             raise ValueError(f"project {task.project_id} for task {task_id} not found")
@@ -734,11 +919,7 @@ def reconcile_on_startup() -> None:
     a user re-run) will pick it up. We only flip pending↔ready here.
     """
     with session_scope() as s:
-        rows = (
-            s.query(models.Task)
-            .filter(models.Task.status.in_(["pending", "ready"]))
-            .all()
-        )
+        rows = s.query(models.Task).filter(models.Task.status.in_(["pending", "ready"])).all()
         for t in rows:
             new = "ready" if _all_deps_done(s, t.id) else "pending"
             if t.status != new:

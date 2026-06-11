@@ -14,9 +14,7 @@ def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.email", "x@y.z"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "t"], check=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True
-    )
+    subprocess.run(["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True)
     (path / "f.txt").write_text("hi", encoding="utf-8")
     subprocess.run(["git", "-C", str(path), "add", "f.txt"], check=True)
     subprocess.run(
@@ -25,9 +23,7 @@ def _init_git_repo(path: Path) -> None:
     )
 
 
-def test_create_integration_task_rejects_undone_input(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_create_integration_task_rejects_undone_input(initdb: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
@@ -36,8 +32,11 @@ def test_create_integration_task_rejects_undone_input(
         s.add(proj)
         s.flush()
         t = models.Task(
-            project_id=proj.id, title="t", prompt="p",
-            status="running", mode="plan_then_execute",
+            project_id=proj.id,
+            title="t",
+            prompt="p",
+            status="running",
+            mode="plan_then_execute",
         )
         s.add(t)
         s.flush()
@@ -58,15 +57,23 @@ def test_create_integration_task_builds_synthetic_task_with_deps(
         s.add(proj)
         s.flush()
         t1 = models.Task(
-            project_id=proj.id, title="t1", prompt="p1",
-            status="done", mode="plan_then_execute",
-            worktree_branch="task/t1", worktree_path="/tmp/wt1",
+            project_id=proj.id,
+            title="t1",
+            prompt="p1",
+            status="done",
+            mode="plan_then_execute",
+            worktree_branch="task/t1",
+            worktree_path="/tmp/wt1",
             integration_status="pending",
         )
         t2 = models.Task(
-            project_id=proj.id, title="t2", prompt="p2",
-            status="done", mode="plan_then_execute",
-            worktree_branch="task/t2", worktree_path="/tmp/wt2",
+            project_id=proj.id,
+            title="t2",
+            prompt="p2",
+            status="done",
+            mode="plan_then_execute",
+            worktree_branch="task/t2",
+            worktree_path="/tmp/wt2",
             integration_status="pending",
         )
         s.add_all([t1, t2])
@@ -104,9 +111,7 @@ def test_create_integration_task_builds_synthetic_task_with_deps(
         assert deps_set == {t1id, t2id}
 
 
-def test_integration_finalize_cleans_worktrees_on_success(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_integration_finalize_cleans_worktrees_on_success(initdb: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
@@ -115,8 +120,12 @@ def test_integration_finalize_cleans_worktrees_on_success(
         s.add(proj)
         s.flush()
         t1 = models.Task(
-            project_id=proj.id, title="t1", prompt="p1",
-            status="done", phase="done", mode="plan_then_execute",
+            project_id=proj.id,
+            title="t1",
+            prompt="p1",
+            status="done",
+            phase="done",
+            mode="plan_then_execute",
             integration_status="pending",
         )
         s.add(t1)
@@ -128,16 +137,22 @@ def test_integration_finalize_cleans_worktrees_on_success(
         s.flush()
         # Build the synthetic integration task + dep + job.
         synth = models.Task(
-            project_id=proj.id, title="integrate", prompt="merge",
-            status="running", phase="integrating",
-            mode="one_shot", synthetic=True,
+            project_id=proj.id,
+            title="integrate",
+            prompt="merge",
+            status="running",
+            phase="integrating",
+            mode="one_shot",
+            synthetic=True,
         )
         s.add(synth)
         s.flush()
         s.add(models.TaskDependency(task_id=synth.id, depends_on_id=t1.id))
         job = models.Job(
-            project_id=proj.id, task_id=synth.id,
-            kind="integrate", cwd=str(repo),
+            project_id=proj.id,
+            task_id=synth.id,
+            kind="integrate",
+            cwd=str(repo),
         )
         s.add(job)
         s.flush()
@@ -156,9 +171,7 @@ def test_integration_finalize_cleans_worktrees_on_success(
     assert not Path(wt_path).exists()
 
 
-def test_integration_finalize_marks_conflict_on_failure(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_integration_finalize_marks_conflict_on_failure(initdb: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
@@ -167,24 +180,35 @@ def test_integration_finalize_marks_conflict_on_failure(
         s.add(proj)
         s.flush()
         t1 = models.Task(
-            project_id=proj.id, title="t1", prompt="p1",
-            status="done", phase="done", mode="plan_then_execute",
-            worktree_branch="task/t1", worktree_path="/tmp/wt1",
+            project_id=proj.id,
+            title="t1",
+            prompt="p1",
+            status="done",
+            phase="done",
+            mode="plan_then_execute",
+            worktree_branch="task/t1",
+            worktree_path="/tmp/wt1",
             integration_status="pending",
         )
         s.add(t1)
         s.flush()
         synth = models.Task(
-            project_id=proj.id, title="integrate", prompt="merge",
-            status="running", phase="integrating",
-            mode="one_shot", synthetic=True,
+            project_id=proj.id,
+            title="integrate",
+            prompt="merge",
+            status="running",
+            phase="integrating",
+            mode="one_shot",
+            synthetic=True,
         )
         s.add(synth)
         s.flush()
         s.add(models.TaskDependency(task_id=synth.id, depends_on_id=t1.id))
         job = models.Job(
-            project_id=proj.id, task_id=synth.id,
-            kind="integrate", cwd=str(repo),
+            project_id=proj.id,
+            task_id=synth.id,
+            kind="integrate",
+            cwd=str(repo),
         )
         s.add(job)
         s.flush()

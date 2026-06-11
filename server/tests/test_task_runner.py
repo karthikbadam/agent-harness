@@ -13,18 +13,14 @@ def _init_git_repo(path: Path) -> str:
     subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.email", "x@y.z"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "t"], check=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True
-    )
+    subprocess.run(["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True)
     (path / "f.txt").write_text("hi", encoding="utf-8")
     subprocess.run(["git", "-C", str(path), "add", "f.txt"], check=True)
     subprocess.run(
         ["git", "-C", str(path), "commit", "--no-gpg-sign", "-q", "-m", "init"],
         check=True,
     )
-    return subprocess.check_output(
-        ["git", "-C", str(path), "rev-parse", "HEAD"]
-    ).decode().strip()
+    return subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"]).decode().strip()
 
 
 def _write_event_log(log_dir: Path, text: str) -> None:
@@ -161,9 +157,7 @@ def test_no_git_records_null_sha(initdb: Path, tmp_path: Path) -> None:
         assert o.status == "success"
 
 
-def test_plan_mode_inserts_children_and_marks_self_done(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_plan_mode_inserts_children_and_marks_self_done(initdb: Path, tmp_path: Path) -> None:
     """A top-level planner task (mode='plan') parses its job's JSON output
     into child tasks and flips itself to done. The plan task is NOT parked
     at awaiting_ack — that's only for per-task plan_then_execute planning.
@@ -187,7 +181,11 @@ def test_plan_mode_inserts_children_and_marks_self_done(
         s.add(t)
         s.flush()
         job = models.Job(
-            project_id=proj.id, title="run", task_id=t.id, kind="plan", cwd=str(repo),
+            project_id=proj.id,
+            title="run",
+            task_id=t.id,
+            kind="plan",
+            cwd=str(repo),
         )
         s.add(job)
         s.flush()
@@ -206,7 +204,7 @@ def test_plan_mode_inserts_children_and_marks_self_done(
         assert plan.status == "done" and plan.phase == "done"
         outcome = s.query(models.Outcome).filter_by(task_id=tid).one()
         assert outcome.kind == "plan" and outcome.status == "success"
-        assert "Created 2 task" in (outcome.summary or "")
+        assert "Drafted 2 task" in (outcome.summary or "")
         children = (
             s.query(models.Task)
             .filter(models.Task.project_id == pid, models.Task.source == "planner")
@@ -218,9 +216,7 @@ def test_plan_mode_inserts_children_and_marks_self_done(
         assert by_title["step two"].status == "pending"
 
 
-def test_plan_mode_empty_output_falls_back_to_research_task(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_plan_mode_empty_output_falls_back_to_research_task(initdb: Path, tmp_path: Path) -> None:
     """When the planner emits no usable JSON, the fallback ensures at least
     one child task lands — a research task carrying the original ask. This
     is the "the project page expects a task to track every ask" contract.
@@ -244,7 +240,10 @@ def test_plan_mode_empty_output_falls_back_to_research_task(
         s.add(t)
         s.flush()
         job = models.Job(
-            project_id=proj.id, task_id=t.id, kind="plan", cwd=str(repo),
+            project_id=proj.id,
+            task_id=t.id,
+            kind="plan",
+            cwd=str(repo),
         )
         s.add(job)
         s.flush()
@@ -297,7 +296,10 @@ def test_research_mode_executes_at_project_root_without_worktree(
         s.add(t)
         s.flush()
         job = models.Job(
-            project_id=proj.id, task_id=t.id, kind="execute", cwd=str(repo),
+            project_id=proj.id,
+            task_id=t.id,
+            kind="execute",
+            cwd=str(repo),
         )
         s.add(job)
         s.flush()
@@ -365,9 +367,7 @@ def test_planning_phase_records_plan_outcome_and_keeps_task_running(
         assert task.phase == "awaiting_ack"
 
 
-def test_executing_phase_marks_done_and_integration_pending(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_executing_phase_marks_done_and_integration_pending(initdb: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
@@ -417,13 +417,20 @@ def test_autodisables_autopilot_when_project_runs_dry(initdb: Path) -> None:
         s.flush()
         # One task that's about to finish.
         t = models.Task(
-            project_id=proj.id, title="t", prompt="p",
-            status="running", phase="executing", mode="one_shot",
+            project_id=proj.id,
+            title="t",
+            prompt="p",
+            status="running",
+            phase="executing",
+            mode="one_shot",
         )
         s.add(t)
         s.flush()
         job = models.Job(
-            project_id=proj.id, task_id=t.id, kind="execute", cwd="/tmp",
+            project_id=proj.id,
+            task_id=t.id,
+            kind="execute",
+            cwd="/tmp",
         )
         s.add(job)
         s.flush()
@@ -442,19 +449,30 @@ def test_autopilot_stays_on_when_other_tasks_pending(initdb: Path) -> None:
         s.add(proj)
         s.flush()
         finishing = models.Task(
-            project_id=proj.id, title="a", prompt="p",
-            status="running", phase="executing", mode="one_shot",
+            project_id=proj.id,
+            title="a",
+            prompt="p",
+            status="running",
+            phase="executing",
+            mode="one_shot",
         )
         s.add(finishing)
         # A second task still ready — driver would run it next.
-        s.add(models.Task(
-            project_id=proj.id, title="b", prompt="p",
-            status="ready", mode="one_shot",
-        ))
+        s.add(
+            models.Task(
+                project_id=proj.id,
+                title="b",
+                prompt="p",
+                status="ready",
+                mode="one_shot",
+            )
+        )
         s.flush()
         job = models.Job(
-            project_id=proj.id, task_id=finishing.id,
-            kind="execute", cwd="/tmp",
+            project_id=proj.id,
+            task_id=finishing.id,
+            kind="execute",
+            cwd="/tmp",
         )
         s.add(job)
         s.flush()
@@ -466,9 +484,7 @@ def test_autopilot_stays_on_when_other_tasks_pending(initdb: Path) -> None:
         assert s.get(models.Project, pid).autopilot_mode == "on"
 
 
-def test_executing_finalize_commits_dirty_worktree(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_executing_finalize_commits_dirty_worktree(initdb: Path, tmp_path: Path) -> None:
     """Backstop: if the execute turn left uncommitted changes in the worktree,
     finalize should commit them so the worktree branch carries the work."""
     repo = tmp_path / "repo"
@@ -485,9 +501,7 @@ def test_executing_finalize_commits_dirty_worktree(
         stderr=subprocess.DEVNULL,
     )
     (wt / "f.txt").write_text("changed by agent", encoding="utf-8")
-    base_sha = subprocess.check_output(
-        ["git", "-C", str(wt), "rev-parse", "HEAD"]
-    ).decode().strip()
+    base_sha = subprocess.check_output(["git", "-C", str(wt), "rev-parse", "HEAD"]).decode().strip()
 
     with session_scope() as s:
         proj = models.Project(name="r", path=str(repo))
@@ -518,13 +532,11 @@ def test_executing_finalize_commits_dirty_worktree(
 
     task_runner.on_job_finalized(jid, "done", log_dir=None)
 
-    new_sha = subprocess.check_output(
-        ["git", "-C", str(wt), "rev-parse", "HEAD"]
-    ).decode().strip()
+    new_sha = subprocess.check_output(["git", "-C", str(wt), "rev-parse", "HEAD"]).decode().strip()
     assert new_sha != base_sha, "expected backstop to create a commit"
-    msg = subprocess.check_output(
-        ["git", "-C", str(wt), "log", "-1", "--format=%s"]
-    ).decode().strip()
+    msg = (
+        subprocess.check_output(["git", "-C", str(wt), "log", "-1", "--format=%s"]).decode().strip()
+    )
     assert msg == "implement feature x"
     with session_scope() as s:
         outcome = s.query(models.Outcome).one()
@@ -532,9 +544,7 @@ def test_executing_finalize_commits_dirty_worktree(
         assert outcome.branch == "task/x"
 
 
-def test_executing_finalize_skips_commit_when_clean(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_executing_finalize_skips_commit_when_clean(initdb: Path, tmp_path: Path) -> None:
     """If the agent already committed (or there are no changes), the backstop
     must not create an empty commit."""
     repo = tmp_path / "repo"
@@ -547,9 +557,7 @@ def test_executing_finalize_skips_commit_when_clean(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    base_sha = subprocess.check_output(
-        ["git", "-C", str(wt), "rev-parse", "HEAD"]
-    ).decode().strip()
+    base_sha = subprocess.check_output(["git", "-C", str(wt), "rev-parse", "HEAD"]).decode().strip()
 
     with session_scope() as s:
         proj = models.Project(name="r", path=str(repo))
@@ -578,9 +586,7 @@ def test_executing_finalize_skips_commit_when_clean(
         jid = job.id
 
     task_runner.on_job_finalized(jid, "done", log_dir=None)
-    new_sha = subprocess.check_output(
-        ["git", "-C", str(wt), "rev-parse", "HEAD"]
-    ).decode().strip()
+    new_sha = subprocess.check_output(["git", "-C", str(wt), "rev-parse", "HEAD"]).decode().strip()
     assert new_sha == base_sha
 
 
@@ -597,16 +603,22 @@ def _make_integration_fixture(tmp_path: Path):
         wt = tmp_path / f"wt-{label}"
         subprocess.run(
             ["git", "-C", str(repo), "worktree", "add", "-b", f"task/{label}", str(wt)],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         (wt / f"{label}.txt").write_text("hi", encoding="utf-8")
         subprocess.run(
-            ["git", "-C", str(wt), "add", "-A"], check=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ["git", "-C", str(wt), "add", "-A"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         subprocess.run(
             ["git", "-C", str(wt), "-c", "commit.gpgsign=false", "commit", "-m", f"work-{label}"],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         branches.append((label, str(wt), f"task/{label}"))
 
@@ -617,35 +629,44 @@ def _make_integration_fixture(tmp_path: Path):
         inputs = []
         for label, wt_path, br in branches:
             t = models.Task(
-                project_id=proj.id, title=f"input-{label}", prompt="p",
-                status="done", phase="done", mode="plan_then_execute",
-                worktree_path=wt_path, worktree_branch=br,
+                project_id=proj.id,
+                title=f"input-{label}",
+                prompt="p",
+                status="done",
+                phase="done",
+                mode="plan_then_execute",
+                worktree_path=wt_path,
+                worktree_branch=br,
                 integration_status="pending",
             )
             s.add(t)
             s.flush()
             inputs.append(t.id)
         synth = models.Task(
-            project_id=proj.id, title="integrate", prompt="merge them",
-            status="running", phase="integrating",
-            mode="one_shot", synthetic=True,
+            project_id=proj.id,
+            title="integrate",
+            prompt="merge them",
+            status="running",
+            phase="integrating",
+            mode="one_shot",
+            synthetic=True,
         )
         s.add(synth)
         s.flush()
         for in_id in inputs:
             s.add(models.TaskDependency(task_id=synth.id, depends_on_id=in_id))
         job = models.Job(
-            project_id=proj.id, task_id=synth.id,
-            kind="integrate", cwd=str(repo),
+            project_id=proj.id,
+            task_id=synth.id,
+            kind="integrate",
+            cwd=str(repo),
         )
         s.add(job)
         s.flush()
         return repo, inputs[0], inputs[1], synth.id, job.id
 
 
-def test_integration_finalize_succeeds_when_target_has_merged(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_integration_finalize_succeeds_when_target_has_merged(initdb: Path, tmp_path: Path) -> None:
     """When the agent did merge the input branches into a target branch, the
     inputs' tips are reachable from another branch — finalize should mark
     integration success and clean up."""
@@ -654,17 +675,32 @@ def test_integration_finalize_succeeds_when_target_has_merged(
     # input branches into it.
     subprocess.run(
         ["git", "-C", str(repo), "branch", "harness-test/target", "main"],
-        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     subprocess.run(
         ["git", "-C", str(repo), "checkout", "harness-test/target"],
-        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     for br in ("task/a", "task/b"):
         subprocess.run(
-            ["git", "-C", str(repo), "-c", "commit.gpgsign=false",
-             "merge", "--no-ff", "--no-edit", br],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "commit.gpgsign=false",
+                "merge",
+                "--no-ff",
+                "--no-edit",
+                br,
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
     task_runner.on_job_finalized(jid, "done", log_dir=None)
@@ -679,9 +715,7 @@ def test_integration_finalize_succeeds_when_target_has_merged(
         assert s.get(models.Task, tid_a).worktree_branch is None
 
 
-def test_integration_finalize_fails_when_no_merge_happened(
-    initdb: Path, tmp_path: Path
-) -> None:
+def test_integration_finalize_fails_when_no_merge_happened(initdb: Path, tmp_path: Path) -> None:
     """If the agent exited cleanly without actually merging (e.g. blocked on
     permissions and gave up), finalize must NOT mark success — that would
     silently orphan the work. Inputs stay 'conflict' and branches survive."""
@@ -748,7 +782,10 @@ def test_advance_to_executing_rejects_wrong_phase(initdb: Path, tmp_path: Path) 
         s.add(proj)
         s.flush()
         t = models.Task(
-            project_id=proj.id, title="t", prompt="p", status="running",
+            project_id=proj.id,
+            title="t",
+            prompt="p",
+            status="running",
             phase="planning",
             mode="plan_then_execute",
         )

@@ -250,6 +250,7 @@ class ClaudeRunner:
     _proc: asyncio.subprocess.Process | None = None
     _parser: StreamJsonParser | None = None
     _stop_requested: bool = False
+    _result_delivered: bool = False
 
     def __post_init__(self) -> None:
         self._parser = StreamJsonParser(job_id=self.job_id, turn=self.turn)
@@ -307,18 +308,32 @@ class ClaudeRunner:
             stderr=asyncio.subprocess.PIPE,
             cwd=self.cwd,
             env=merged_env,
+            # The StreamReader's default line buffer is 64 KB; a single
+            # stream-json line (e.g. a large file Write or tool result echoed
+            # back) can exceed that and raise LimitOverrunError, killing the
+            # job. Raise the ceiling so long lines parse instead of crashing.
+            limit=16 * 1024 * 1024,
         )
         assert self._proc.stdout is not None
         parser = self._parser
         assert parser is not None
         try:
-            while True:
+            terminal = False
+            while not terminal:
                 line = await self._proc.stdout.readline()
                 if not line:
                     break
                 events = parser.feed_line(line.decode("utf-8", "replace"))
                 for ev in events:
                     yield ev
+                    if isinstance(ev, TurnDoneEvent):
+                        # The result event is terminal. claude occasionally
+                        # lingers after emitting it when a tool left a
+                        # backgrounded child holding the stdout pipe — waiting
+                        # for EOF would then hang until the idle watchdog
+                        # reaped a turn that had already succeeded. Stop now.
+                        self._result_delivered = True
+                        terminal = True
         finally:
             await self._drain_stderr_and_wait()
 
@@ -329,25 +344,43 @@ class ClaudeRunner:
         err_text = ""
         if proc.stderr is not None:
             try:
-                err = await proc.stderr.read()
+                err = await asyncio.wait_for(proc.stderr.read(), timeout=2.0)
                 if err:
                     err_text = err.decode("utf-8", "replace")
             except Exception:
                 pass
-        await proc.wait()
-        if not err_text:
-            return
-        # Nonzero exits without a user-initiated stop are bugs — surface stderr
-        # at WARNING so it shows up without needing DEBUG logging configured.
-        if proc.returncode not in (0, None) and not self._stop_requested:
+        # By now the result (if any) has been delivered. A process still alive
+        # is lingering — e.g. a tool backgrounded a child that inherited the
+        # pipe. Don't block finalization on it: brief grace, then terminate.
+        if proc.returncode is None:
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                try:
+                    proc.terminate()
+                    await asyncio.wait_for(proc.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    await proc.wait()
+                except ProcessLookupError:
+                    pass
+        rc = proc.returncode
+        # An unexpected nonzero/signal exit is a bug worth surfacing — log it
+        # even when stderr is empty (e.g. an external SIGTERM), UNLESS the turn
+        # already delivered its result (a husk we terminated is expected) or the
+        # stop was user-initiated.
+        if rc not in (0, None) and not self._stop_requested and not self._result_delivered:
             log.warning(
-                "claude exited %d job=%s turn=%d stderr: %.500s",
-                proc.returncode,
+                "claude exited %d job=%s turn=%d%s",
+                rc,
                 self.job_id,
                 self.turn,
-                err_text,
+                f" stderr: {err_text[:500]}" if err_text else " (no stderr)",
             )
-        else:
+        elif err_text:
             log.debug("claude stderr job=%s turn=%d: %.500s", self.job_id, self.turn, err_text)
 
     @property

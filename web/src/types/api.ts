@@ -335,6 +335,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/loops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Loop
+         * @description Create an autoresearch loop — a ``mode='loop'`` parent task that spawns
+         *     one iteration child at a time until a stop condition (max_iterations /
+         *     target_metric / cost / wall-clock / consecutive failures).
+         *
+         *     Defaults to ``?run=true``: the loop starts immediately (seeds iteration #1).
+         *     Pass ``?run=false`` to create it paused (status ``ready``; kick later with
+         *     ``POST /tasks/{id}/run``).
+         */
+        post: operations["create_loop_api_projects__project_id__loops_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/iterations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Iterations
+         * @description The iteration children of a loop parent, flattened with each one's
+         *     parsed result (metric, kept) for the UI series. Ordered by iteration.
+         */
+        get: operations["list_iterations_api_tasks__task_id__iterations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks": {
         parameters: {
             query?: never;
@@ -580,6 +627,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks/{task_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Artifacts */
+        get: operations["list_artifacts_api_tasks__task_id__artifacts_get"];
+        put?: never;
+        /** Create Artifact */
+        post: operations["create_artifact_api_tasks__task_id__artifacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/artifacts/{artifact_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Artifact */
+        get: operations["download_artifact_api_artifacts__artifact_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/artifacts/{artifact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Artifact */
+        delete: operations["delete_artifact_api_artifacts__artifact_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/plan": {
         parameters: {
             query?: never;
@@ -790,6 +889,49 @@ export interface components {
              */
             created_at: string;
         };
+        /** ArtifactCreate */
+        ArtifactCreate: {
+            /** Path */
+            path: string;
+            /** Name */
+            name?: string | null;
+            /**
+             * Kind
+             * @default file
+             * @enum {string}
+             */
+            kind: "graph" | "table" | "report" | "checkpoint" | "log" | "file";
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            };
+            /** Job Id */
+            job_id?: string | null;
+        };
+        /** ArtifactOut */
+        ArtifactOut: {
+            /** Id */
+            id: string;
+            /** Task Id */
+            task_id: string;
+            /** Job Id */
+            job_id?: string | null;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            };
+            /** Download Url */
+            download_url: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** AssistantTextEvent */
         AssistantTextEvent: {
             /** Job Id */
@@ -927,6 +1069,33 @@ export interface components {
             /** Target Branch */
             target_branch?: string | null;
         };
+        /**
+         * IterationOut
+         * @description One loop iteration child, flattened with its result for the UI series.
+         */
+        IterationOut: {
+            /** Task Id */
+            task_id: string;
+            /** Iteration */
+            iteration: number;
+            /** Status */
+            status: string;
+            /** Metric */
+            metric?: number | null;
+            /** Kept */
+            kept?: boolean | null;
+            /** Description */
+            description?: string | null;
+            /** Commit Sha */
+            commit_sha?: string | null;
+            /** Duration S */
+            duration_s?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** JobCreate */
         JobCreate: {
             /** Prompt */
@@ -1019,6 +1188,57 @@ export interface components {
             /** Task Ids */
             task_ids?: string[];
         };
+        /**
+         * LoopCreate
+         * @description Create an autoresearch loop (a ``mode='loop'`` parent task).
+         *
+         *     ``prompt`` is the standing instruction shared by every iteration (the
+         *     ``program.md`` body, or a reference to it). The harness wraps it per
+         *     iteration with the carried state header. Caps are all optional; omit for an
+         *     open-ended loop bounded only by ``max_iterations``.
+         */
+        LoopCreate: {
+            /** Title */
+            title: string;
+            /** Prompt */
+            prompt: string;
+            /**
+             * Metric Name
+             * @default metric
+             */
+            metric_name: string;
+            /**
+             * Direction
+             * @default maximize
+             * @enum {string}
+             */
+            direction: "maximize" | "minimize";
+            /**
+             * Max Iterations
+             * @default 50
+             */
+            max_iterations: number;
+            /** Target Metric */
+            target_metric?: number | null;
+            /** Max Cost Usd */
+            max_cost_usd?: number | null;
+            /** Max Wall Clock S */
+            max_wall_clock_s?: number | null;
+            /**
+             * Max Consecutive Failures
+             * @default 3
+             */
+            max_consecutive_failures: number;
+            /** Stuck After */
+            stuck_after?: number | null;
+            /** Escalate Model */
+            escalate_model?: string | null;
+            /**
+             * Idle Timeout Seconds
+             * @default 0
+             */
+            idle_timeout_seconds: number | null;
+        };
         /** MergeIn */
         MergeIn: {
             /** Task Ids */
@@ -1049,6 +1269,10 @@ export interface components {
              * @default execute
              */
             kind: string;
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            };
             /**
              * Created At
              * Format: date-time
@@ -1094,6 +1318,11 @@ export interface components {
             name: string;
             /** Path */
             path: string;
+            /**
+             * Create Dir
+             * @default false
+             */
+            create_dir: boolean;
             /**
              * Permission Mode
              * @default acceptEdits
@@ -1287,7 +1516,9 @@ export interface components {
              */
             order_idx: number;
             /** Mode */
-            mode?: ("plan_then_execute" | "one_shot" | "execute_only" | "research" | "plan") | null;
+            mode?: ("plan_then_execute" | "one_shot" | "execute_only" | "research" | "plan" | "loop") | null;
+            /** Idle Timeout Seconds */
+            idle_timeout_seconds?: number | null;
         };
         /** TaskOut */
         TaskOut: {
@@ -1323,6 +1554,18 @@ export interface components {
              * @default false
              */
             synthetic: boolean;
+            /** Idle Timeout Seconds */
+            idle_timeout_seconds?: number | null;
+            /** Parent Task Id */
+            parent_task_id?: string | null;
+            /** Loop Spec */
+            loop_spec?: {
+                [key: string]: unknown;
+            } | null;
+            /** Loop State */
+            loop_state?: {
+                [key: string]: unknown;
+            } | null;
             /** Depends On */
             depends_on?: string[];
             /** Latest Outcome Id */
@@ -1349,7 +1592,9 @@ export interface components {
             /** Order Idx */
             order_idx?: number | null;
             /** Mode */
-            mode?: ("plan_then_execute" | "one_shot" | "execute_only" | "research" | "plan") | null;
+            mode?: ("plan_then_execute" | "one_shot" | "execute_only" | "research" | "plan" | "loop") | null;
+            /** Idle Timeout Seconds */
+            idle_timeout_seconds?: number | null;
         };
         /** ToolResultEvent */
         ToolResultEvent: {
@@ -2365,6 +2610,81 @@ export interface operations {
             };
         };
     };
+    create_loop_api_projects__project_id__loops_post: {
+        parameters: {
+            query?: {
+                run?: boolean;
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoopCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_iterations_api_tasks__task_id__iterations_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IterationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_all_tasks_api_tasks_get: {
         parameters: {
             query?: {
@@ -2814,6 +3134,148 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OutcomeOut"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_artifacts_api_tasks__task_id__artifacts_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_artifact_api_tasks__task_id__artifacts_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtifactCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_artifact_api_artifacts__artifact_id__download_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_artifact_api_artifacts__artifact_id__delete: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

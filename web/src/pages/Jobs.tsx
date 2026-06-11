@@ -36,10 +36,10 @@ export function JobsPage() {
     return out;
   }, [allJobs, taskFilter, projectFilter]);
 
-  const groups = useMemo(() => groupByProject(jobs ?? [], projects ?? []), [
-    jobs,
-    projects,
-  ]);
+  const groups = useMemo(
+    () => groupByProject(jobs ?? [], projects ?? []),
+    [jobs, projects],
+  );
 
   const hasFilter = Boolean(taskFilter || projectFilter);
   const clearFilters = () => {
@@ -52,7 +52,7 @@ export function JobsPage() {
   const title = taskFilter
     ? "Task jobs"
     : projectFilter
-      ? projects?.find((p) => p.id === projectFilter)?.name ?? "Project jobs"
+      ? (projects?.find((p) => p.id === projectFilter)?.name ?? "Project jobs")
       : "Jobs";
   const subtitle = taskFilter
     ? `Filtered to task ${taskFilter.slice(0, 8)}`
@@ -143,7 +143,10 @@ interface ProjectGroup {
   jobs: JobOut[];
 }
 
-function groupByProject(jobs: JobOut[], projects: ProjectOut[]): ProjectGroup[] {
+function groupByProject(
+  jobs: JobOut[],
+  projects: ProjectOut[],
+): ProjectGroup[] {
   const nameById = new Map(projects.map((p) => [p.id, p.name]));
   const byProj = new Map<string, JobOut[]>();
   for (const j of jobs) {
@@ -158,11 +161,13 @@ function groupByProject(jobs: JobOut[], projects: ProjectOut[]): ProjectGroup[] 
         parseServerDate(a.created_at).getTime(),
     );
   }
-  const groups: ProjectGroup[] = Array.from(byProj.entries()).map(([pid, js]) => ({
-    projectId: pid,
-    label: nameById.get(pid) ?? pid.slice(0, 8),
-    jobs: js,
-  }));
+  const groups: ProjectGroup[] = Array.from(byProj.entries()).map(
+    ([pid, js]) => ({
+      projectId: pid,
+      label: nameById.get(pid) ?? pid.slice(0, 8),
+      jobs: js,
+    }),
+  );
   groups.sort(
     (a, b) =>
       parseServerDate(b.jobs[0]!.created_at).getTime() -
