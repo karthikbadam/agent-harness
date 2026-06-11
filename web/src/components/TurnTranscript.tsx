@@ -6,9 +6,11 @@ import {
   Code,
   Flex,
   HStack,
+  Image,
   Stack,
   Text,
 } from "@chakra-ui/react";
+import { LuFile } from "react-icons/lu";
 
 import type {
   JobOut,
@@ -66,23 +68,63 @@ export function TurnTranscript({ events, job }: Props) {
 }
 
 function UserPromptCard({ turn }: { turn: TurnOut }) {
+  const attachIds = turn.attachment_ids ?? [];
   return (
-    <Box
-      alignSelf="flex-end"
-      maxW="85%"
-      bg="blue.subtle"
-      color="fg"
-      borderRadius="lg"
-      px={3}
-      py={2}
-    >
-      <Text fontSize="xs" color="fg.muted" mb={1}>
-        you · turn {turn.idx}
-      </Text>
-      <Text whiteSpace="pre-wrap" fontSize="sm">
-        {turn.prompt}
-      </Text>
+    <Box alignSelf="flex-end" maxW="85%">
+      {/* Attachment previews above the bubble */}
+      {attachIds.length > 0 && (
+        <Flex gap={1.5} mb={1.5} flexWrap="wrap" justify="flex-end">
+          {attachIds.map((id) => (
+            <AttachmentThumb key={id} id={id} />
+          ))}
+        </Flex>
+      )}
+      <Box
+        bg="blue.subtle"
+        color="fg"
+        borderRadius="lg"
+        px={3}
+        py={2}
+      >
+        <Text fontSize="xs" color="fg.muted" mb={1}>
+          you · turn {turn.idx}
+        </Text>
+        <Text whiteSpace="pre-wrap" fontSize="sm">
+          {turn.prompt}
+        </Text>
+      </Box>
     </Box>
+  );
+}
+
+function AttachmentThumb({ id }: { id: string }) {
+  const url = `/api/attachments/${id}/file`;
+  const [isImage, setIsImage] = useState(true);
+  return isImage ? (
+    <Image
+      src={url}
+      w="14"
+      h="14"
+      objectFit="cover"
+      rounded="md"
+      borderWidth="1px"
+      borderColor="border.subtle"
+      onError={() => setIsImage(false)}
+    />
+  ) : (
+    <Flex
+      align="center"
+      justify="center"
+      w="14"
+      h="14"
+      bg="bg.muted"
+      rounded="md"
+      borderWidth="1px"
+      borderColor="border.subtle"
+      color="fg.muted"
+    >
+      <LuFile size={20} />
+    </Flex>
   );
 }
 
