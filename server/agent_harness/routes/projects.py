@@ -31,6 +31,7 @@ def _expand_path(p: str) -> str:
 
 
 def _to_out(p: models.Project) -> ProjectOut:
+    cover_url = f"/api/attachments/{p.cover_image_id}/file" if p.cover_image_id else None
     return ProjectOut(
         id=p.id,
         name=p.name,
@@ -43,6 +44,7 @@ def _to_out(p: models.Project) -> ProjectOut:
         instructions=p.instructions,
         skills=list(p.skills or []),
         context_paths=list(p.context_paths or []),
+        cover_url=cover_url,
         created_at=p.created_at,
     )
 

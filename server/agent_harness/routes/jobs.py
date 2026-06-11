@@ -14,6 +14,7 @@ from ..config import get_settings
 from ..db import get_session
 from ..jobs import JobManager
 from ..schemas import FollowupCreate, JobCreate, JobOut, TurnOut
+from ..routes.attachments import stamp_job_on_attachments
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_auth)])
 
@@ -41,6 +42,7 @@ def _to_out(j: models.Job) -> JobOut:
                 cost_usd=t.cost_usd,
                 started_at=t.started_at,
                 ended_at=t.ended_at,
+                attachment_ids=list(t.attachment_ids or []),
             )
             for t in j.turns
         ],
@@ -75,9 +77,14 @@ async def create_job(
     mgr = _manager(request)
     project_id = body.project_id or _resolve_default_project_id(s)
     try:
-        jid = mgr.create_job(project_id, body.prompt, body.title or "")
+        jid = mgr.create_job(
+            project_id, body.prompt, body.title or "",
+            attachment_ids=body.attachment_ids,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    stamp_job_on_attachments(body.attachment_ids, jid, project_id, s)
+    s.commit()
     await mgr.start(jid)
     s.expire_all()
     j = s.get(models.Job, jid)
@@ -146,12 +153,14 @@ async def followup_job(
             assert new_job is not None
             return _to_out(new_job)
     try:
-        await mgr.followup(job_id, body.prompt)
+        await mgr.followup(job_id, body.prompt, attachment_ids=body.attachment_ids)
     except ValueError as e:
         raise HTTPException(400, str(e))
     s.expire_all()
     j = s.get(models.Job, job_id)
     assert j is not None
+    stamp_job_on_attachments(body.attachment_ids, job_id, j.project_id, s)
+    s.commit()
     return _to_out(j)
 
 

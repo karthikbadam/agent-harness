@@ -94,6 +94,9 @@ def _apply_column_migrations(engine: Engine) -> None:
         # Tier 3: loop stuck-detection runs a "rethink" iteration, optionally
         # on a stronger model, via a per-task model override.
         ("tasks", "model_override", "VARCHAR(64)"),
+        # attachments: user-uploaded files; cover image for project cards.
+        ("projects", "cover_image_id", "VARCHAR(12)"),
+        ("turns", "attachment_ids", "JSON"),
     ]
 
     with engine.begin() as conn:

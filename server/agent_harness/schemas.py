@@ -114,6 +114,17 @@ class ProjectOut(BaseModel):
     instructions: str | None = None
     skills: list[str] = Field(default_factory=list)
     context_paths: list[str] = Field(default_factory=list)
+    cover_url: str | None = None
+    created_at: datetime
+
+
+class AttachmentOut(BaseModel):
+    id: str
+    project_id: str | None = None
+    job_id: str | None = None
+    filename: str
+    mime_type: str
+    url: str  # /api/attachments/{id}/file
     created_at: datetime
 
 
@@ -126,6 +137,7 @@ class TurnOut(BaseModel):
     cost_usd: float | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class JobOut(BaseModel):
@@ -147,11 +159,13 @@ class JobCreate(BaseModel):
     prompt: str
     project_id: str | None = None
     title: str | None = None
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class FollowupCreate(BaseModel):
     # Optional so an ack on an awaiting_ack job can omit it.
     prompt: str = ""
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class ScheduleCreate(BaseModel):
@@ -410,6 +424,7 @@ class SuggestedAction(BaseModel):
 
 class PlanCreate(BaseModel):
     ask: str
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class PlanOut(BaseModel):

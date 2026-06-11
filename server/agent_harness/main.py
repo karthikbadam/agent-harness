@@ -31,6 +31,7 @@ from .schedule_service import ScheduleService
 from .services import claude_md, orchestrator_mcp, task_runner
 from .routes import allowlist as allowlist_routes
 from .routes import artifacts as artifacts_routes
+from .routes import attachments as attachments_routes
 from .routes import driver as driver_routes
 from .routes import jobs as jobs_routes
 from .routes import outcomes as outcomes_routes
@@ -122,6 +123,8 @@ def create_app() -> FastAPI:
 
     app.include_router(projects_routes.router)
     app.include_router(jobs_routes.router)
+    app.include_router(attachments_routes.router)
+    app.include_router(attachments_routes.public_router)
     app.include_router(schedules_routes.router)
     app.include_router(allowlist_routes.router)
     app.include_router(tasks_routes.router)

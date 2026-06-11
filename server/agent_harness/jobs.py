@@ -21,9 +21,9 @@ from typing import Optional
 from sqlalchemy import select
 
 from .broadcaster import BroadcasterRegistry, make_status_event
-from .claude import ClaudeRunner
+from .claude import AttachedFile, ClaudeRunner
 from .db import session_scope
-from . import models
+from . import models  # noqa: E402 — models must register before select()
 from .schemas import StreamEvent, ToolResultEvent, ToolUseEvent, TurnDoneEvent
 
 log = logging.getLogger(__name__)
@@ -174,6 +174,7 @@ class JobManager:
         task_id: str | None = None,
         kind: str | None = None,
         cwd: str | None = None,
+        attachment_ids: list[str] | None = None,
     ) -> str:
         """Create Job + first Turn rows. Return job_id. Does not start running.
 
@@ -212,7 +213,13 @@ class JobManager:
             )
             s.add(job)
             s.flush()
-            turn = models.Turn(job_id=job.id, idx=0, prompt=prompt, status="queued")
+            turn = models.Turn(
+                job_id=job.id,
+                idx=0,
+                prompt=prompt,
+                status="queued",
+                attachment_ids=list(attachment_ids or []),
+            )
             s.add(turn)
             s.flush()
             return job.id
@@ -227,7 +234,7 @@ class JobManager:
         self._tasks[job_id] = task
         return task
 
-    async def followup(self, job_id: str, prompt: str) -> int:
+    async def followup(self, job_id: str, prompt: str, attachment_ids: list[str] | None = None) -> int:
         """Create a new Turn, kick off run. Returns the new turn's idx."""
         with session_scope() as s:
             job = s.get(models.Job, job_id)
@@ -239,7 +246,13 @@ class JobManager:
                 .order_by(models.Turn.idx.desc())
             ).first()
             next_idx = (idx[0] + 1) if idx else 0
-            turn = models.Turn(job_id=job_id, idx=next_idx, prompt=prompt, status="queued")
+            turn = models.Turn(
+                job_id=job_id,
+                idx=next_idx,
+                prompt=prompt,
+                status="queued",
+                attachment_ids=list(attachment_ids or []),
+            )
             s.add(turn)
             s.flush()
         coro = self._run_turn(job_id, turn_idx=next_idx)
@@ -311,6 +324,19 @@ class JobManager:
                 idle_timeout = self.default_idle_timeout_seconds
             # Per-task model override (loop "rethink" iterations may escalate).
             model_override = task.model_override if task is not None else None
+            # Load attachments for this turn so the runner can reference them.
+            att_ids = list(turn.attachment_ids or [])
+            attachments: list[AttachedFile] = []
+            for att_id in att_ids:
+                att = s.get(models.Attachment, att_id)
+                if att is not None:
+                    attachments.append(
+                        AttachedFile(
+                            path=att.path,
+                            filename=att.filename,
+                            mime_type=att.mime_type,
+                        )
+                    )
 
         allowed = _gather_allowlist(project_id, kind=kind)
         broadcaster.start_turn(turn_idx)
@@ -331,6 +357,7 @@ class JobManager:
                 + (["--model", model_override] if model_override else [])
             ),
             claude_path=self.claude_path,
+            attachments=attachments,
         )
         self._runners[job_id] = runner
         start_ts = utcnow()

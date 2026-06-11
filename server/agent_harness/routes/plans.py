@@ -22,6 +22,7 @@ from ..config import get_settings
 from ..db import get_session
 from ..jobs import JobManager
 from ..schemas import LastPlanOut, PlanCreate, PlanOut
+from ..routes.attachments import stamp_job_on_attachments
 
 router = APIRouter(tags=["plans"], dependencies=[Depends(require_auth)])
 
@@ -62,7 +63,10 @@ async def plan_project(
     task_id = task.id
     from ..services import task_runner
 
-    await task_runner.kickoff_first_phase(task_id, mgr)
+    jid = await task_runner.kickoff_first_phase(task_id, mgr)
+    if jid and body.attachment_ids:
+        stamp_job_on_attachments(body.attachment_ids, jid, project_id, s)
+        s.commit()
     return PlanOut(task_ids=[task_id], raw=None, error=None)
 
 

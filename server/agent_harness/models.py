@@ -13,6 +13,8 @@ Tables:
 - outcomes: checkpoint tied to a git commit, recorded when a task-bound job
   finishes.
 - settings: small kv store for runtime-mutable settings.
+- attachments: user-uploaded files attached to conversation turns; images are
+  also eligible to become the project's card cover.
 """
 
 from __future__ import annotations
@@ -52,10 +54,14 @@ class Project(Base):
     skills: Mapped[list[str]] = mapped_column(JSON, default=list)
     context_paths: Mapped[list[str]] = mapped_column(JSON, default=list)
     autopilot_mode: Mapped[str] = mapped_column(String(8), default="off")
+    cover_image_id: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     rules: Mapped[list["AllowlistRule"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+    attachments: Mapped[list["Attachment"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
 
@@ -101,6 +107,7 @@ class Turn(Base):
     job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), nullable=False)
     idx: Mapped[int] = mapped_column(Integer, nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(16), default="queued")
     pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     exit_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -249,6 +256,29 @@ class Artifact(Base):
     path: Mapped[str] = mapped_column(Text, nullable=False)  # stored path under AH_HOME
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Attachment(Base):
+    """A file uploaded by the user and attached to a conversation turn.
+
+    Images are stored under AH_HOME/attachments/ and can be set as a project's
+    card cover (project.cover_image_id). Non-image files are referenced by path
+    in the turn prompt so the agent can read them with its tools.
+    """
+
+    __tablename__ = "attachments"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=new_id)
+    project_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
+    )
+    job_id: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    project: Mapped[Optional[Project]] = relationship(back_populates="attachments")
 
 
 class Outcome(Base):
