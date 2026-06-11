@@ -20,6 +20,9 @@ fi
 (cd "$REPO" && uv sync --quiet)
 VENV_BIN="$REPO/.venv/bin"
 
+TOKEN="$("$VENV_BIN/python" -c "from agent_harness import config; print(config.load_toml().get('auth_token', ''))")"
+echo "==> Token: $TOKEN"
+
 echo "==> Backend on :8765 (detached)"
 (cd "$REPO" && nohup "$VENV_BIN/python" -m uvicorn agent_harness.main:app \
   --reload --host 0.0.0.0 --port 8765 --app-dir server \

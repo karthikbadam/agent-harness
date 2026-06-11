@@ -23,6 +23,9 @@ pids=()
 cleanup() { for p in "${pids[@]:-}"; do kill "$p" 2>/dev/null || true; done; wait 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
+TOKEN="$("$VENV_BIN/python" -c "from agent_harness import config; print(config.load_toml().get('auth_token', ''))")"
+echo "==> Token: $TOKEN"
+
 echo "==> Backend on :8765 (also serves web/dist/)"
 # Bind 0.0.0.0 so phones on the same LAN can hit http://<mac-ip>:8765.
 (cd "$REPO" && "$VENV_BIN/python" -m uvicorn agent_harness.main:app --reload --host 0.0.0.0 --port 8765 --app-dir server) &
