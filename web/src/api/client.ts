@@ -61,8 +61,11 @@ export const api = {
     ),
 };
 
+/**
+ * SSE URL. The token is NOT placed in the query string (it would leak into
+ * access logs and history). EventSource sends the same-origin `ah_session`
+ * cookie automatically; establish it once via POST /api/session (see useAuth).
+ */
 export function sseUrl(path: string): string {
-  const t = useUI.getState().token ?? "";
-  const sep = path.includes("?") ? "&" : "?";
-  return `${path}${sep}token=${encodeURIComponent(t)}`;
+  return path;
 }
