@@ -11,7 +11,9 @@ Wires:
 
 from __future__ import annotations
 
+import secrets
 from contextlib import AsyncExitStack, asynccontextmanager
+from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -38,6 +40,7 @@ from .routes import outcomes as outcomes_routes
 from .routes import plans as plans_routes
 from .routes import projects as projects_routes
 from .routes import schedules as schedules_routes
+from .routes import session as session_routes
 from .routes import stream as stream_routes
 from .routes import tasks as tasks_routes
 from .schemas import AuthInfo
@@ -123,6 +126,9 @@ def create_app() -> FastAPI:
     async def me() -> AuthInfo:
         return AuthInfo()
 
+    app.add_middleware(_SecurityHeadersMiddleware)
+
+    app.include_router(session_routes.router)
     app.include_router(projects_routes.router)
     app.include_router(jobs_routes.router)
     app.include_router(attachments_routes.router)
@@ -162,12 +168,47 @@ def create_app() -> FastAPI:
     return app
 
 
+class _SecurityHeadersMiddleware:
+    """Add baseline security headers to every response.
+
+    HSTS only matters once we're behind HTTPS (Tailscale Serve), where it's
+    harmless and correct; the rest defend the SPA against sniffing/clickjacking
+    and stop the Referer header from leaking URLs to any external resource.
+    """
+
+    def __init__(self, app) -> None:  # type: ignore[no-untyped-def]
+        self._app = app
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+        if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):  # type: ignore[no-untyped-def]
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                extra = {
+                    b"x-content-type-options": b"nosniff",
+                    b"x-frame-options": b"DENY",
+                    b"referrer-policy": b"no-referrer",
+                    b"strict-transport-security": b"max-age=63072000; includeSubDomains",
+                }
+                present = {k.lower() for k, _ in headers}
+                for k, v in extra.items():
+                    if k not in present:
+                        headers.append((k, v))
+            await send(message)
+
+        await self._app(scope, receive, send_with_headers)
+
+
 class _BearerGuard:
     """ASGI middleware: gate a mounted sub-app on the harness bearer token.
 
     The FastAPI ``require_auth`` Depends() only fires for routes registered on
     the FastAPI app; mounted ASGI sub-apps (like the MCP server) bypass it,
-    so we wrap them here to share the same auth surface.
+    so we wrap them here to share the same auth surface — bearer header or the
+    signed ``ah_session`` cookie.
     """
 
     def __init__(self, inner: object) -> None:
@@ -178,6 +219,7 @@ class _BearerGuard:
             await self._inner(scope, receive, send)
             return
         from .config import get_settings
+        from .session import COOKIE_NAME, verify as verify_cookie
 
         required = get_settings().auth_token
         if not required:
@@ -187,7 +229,15 @@ class _BearerGuard:
             k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])
         }
         auth = headers.get("authorization", "")
-        ok = auth.startswith("Bearer ") and auth[len("Bearer ") :] == required
+        ok = auth.startswith("Bearer ") and secrets.compare_digest(
+            auth[len("Bearer ") :], required
+        )
+        if not ok:
+            cookie_header = headers.get("cookie", "")
+            morsels = SimpleCookie()
+            morsels.load(cookie_header)
+            cookie_val = morsels[COOKIE_NAME].value if COOKIE_NAME in morsels else None
+            ok = verify_cookie(cookie_val, required)
         if not ok:
             if scope["type"] == "http":
                 body = b'{"detail":"unauthorized"}'

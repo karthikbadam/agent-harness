@@ -40,15 +40,39 @@ async def test_bearer_token_works(app_client) -> None:
     assert r.status_code == 200
 
 
-async def test_query_token_works(app_client) -> None:
-    client, _ = app_client
-    r = await client.get("/api/projects?token=test-token")
-    assert r.status_code == 200
-
-
 async def test_wrong_token_401(app_client) -> None:
     client, _ = app_client
     r = await client.get("/api/projects", headers={"Authorization": "Bearer wrong"})
+    assert r.status_code == 401
+
+
+async def test_query_token_rejected(app_client) -> None:
+    # The token must never ride in the URL anymore.
+    client, _ = app_client
+    r = await client.get("/api/projects?token=test-token")
+    assert r.status_code == 401
+
+
+async def test_session_cookie_works(app_client) -> None:
+    client, _ = app_client
+    # Exchange the bearer token for a cookie...
+    r = await client.post("/api/session", headers={"Authorization": "Bearer test-token"})
+    assert r.status_code == 200
+    assert "ah_session" in client.cookies
+    # ...then authenticate with the cookie alone (no Authorization header).
+    r = await client.get("/api/projects")
+    assert r.status_code == 200
+
+
+async def test_session_requires_token(app_client) -> None:
+    client, _ = app_client
+    r = await client.post("/api/session")
+    assert r.status_code == 401
+
+
+async def test_bad_cookie_401(app_client) -> None:
+    client, _ = app_client
+    r = await client.get("/api/projects", headers={"Cookie": "ah_session=9999999999.forged"})
     assert r.status_code == 401
 
 
@@ -449,6 +473,6 @@ async def test_outcomes_empty_until_runner_records(app_client) -> None:
 
 async def test_me_returns_ok(app_client) -> None:
     client, _ = app_client
-    r = await client.get("/api/me?token=test-token")
+    r = await client.get("/api/me", headers={"Authorization": "Bearer test-token"})
     assert r.status_code == 200
     assert r.json()["ok"] is True

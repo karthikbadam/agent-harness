@@ -30,7 +30,11 @@ def ah_home() -> Path:
 
 @dataclass
 class Settings:
-    host: str = "0.0.0.0"
+    # Loopback by default: the service is RCE-capable and tied to your Claude
+    # account, so it should never listen on the LAN. Reach it from other devices
+    # via Tailscale Serve (which proxies the tailnet to 127.0.0.1) — see the
+    # README. Override with AH_HOST / `host` in config.toml only if you know why.
+    host: str = "127.0.0.1"
     port: int = 8765
     db_path: Path | None = None
     logs_dir: Path | None = None
@@ -97,7 +101,7 @@ def _int_env(name: str) -> int | None:
 def get_settings() -> Settings:
     toml = load_toml()
     s = Settings(
-        host=_env("host") or toml.get("host", "0.0.0.0"),
+        host=_env("host") or toml.get("host", "127.0.0.1"),
         port=_int_env("port") or int(toml.get("port", 8765)),
         auth_token=_env("auth_token") or toml.get("auth_token"),
         claude_path=_env("claude_path") or toml.get("claude_path"),

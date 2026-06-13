@@ -1,7 +1,9 @@
 """SSE endpoint for live job events.
 
 GET /api/jobs/{id}/stream
-  Auth: ?token=... (EventSource can't set headers).
+  Auth: ``ah_session`` cookie (EventSource can't set headers, so the browser
+        relies on the same-origin cookie minted by POST /api/session). curl/CLI
+        clients can use ``Authorization: Bearer`` instead.
   Reconnect: honors `Last-Event-ID` header (set automatically by browsers) and
              also a `?last_event_id=` query param for non-browser clients.
   Heartbeat: ":\n\n" comment every 15s.
