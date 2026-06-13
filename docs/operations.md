@@ -13,9 +13,13 @@ Three ways to drive the harness:
 
 | Surface | Use when |
 | --- | --- |
-| Web UI (`http://<lan-ip>:8765/`) | Day-to-day; submitting/monitoring from iPhone. |
-| HTTP API (`/api/*`) | Scripts, cron'd shell pokes, Claude Code skill, tests. |
+| Web UI (`https://<mac>.<tailnet>.ts.net/`) | Day-to-day; submitting/monitoring from iPhone over the tailnet. |
+| HTTP API (`/api/*`) | Scripts, cron'd shell pokes, Claude Code skill, tests. On the Mac itself, `http://127.0.0.1:8765`. |
 | `agent-harness` CLI | Setup and service lifecycle only (`init`, `gen-token`, `gen-openapi`, `serve`). |
+
+The service binds to `127.0.0.1` only; the tailnet HTTPS URL is provided by
+`tailscale serve` (see [README](../README.md)). It is never reachable on the LAN
+or the public internet.
 
 The CLI never reaches into a running server — it operates on `AH_HOME`
 files. To talk to a live server, use the HTTP API.
@@ -32,7 +36,11 @@ curl -sS -H "Authorization: Bearer $TOKEN" $BASE/api/me
 # {"ok":true}
 ```
 
-EventSource can't set headers, so the SSE route also accepts `?token=...`.
+The token must be sent in the `Authorization: Bearer` header — it is **not**
+accepted as a `?token=` query param anymore (that would leak it into logs and
+history). The browser exchanges it once via `POST /api/session` for an
+`HttpOnly` `ah_session` cookie; SSE/EventSource then authenticates with that
+cookie. For curl SSE, just send the bearer header (curl, unlike EventSource, can).
 
 ### Rotate the token
 
@@ -94,13 +102,13 @@ is running.
 ### Watch the live stream
 
 ```bash
-curl -N "$BASE/api/jobs/<jid>/stream?token=$TOKEN"
+curl -N -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/<jid>/stream"
 ```
 
 `-N` disables curl's buffering. To resume after a disconnect:
 
 ```bash
-curl -N "$BASE/api/jobs/<jid>/stream?token=$TOKEN&last_event_id=42"
+curl -N -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/<jid>/stream?last_event_id=42"
 ```
 
 Heartbeats arrive as `: hb\n\n` every 15s — useful as a liveness check.
@@ -311,10 +319,11 @@ Or set it per-project via `PATCH /api/projects/<pid>` with
 
 ### "SSE just hangs on the iPhone"
 
-- Open `http://<lan-ip>:8765/healthz` — if that fails, it's a network /
-  service problem, not SSE.
-- Heartbeats: with `curl -N $BASE/api/jobs/<jid>/stream?token=$TOKEN` you
-  should see a `: hb` line within 15s. If not, the server isn't serving
+- Open `https://<mac>.<tailnet>.ts.net/healthz` (or `http://127.0.0.1:8765/healthz`
+  on the Mac) — if that fails, it's a network / Tailscale / service problem, not
+  SSE. Check `tailscale serve status` and that the iPhone has Tailscale connected.
+- Heartbeats: with `curl -N -H "Authorization: Bearer $TOKEN" $BASE/api/jobs/<jid>/stream`
+  you should see a `: hb` line within 15s. If not, the server isn't serving
   the stream — check `server.err.log`.
 - Replay-then-live: subscribing replays from disk first. For a very long
   transcript this can take a moment; the first byte is `retry: 3000`,
