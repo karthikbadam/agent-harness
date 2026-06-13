@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # One-command install for agent-harness on macOS.
 #
-# Plain HTTP on the LAN; no TLS, no profile install on the iPhone.
+# The service binds to 127.0.0.1 only (never the LAN). Reach it from other
+# devices over your tailnet via Tailscale Serve, which terminates HTTPS and
+# proxies to loopback. If `tailscale` is present we set the proxy up for you.
 # Idempotent: re-running keeps the existing token.
 set -euo pipefail
 
@@ -35,9 +37,6 @@ bold "==> Auth token"
 "$VENV_BIN/agent-harness" gen-token >/dev/null
 TOKEN="$("$VENV_BIN/python" -c "from agent_harness import config; print(config.load_toml()['auth_token'])")"
 
-LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
-[[ -n "$LAN_IP" ]] || { err "No LAN IP via en0/en1. Connect to WiFi and re-run."; exit 1; }
-
 bold "==> launchd ($LABEL)"
 mkdir -p "$PLIST_DIR"
 SAFE_PATH="$VENV_BIN:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
@@ -52,12 +51,50 @@ launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 sleep 1
 
+# Front the loopback service with Tailscale Serve (tailnet-only HTTPS). We use
+# `serve`, never `funnel` — funnel would publish this RCE-capable service to the
+# public internet.
+bold "==> Tailscale"
+TS_NAME=""
+if command -v tailscale >/dev/null 2>&1; then
+  tailscale serve --bg "$PORT" >/dev/null 2>&1 || \
+    err "tailscale serve failed; run 'tailscale up' then re-run, or set it up manually."
+  TS_NAME="$("$VENV_BIN/python" - <<'PY' 2>/dev/null || true
+import json, subprocess
+try:
+    out = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True).stdout
+    print(json.loads(out).get("Self", {}).get("DNSName", "").rstrip("."))
+except Exception:
+    pass
+PY
+)"
+else
+  err "tailscale not found. Install it (https://tailscale.com/download), run 'tailscale up' on this Mac and the iPhone, enable MagicDNS + HTTPS in the admin console, then 'tailscale serve --bg $PORT'."
+fi
+
 cat <<EOF
 
 $(bold "Done.")
 
-Open this on your iPhone (same WiFi):
-  http://$LAN_IP:$PORT/auth?token=$TOKEN
+EOF
+if [[ -n "$TS_NAME" ]]; then
+  cat <<EOF
+Open this on any device on your tailnet (works beyond your WiFi):
+  https://$TS_NAME/auth#token=$TOKEN
+
+The token is in the URL fragment (#), so it never reaches the server or its
+logs — the page swaps it for an HttpOnly cookie and clears the URL.
+EOF
+else
+  cat <<EOF
+Once Tailscale Serve is up, open (from any tailnet device):
+  https://<mac>.<tailnet>.ts.net/auth#token=$TOKEN
+
+For local testing on this Mac only:
+  http://127.0.0.1:$PORT/auth#token=$TOKEN
+EOF
+fi
+cat <<EOF
 
 Logs:    tail -f $AH_HOME/logs/server.err.log
 Stop:    launchctl unload $PLIST
