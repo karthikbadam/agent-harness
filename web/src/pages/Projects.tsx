@@ -116,7 +116,7 @@ export function ProjectsPage() {
       {/* Masonry 2-column grid using CSS columns */}
       {displayed.length > 0 && (
         <Box
-          sx={{
+          css={{
             columnCount: { base: 1, sm: 2 },
             columnGap: "12px",
           }}
@@ -124,7 +124,7 @@ export function ProjectsPage() {
           {displayed.map((p) => (
             <Box
               key={p.id}
-              sx={{ breakInside: "avoid" }}
+              css={{ breakInside: "avoid" }}
               mb={3}
               display="inline-block"
               w="100%"
@@ -281,7 +281,7 @@ function ProjectCard({
             fontSize="sm"
             color="fg.muted"
             lineHeight="short"
-            sx={{
+            css={{
               display: "-webkit-box",
               WebkitLineClamp: 3,
               WebkitBoxOrient: "vertical",

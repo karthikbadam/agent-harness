@@ -167,8 +167,10 @@ function MobileSwipeable({
 
   return (
     <Box ref={wrapRef} position="relative">
-      {/* Delete pane behind row, exposed when row translates left. */}
+      {/* Delete pane behind row, exposed when row translates left. Hidden
+          when at rest so it can't peek through the row's rounded corners. */}
       <Flex
+        display={open || dx !== 0 ? "flex" : "none"}
         position="absolute"
         top={0}
         bottom={0}

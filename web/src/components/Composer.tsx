@@ -1,6 +1,7 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   Box,
+  chakra,
   Flex,
   IconButton,
   Image,
@@ -243,15 +244,12 @@ export function Composer({
           <LuPaperclip />
         </IconButton>
 
-        <Box
-          as="textarea"
+        <chakra.textarea
           ref={textareaRef}
           rows={1}
           placeholder={placeholder}
           value={value}
-          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-            setValue(e.target.value)
-          }
+          onChange={(e) => setValue(e.target.value)}
           onKeyDown={onKeyDown}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
@@ -269,7 +267,7 @@ export function Composer({
           lineHeight="1.4"
           fontFamily="inherit"
           color="inherit"
-          sx={{
+          css={{
             "&:focus": { boxShadow: "none", outline: "none" },
             "&::placeholder": { color: "var(--chakra-colors-fg-subtle)" },
           }}
