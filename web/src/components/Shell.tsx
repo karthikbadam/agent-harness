@@ -143,7 +143,7 @@ export function Shell({
       borderBottomWidth="1px"
       borderColor="border.subtle"
     >
-      <Container maxW={CONTENT_MAX_W} px={{ base: 4, md: 6 }} py={2}>
+      <Container maxW={CONTENT_MAX_W} px={{ base: 4, md: 6 }} py={3}>
         <Flex align="flex-start" gap={3}>
           {backButton}
           <Stack gap={0.5} flex="1" minW={0}>
@@ -286,7 +286,7 @@ export function Shell({
         <Container
           maxW={CONTENT_MAX_W}
           px={{ base: 3, md: 6 }}
-          pt={{ base: 3, md: 3 }}
+          pt={{ base: 2, md: 2 }}
           pb={{ base: 3, md: 4 }}
           w="100%"
         >
