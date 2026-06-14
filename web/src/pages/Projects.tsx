@@ -184,7 +184,7 @@ function ProjectCard({
       rounded="2xl"
       overflow="hidden"
       borderWidth="1px"
-      borderColor="border.subtle"
+      borderColor="border"
       cursor="pointer"
       onClick={onClick}
       _hover={{ shadow: "md", transform: "translateY(-1px)" }}
