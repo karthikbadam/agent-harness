@@ -286,7 +286,6 @@ export function Shell({
         <Container
           maxW={CONTENT_MAX_W}
           px={{ base: 3, md: 6 }}
-          pt={{ base: 2, md: 2 }}
           pb={{ base: 3, md: 4 }}
           w="100%"
         >
