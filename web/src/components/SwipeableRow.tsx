@@ -33,7 +33,13 @@ export function SwipeableRow({
   disabled = false,
 }: Props) {
   return (
-    <Box position="relative" role="group">
+    <Box
+      position="relative"
+      css={{
+        "& [data-delete-btn]": { opacity: 0, transition: "opacity 0.15s" },
+        "&:hover [data-delete-btn]": { opacity: 1 },
+      }}
+    >
       {disabled ? (
         children
       ) : (
@@ -75,17 +81,17 @@ function HoverDeleteButton({
     <IconButton
       hideBelow="md"
       aria-label="Delete"
+      data-delete-btn=""
       size="xs"
       variant="ghost"
       position="absolute"
       top={2}
       right={2}
-      opacity={confirming ? 1 : 0}
-      _groupHover={{ opacity: 1 }}
+      opacity={confirming ? 1 : undefined}
       transition="opacity 0.15s, background 0.15s, color 0.15s"
       color={confirming ? "red.fg" : "fg.subtle"}
       bg={confirming ? "red.subtle" : undefined}
-      _hover={{ color: "red.fg", bg: "red.subtle" }}
+      _hover={{ color: "red.fg", bg: "red.subtle", opacity: 1 }}
       onMouseLeave={() => setConfirming(false)}
       onClick={handleClick}
       title={confirming ? "Click again to confirm delete" : "Delete"}

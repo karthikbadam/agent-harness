@@ -3,14 +3,12 @@ import { useNavigate } from "react-router-dom";
 import {
   Box,
   Center,
-  Drawer,
   Flex,
   Heading,
   HStack,
   IconButton,
   Image,
   Input,
-  Portal,
   Spinner,
   Stack,
   Text,
@@ -18,12 +16,12 @@ import {
 import {
   LuPin,
   LuClock,
-  LuPencilLine,
   LuSearch,
   LuX,
 } from "react-icons/lu";
 
-import { Shell, MOBILE_TAB_HEIGHT } from "../components/Shell";
+import { Shell } from "../components/Shell";
+import { StickyComposer } from "../components/StickyComposer";
 import { NewProjectComposer } from "../components/NewProjectComposer";
 import { SwipeableRow } from "../components/SwipeableRow";
 import { relativeCardDate, parseServerDate } from "../api/dates";
@@ -48,7 +46,6 @@ export function ProjectsPage() {
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [composerOpen, setComposerOpen] = useState(false);
 
   const displayed = useMemo(() => {
     if (!searchQuery.trim()) return sorted;
@@ -76,7 +73,7 @@ export function ProjectsPage() {
   return (
     <Shell
       title="Projects"
-      composerHeight={0}
+      composerHeight={110}
       right={
         <IconButton
           aria-label="Search"
@@ -117,7 +114,7 @@ export function ProjectsPage() {
       {displayed.length > 0 && (
         <Box
           css={{
-            columnCount: { base: 1, sm: 2 },
+            columnCount: { base: 1, sm: 2, xl: 3 },
             columnGap: "12px",
           }}
         >
@@ -145,66 +142,9 @@ export function ProjectsPage() {
         </Box>
       )}
 
-      {/* FAB: compose button */}
-      <Box
-        position="fixed"
-        right={6}
-        bottom={{
-          base: `calc(${MOBILE_TAB_HEIGHT}px + env(safe-area-inset-bottom) + 16px)`,
-          md: "24px",
-        }}
-        zIndex={20}
-      >
-        <IconButton
-          aria-label="New project"
-          size="lg"
-          rounded="full"
-          bg="fg"
-          color="bg"
-          boxShadow="lg"
-          onClick={() => setComposerOpen(true)}
-          _hover={{ bg: "fg.muted" }}
-        >
-          <LuPencilLine />
-        </IconButton>
-      </Box>
-
-      {/* New project drawer */}
-      <Drawer.Root
-        open={composerOpen}
-        onOpenChange={(e) => setComposerOpen(e.open)}
-        placement="bottom"
-      >
-        <Portal>
-          <Drawer.Backdrop />
-          <Drawer.Positioner>
-            <Drawer.Content
-              borderTopRadius="2xl"
-              maxH="85dvh"
-              pb="env(safe-area-inset-bottom)"
-            >
-              <Drawer.Header borderBottomWidth="1px" borderColor="border.subtle">
-                <Drawer.Title fontSize="md">New project</Drawer.Title>
-                <Drawer.CloseTrigger asChild>
-                  <IconButton
-                    aria-label="Close"
-                    variant="ghost"
-                    size="sm"
-                    position="absolute"
-                    top={3}
-                    right={3}
-                  >
-                    <LuX />
-                  </IconButton>
-                </Drawer.CloseTrigger>
-              </Drawer.Header>
-              <Drawer.Body px={0} pb={0} overflowY="auto">
-                <NewProjectComposer />
-              </Drawer.Body>
-            </Drawer.Content>
-          </Drawer.Positioner>
-        </Portal>
-      </Drawer.Root>
+      <StickyComposer>
+        <NewProjectComposer />
+      </StickyComposer>
     </Shell>
   );
 }
