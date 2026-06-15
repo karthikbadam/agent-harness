@@ -1,0 +1,7 @@
+Reading additional input from stdin...
+{"type":"thread.started","thread_id":"019ecd2b-dead-7fe2-8e7f-000000000001"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc 'exit 2'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc 'exit 2'","aggregated_output":"boom\n","exit_code":2,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"reasoning","text":"the command failed"}}
+{"type":"turn.failed","error":{"message":"model returned an error"}}
