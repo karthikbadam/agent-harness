@@ -29,6 +29,7 @@ def _to_out(j: models.Job) -> JobOut:
         schedule_id=j.schedule_id,
         task_id=j.task_id,
         kind=j.kind,
+        agent_provider=j.agent_provider,
         cwd=j.cwd,
         created_at=j.created_at,
         ended_at=j.ended_at,
@@ -78,8 +79,11 @@ async def create_job(
     project_id = body.project_id or _resolve_default_project_id(s)
     try:
         jid = mgr.create_job(
-            project_id, body.prompt, body.title or "",
+            project_id,
+            body.prompt,
+            body.title or "",
             attachment_ids=body.attachment_ids,
+            agent_provider=body.agent_provider,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
