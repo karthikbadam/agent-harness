@@ -23,6 +23,7 @@ import {
   ProviderPicker,
   type ProviderValue,
 } from "../components/ProviderPicker";
+import { ProjectSettingsButton } from "../components/ProjectSettingsButton";
 import { StickyComposer } from "../components/StickyComposer";
 import { TaskCard } from "../components/TaskCard";
 import { parseServerDate, relativeTime } from "../api/dates";
@@ -72,6 +73,7 @@ export function ProjectDetailPage() {
                 <Text hideBelow="md">View plan</Text>
               </Button>
             )}
+            <ProjectSettingsButton project={project} />
             <AutopilotToggle projectId={project.id} />
           </>
         ) : undefined

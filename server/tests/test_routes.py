@@ -80,6 +80,37 @@ async def test_projects_crud(app_client) -> None:
     assert r.status_code == 404
 
 
+async def test_delete_job_with_outcome_succeeds(app_client) -> None:
+    # Regression: a job that produced an Outcome (every planner/execute job
+    # does) used to 500 on delete with a FOREIGN KEY constraint error.
+    from agent_harness import models
+    from agent_harness.db import session_scope
+
+    client, _ = app_client
+    auth = {"Authorization": "Bearer test-token"}
+    r = await client.post("/api/projects", json={"name": "d", "path": "/tmp/d"}, headers=auth)
+    pid = r.json()["id"]
+    with session_scope() as s:
+        task = models.Task(project_id=pid, title="t", prompt="p")
+        s.add(task)
+        s.flush()
+        job = models.Job(project_id=pid, title="j", status="done", task_id=task.id, kind="execute")
+        s.add(job)
+        s.flush()
+        s.add(
+            models.Outcome(
+                task_id=task.id, job_id=job.id, status="success", kind="execute", summary="ok"
+            )
+        )
+        s.flush()
+        jid = job.id
+
+    r = await client.delete(f"/api/jobs/{jid}", headers=auth)
+    assert r.status_code == 204
+    r = await client.get(f"/api/jobs/{jid}", headers=auth)
+    assert r.status_code == 404
+
+
 async def test_project_agent_provider_round_trip(app_client) -> None:
     client, _ = app_client
     auth = {"Authorization": "Bearer test-token"}

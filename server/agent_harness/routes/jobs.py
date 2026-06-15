@@ -188,6 +188,21 @@ def delete_job(job_id: str, s: Session = Depends(get_session)) -> None:
         raise HTTPException(404, "not found")
     if j.status in {"running", "queued"}:
         raise HTTPException(409, "stop the job first")
+    # Outcomes/artifacts/driver_notes FK to this job but aren't covered by the
+    # Job.turns SQLA cascade, so a bare delete trips a FOREIGN KEY constraint
+    # for any job that produced a checkpoint (every planner/execute job does).
+    # Drain the outcome rows and detach the nullable references first.
+    s.execute(models.Outcome.__table__.delete().where(models.Outcome.job_id == job_id))
+    s.execute(
+        models.Artifact.__table__.update()
+        .where(models.Artifact.job_id == job_id)
+        .values(job_id=None)
+    )
+    s.execute(
+        models.DriverNote.__table__.update()
+        .where(models.DriverNote.job_id == job_id)
+        .values(job_id=None)
+    )
     s.delete(j)
     s.commit()
     settings = get_settings()
