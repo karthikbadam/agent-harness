@@ -48,6 +48,10 @@ class Project(Base):
     permission_mode: Mapped[str] = mapped_column(String(32), default="acceptEdits")
     dangerously_skip: Mapped[bool] = mapped_column(default=False)
     extra_claude_args: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Default agent provider for this project: claude | codex | auto.
+    # ``auto`` runs Claude for the plan phase and Codex for execute/integrate/
+    # ad-hoc. Jobs resolve this to a concrete claude|codex at spawn time.
+    agent_provider: Mapped[str] = mapped_column(String(8), default="claude")
     idle_timeout_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_default: Mapped[bool] = mapped_column(default=False)
     instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -89,6 +93,10 @@ class Job(Base):
     schedule_id: Mapped[Optional[str]] = mapped_column(ForeignKey("schedules.id"), nullable=True)
     task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"), nullable=True)
     kind: Mapped[str] = mapped_column(String(12), default="ad_hoc")  # ad_hoc|plan|execute|integrate
+    # Resolved provider that actually ran this job: claude | codex. Well-defined
+    # per job because ``kind`` is fixed for a job's lifetime and each phase is a
+    # separate Job (see services.task_runner.advance_to_executing).
+    agent_provider: Mapped[str] = mapped_column(String(8), default="claude")
     cwd: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
@@ -195,6 +203,9 @@ class Task(Base):
     # Per-task model override (passed as ``--model`` at spawn). Used by the
     # loop's stuck-detection to run a "rethink" iteration on a stronger model.
     model_override: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Per-task agent provider override (claude|codex|auto). Null = inherit the
+    # project default. Mirrors the model_override / idle_timeout_seconds pattern.
+    agent_provider: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     worktree_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     worktree_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     integration_status: Mapped[Optional[str]] = mapped_column(
