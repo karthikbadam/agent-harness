@@ -19,6 +19,10 @@ import { Shell } from "../components/Shell";
 import { AutopilotToggle } from "../components/AutopilotToggle";
 import { Composer } from "../components/Composer";
 import { MarkdownText } from "../components/MarkdownText";
+import {
+  ProviderPicker,
+  type ProviderValue,
+} from "../components/ProviderPicker";
 import { StickyComposer } from "../components/StickyComposer";
 import { TaskCard } from "../components/TaskCard";
 import { parseServerDate, relativeTime } from "../api/dates";
@@ -34,6 +38,12 @@ export function ProjectDetailPage() {
   const plan = usePlan(projectId);
   const { data: lastPlan } = useLastPlan(projectId);
   const [planOpen, setPlanOpen] = useState(false);
+  // Provider for prompts on this project. Defaults to the project's configured
+  // provider; a per-prompt override takes precedence until the user changes it.
+  const [providerOverride, setProviderOverride] =
+    useState<ProviderValue | null>(null);
+  const provider: ProviderValue =
+    providerOverride ?? (project?.agent_provider as ProviderValue) ?? "claude";
   const groups = useMemo(() => groupByPhase(tasks ?? []), [tasks]);
 
   // Planning shows up as a regular task with mode='plan' in the list (the
@@ -109,12 +119,19 @@ export function ProjectDetailPage() {
       )}
       {project && (
         <StickyComposer>
+          <Flex px={4} pt={2} justify="flex-end">
+            <ProviderPicker value={provider} onChange={setProviderOverride} />
+          </Flex>
           <Composer
             placeholder="Plan a new task — describe what should happen"
             disabled={plan.isPending}
             projectId={projectId}
             onSend={async (prompt, attachmentIds) => {
-              await plan.mutateAsync({ ask: prompt, attachmentIds });
+              await plan.mutateAsync({
+                ask: prompt,
+                attachmentIds,
+                agentProvider: provider,
+              });
             }}
           />
         </StickyComposer>

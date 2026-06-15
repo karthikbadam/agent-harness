@@ -20,7 +20,7 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { Composer } from "./Composer";
-import { ProviderPicker, type ProviderChoice } from "./ProviderPicker";
+import { ProviderPicker, type ProviderValue } from "./ProviderPicker";
 import { tasksApi } from "../api/tasks";
 import { useCreateProject, usePathSuggestions } from "../hooks/useProjects";
 import type { PathSuggestion } from "../types";
@@ -32,7 +32,7 @@ export function NewProjectComposer() {
   const create = useCreateProject();
   const [selected, setSelected] = useState<PathSuggestion | null>(null);
   const [newFolder, setNewFolder] = useState<string | null>(null); // null = existing-path mode
-  const [provider, setProvider] = useState<ProviderChoice>("claude");
+  const [provider, setProvider] = useState<ProviderValue>("claude");
   const { data: suggestions, isLoading: loadingSuggestions } =
     usePathSuggestions(true);
 

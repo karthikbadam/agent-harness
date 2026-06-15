@@ -1419,6 +1419,8 @@ export interface components {
         PlanCreate: {
             /** Ask */
             ask: string;
+            /** Agent Provider */
+            agent_provider?: ("claude" | "codex" | "auto") | null;
             /** Attachment Ids */
             attachment_ids?: string[];
         };

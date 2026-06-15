@@ -15,7 +15,7 @@ import { Composer } from "../components/Composer";
 import { JobCard } from "../components/JobCard";
 import {
   ProviderPicker,
-  type ProviderChoice,
+  type ProviderValue,
 } from "../components/ProviderPicker";
 import { StickyComposer } from "../components/StickyComposer";
 import { parseServerDate } from "../api/dates";
@@ -31,7 +31,7 @@ export function JobsPage() {
   const { data: allJobs, isLoading, error } = useJobs();
   const { data: projects } = useProjects();
   const createJob = useCreateJob();
-  const [provider, setProvider] = useState<ProviderChoice>("inherit");
+  const [provider, setProvider] = useState<ProviderValue>("claude");
 
   const jobs = useMemo(() => {
     if (!allJobs) return undefined;
@@ -128,11 +128,7 @@ export function JobsPage() {
       </Stack>
       <StickyComposer>
         <Flex px={4} pt={2} justify="flex-end">
-          <ProviderPicker
-            value={provider}
-            onChange={setProvider}
-            includeInherit
-          />
+          <ProviderPicker value={provider} onChange={setProvider} />
         </Flex>
         <Composer
           placeholder="Start an ad-hoc job…"
@@ -142,7 +138,7 @@ export function JobsPage() {
               prompt,
               project_id: projectFilter || undefined,
               attachment_ids: attachmentIds,
-              agent_provider: provider === "inherit" ? undefined : provider,
+              agent_provider: provider,
             });
             navigate(`/jobs/${job.id}`);
           }}

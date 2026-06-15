@@ -92,6 +92,49 @@ def test_create_job_task_override_beats_project(initdb: Path) -> None:
     assert _job_provider(jid) == "codex"
 
 
+def test_planner_propagates_provider_to_children(initdb: Path) -> None:
+    from agent_harness.services.planner import _propagate_provider
+
+    pid = _project("claude")
+    with session_scope() as s:
+        plan = models.Task(
+            project_id=pid, title="Plan", prompt="x", mode="plan", agent_provider="codex"
+        )
+        s.add(plan)
+        s.flush()
+        plan_id = plan.id
+        kids = []
+        for i in range(2):
+            t = models.Task(
+                project_id=pid, title=f"c{i}", prompt="p", mode="execute_only", source="planner"
+            )
+            s.add(t)
+            s.flush()
+            kids.append(t.id)
+    _propagate_provider(plan_id, kids)
+    with session_scope() as s:
+        for kid in kids:
+            assert s.get(models.Task, kid).agent_provider == "codex"
+
+
+def test_planner_propagate_noop_when_plan_has_no_override(initdb: Path) -> None:
+    from agent_harness.services.planner import _propagate_provider
+
+    pid = _project("claude")
+    with session_scope() as s:
+        plan = models.Task(project_id=pid, title="Plan", prompt="x", mode="plan")  # no override
+        s.add(plan)
+        s.flush()
+        plan_id = plan.id
+        t = models.Task(project_id=pid, title="c", prompt="p", source="planner")
+        s.add(t)
+        s.flush()
+        kid = t.id
+    _propagate_provider(plan_id, [kid])
+    with session_scope() as s:
+        assert s.get(models.Task, kid).agent_provider is None  # inherit project default
+
+
 def test_create_job_auto_plan_phase_resolves_claude(initdb: Path) -> None:
     pid = _project("auto")
     with session_scope() as s:

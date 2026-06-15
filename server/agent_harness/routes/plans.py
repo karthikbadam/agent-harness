@@ -57,6 +57,7 @@ async def plan_project(
         status="ready",
         source="user",
         mode="plan",
+        agent_provider=body.agent_provider,
     )
     s.add(task)
     s.commit()

@@ -352,12 +352,37 @@ def parse_and_insert_from_log_dir(
     if parsed and isinstance(parsed, list):
         ids = _insert_drafts(project_id, parsed, plan_task_id=plan_task_id)
         if ids:
+            _propagate_provider(plan_task_id, ids)
             return ids
     log.info(
         "planner emitted no usable tasks for %s; inserting fallback research task",
         plan_task_id,
     )
-    return _insert_fallback_research(project_id, ask, plan_task_id=plan_task_id)
+    ids = _insert_fallback_research(project_id, ask, plan_task_id=plan_task_id)
+    _propagate_provider(plan_task_id, ids)
+    return ids
+
+
+def _propagate_provider(plan_task_id: str | None, child_ids: list[str]) -> None:
+    """Copy the plan task's agent_provider override onto its child tasks.
+
+    The user's provider choice at prompt time lands on the ``mode='plan'`` task;
+    this flows it to every task the planner drafts so the work runs on the
+    chosen backend. No-op when the plan task has no override (null = inherit the
+    project default at job-spawn time).
+    """
+    if not plan_task_id or not child_ids:
+        return
+    with session_scope() as s:
+        parent = s.get(models.Task, plan_task_id)
+        prov = parent.agent_provider if parent is not None else None
+        if not prov:
+            return
+        s.execute(
+            models.Task.__table__.update()
+            .where(models.Task.id.in_(child_ids))
+            .values(agent_provider=prov)
+        )
 
 
 def replace_drafts_from_log_dir(project_id: str, plan_task_id: str, log_dir: Path) -> list[str]:
@@ -389,7 +414,9 @@ def replace_drafts_from_log_dir(project_id: str, plan_task_id: str, log_dir: Pat
                 )
             )
             s.execute(models.Task.__table__.delete().where(models.Task.id.in_(draft_ids)))
-    return _insert_drafts(project_id, parsed, plan_task_id=plan_task_id)
+    ids = _insert_drafts(project_id, parsed, plan_task_id=plan_task_id)
+    _propagate_provider(plan_task_id, ids)
+    return ids
 
 
 def _insert_fallback_research(

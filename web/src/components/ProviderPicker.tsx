@@ -1,8 +1,6 @@
 import { HStack, SegmentGroup, Text } from "@chakra-ui/react";
 
 export type ProviderValue = "claude" | "codex" | "auto";
-// "inherit" means: don't send an override; the job inherits the project default.
-export type ProviderChoice = ProviderValue | "inherit";
 
 const LABELS: Record<ProviderValue, string> = {
   auto: "Auto",
@@ -10,33 +8,29 @@ const LABELS: Record<ProviderValue, string> = {
   codex: "Codex",
 };
 
+const ITEMS = [
+  { value: "auto", label: LABELS.auto },
+  { value: "claude", label: LABELS.claude },
+  { value: "codex", label: LABELS.codex },
+];
+
 interface ProviderPickerProps {
-  value: ProviderChoice;
-  onChange: (v: ProviderChoice) => void;
-  /** Show a leading "Default" segment that maps to project inheritance. */
-  includeInherit?: boolean;
+  value: ProviderValue;
+  onChange: (v: ProviderValue) => void;
   label?: string;
   size?: "xs" | "sm";
 }
 
 /**
- * Segmented Auto/Claude/Codex picker. `auto` runs Claude for planning and
- * Codex for execution. When `includeInherit` is set, a leading "Default"
- * segment lets a one-off (e.g. an ad-hoc job) fall back to the project default.
+ * Segmented Auto/Claude/Codex picker. Claude is the default. `auto` runs
+ * Claude for planning and Codex for execution.
  */
 export function ProviderPicker({
   value,
   onChange,
-  includeInherit = false,
   label = "AGENT",
   size = "xs",
 }: ProviderPickerProps) {
-  const items = [
-    ...(includeInherit ? [{ value: "inherit", label: "Default" }] : []),
-    { value: "auto", label: LABELS.auto },
-    { value: "claude", label: LABELS.claude },
-    { value: "codex", label: LABELS.codex },
-  ];
   return (
     <HStack gap={2}>
       {label && (
@@ -51,13 +45,11 @@ export function ProviderPicker({
       )}
       <SegmentGroup.Root
         value={value}
-        onValueChange={(d) =>
-          onChange((d.value as ProviderChoice) ?? "inherit")
-        }
+        onValueChange={(d) => onChange((d.value as ProviderValue) ?? "claude")}
         size={size}
       >
         <SegmentGroup.Indicator />
-        <SegmentGroup.Items items={items} />
+        <SegmentGroup.Items items={ITEMS} />
       </SegmentGroup.Root>
     </HStack>
   );

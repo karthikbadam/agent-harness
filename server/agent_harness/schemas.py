@@ -434,6 +434,9 @@ class SuggestedAction(BaseModel):
 
 class PlanCreate(BaseModel):
     ask: str
+    # Provider for this plan and the tasks it produces (claude|codex|auto).
+    # null = inherit the project default.
+    agent_provider: Literal["claude", "codex", "auto"] | None = None
     attachment_ids: list[str] = Field(default_factory=list)
 
 

@@ -182,10 +182,12 @@ export function usePlan(projectId: string) {
     mutationFn: ({
       ask,
       attachmentIds = [],
+      agentProvider,
     }: {
       ask: string;
       attachmentIds?: string[];
-    }) => tasksApi.plan(projectId, ask, attachmentIds),
+      agentProvider?: "claude" | "codex" | "auto";
+    }) => tasksApi.plan(projectId, ask, attachmentIds, agentProvider),
     onSuccess: () => invalidateTasksFor(qc, projectId),
   });
 }
