@@ -29,13 +29,38 @@ The harness currently has a single agent integration:
 Codex CLI supports the needed non-interactive mode through:
 
 ```bash
-codex --ask-for-approval never exec --json --sandbox read-only --cd <repo> "<prompt>"
-codex --ask-for-approval never exec --json --sandbox workspace-write --cd <repo> "<prompt>"
+codex -a never -s read-only      --cd <repo> exec --json --skip-git-repo-check "<prompt>"
+codex -a never -s workspace-write --cd <repo> exec --json --skip-git-repo-check "<prompt>"
 ```
 
 `codex exec --json` emits JSONL events such as `thread.started`,
-`turn.started`, `item.completed`, and `turn.completed`. The runner must ignore
-non-JSON warning/progress lines defensively.
+`turn.started`, `item.started`, `item.completed`, and `turn.completed`. The
+runner must ignore non-JSON warning/progress lines defensively.
+
+> **As built (verified against `codex-cli` 0.139.0 — these supersede the
+> assumptions above):**
+> - `-a/--ask-for-approval` is a **global** flag and must precede the `exec`
+>   subcommand (passing it after `exec` errors). `-s/--sandbox` and `--cd` work
+>   as globals too. `--json`, `--skip-git-repo-check`, `-m/--model`,
+>   `-i/--image` are `exec` options.
+> - **Resume is a subcommand, not a flag:** follow-up turns use
+>   `codex … exec resume <session_id> … <prompt>` — a different argv shape from
+>   the fresh `codex … exec … <prompt>`. `CodexRunner.build_argv()` branches on
+>   `resume_session_id`.
+> - Codex **blocks on a piped stdin**, so the runner spawns it with
+>   `stdin=DEVNULL`.
+> - `--skip-git-repo-check` is passed always (ad-hoc jobs may run outside a git
+>   repo); `--dangerously-bypass-approvals-and-sandbox` replaces `-a`/`-s` when
+>   `dangerously_skip` is set.
+> - Real event schema: `thread.started{thread_id}` (→ session_id) ·
+>   `item.started`/`item.completed` carry an `item` whose `type` is
+>   `command_execution` / `file_change` / `agent_message` / `reasoning` ·
+>   `turn.completed{usage}` (no cost field → `cost_usd=None`) ·
+>   `turn.failed` / top-level `error` → non-zero terminal.
+> - Codex has **no per-tool allowlist**; it gates via `--sandbox` mode. The
+>   harness allowlist + `tool_blocked` retry flow is Claude-only and is inert
+>   for Codex jobs. Claude-specific args (`permission_mode`, `allowed_tools`,
+>   `extra_claude_args`) are never forwarded to Codex — only `default_codex_args`.
 
 ## Data Model And API
 
