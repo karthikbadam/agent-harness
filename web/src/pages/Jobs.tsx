@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
@@ -13,6 +13,10 @@ import {
 import { Shell } from "../components/Shell";
 import { Composer } from "../components/Composer";
 import { JobCard } from "../components/JobCard";
+import {
+  ProviderPicker,
+  type ProviderChoice,
+} from "../components/ProviderPicker";
 import { StickyComposer } from "../components/StickyComposer";
 import { parseServerDate } from "../api/dates";
 import { useCreateJob, useJobs } from "../hooks/useJobs";
@@ -27,6 +31,7 @@ export function JobsPage() {
   const { data: allJobs, isLoading, error } = useJobs();
   const { data: projects } = useProjects();
   const createJob = useCreateJob();
+  const [provider, setProvider] = useState<ProviderChoice>("inherit");
 
   const jobs = useMemo(() => {
     if (!allJobs) return undefined;
@@ -122,6 +127,13 @@ export function JobsPage() {
         ))}
       </Stack>
       <StickyComposer>
+        <Flex px={4} pt={2} justify="flex-end">
+          <ProviderPicker
+            value={provider}
+            onChange={setProvider}
+            includeInherit
+          />
+        </Flex>
         <Composer
           placeholder="Start an ad-hoc job…"
           projectId={projectFilter || undefined}
@@ -130,6 +142,7 @@ export function JobsPage() {
               prompt,
               project_id: projectFilter || undefined,
               attachment_ids: attachmentIds,
+              agent_provider: provider === "inherit" ? undefined : provider,
             });
             navigate(`/jobs/${job.id}`);
           }}

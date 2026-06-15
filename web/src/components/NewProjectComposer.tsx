@@ -20,6 +20,7 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { Composer } from "./Composer";
+import { ProviderPicker, type ProviderChoice } from "./ProviderPicker";
 import { tasksApi } from "../api/tasks";
 import { useCreateProject, usePathSuggestions } from "../hooks/useProjects";
 import type { PathSuggestion } from "../types";
@@ -31,6 +32,7 @@ export function NewProjectComposer() {
   const create = useCreateProject();
   const [selected, setSelected] = useState<PathSuggestion | null>(null);
   const [newFolder, setNewFolder] = useState<string | null>(null); // null = existing-path mode
+  const [provider, setProvider] = useState<ProviderChoice>("claude");
   const { data: suggestions, isLoading: loadingSuggestions } =
     usePathSuggestions(true);
 
@@ -60,17 +62,29 @@ export function NewProjectComposer() {
           setSelected(null);
         }}
       />
+      <Flex
+        align="center"
+        px={4}
+        pt={2.5}
+        pb={1}
+        borderBottomWidth="1px"
+        borderColor="border.subtle"
+      >
+        <ProviderPicker value={provider} onChange={setProvider} />
+      </Flex>
       <Composer
         placeholder={placeholder}
         disabled={!ready || create.isPending}
         onSend={async (ask, attachmentIds) => {
           if (!ready) return;
+          const agentProvider = provider as "claude" | "codex" | "auto";
           const body = isNew
             ? {
                 name: newName.split("/").pop() || newName,
                 path: `${NEW_FOLDER_BASE}${newName}`,
                 create_dir: true,
                 permission_mode: "acceptEdits" as const,
+                agent_provider: agentProvider,
                 dangerously_skip: true,
                 is_default: false,
               }
@@ -79,6 +93,7 @@ export function NewProjectComposer() {
                 path: selected!.path,
                 create_dir: false,
                 permission_mode: "acceptEdits" as const,
+                agent_provider: agentProvider,
                 dangerously_skip: false,
                 is_default: false,
               };

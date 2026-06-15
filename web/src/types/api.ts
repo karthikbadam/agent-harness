@@ -240,6 +240,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Attachment
+         * @description Upload a file to be attached to a conversation turn.
+         */
+        post: operations["upload_attachment_api_attachments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Attachment */
+        delete: operations["delete_attachment_api_attachments__attachment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attachments/{attachment_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve Attachment */
+        get: operations["serve_attachment_api_attachments__attachment_id__file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedules": {
         parameters: {
             query?: never;
@@ -433,12 +487,37 @@ export interface paths {
         put?: never;
         /**
          * Run Task
-         * @description Kick a ready Task. Spawns the first phase's Job:
-         *     - plan / plan_then_execute → Plan Job (kind=plan, cwd=project.path)
-         *     - research / one_shot non-synthetic → Execute Job (kind=execute, cwd=project.path)
-         *     - synthetic (integration) → Integrate Job (kind=integrate, cwd=project.path)
+         * @description Kick a ready Task by spawning its first phase via the single canonical
+         *     path, ``task_runner.kickoff_first_phase`` — which knows every mode/kind
+         *     (loop→start_loop, execute_only→worktree, synthetic→integrate, plan→plan).
+         *     Spawning a job directly here would bypass that (e.g. run a loop as one
+         *     direct turn, or run an execute_only task at the project root with no
+         *     worktree).
          */
         post: operations["run_task_api_tasks__task_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Plan
+         * @description Confirm a drafted plan parked at ``awaiting_ack``: promote its draft
+         *     children to runnable and launch the graph. No Claude turn — the no-unmet-dep
+         *     drafts are kicked via ``kickoff_first_phase`` and the rest sequence through
+         *     the normal dependency/autorun flow.
+         */
+        post: operations["confirm_plan_api_tasks__task_id__confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -956,6 +1035,26 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** AttachmentOut */
+        AttachmentOut: {
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /** Filename */
+            filename: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Url */
+            url: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /**
          * AuthInfo
          * @description Returned to authenticated clients on /api/me.
@@ -966,6 +1065,13 @@ export interface components {
              * @default true
              */
             ok: boolean;
+        };
+        /** Body_upload_attachment_api_attachments_post */
+        Body_upload_attachment_api_attachments_post: {
+            /** File */
+            file: string;
+            /** Project Id */
+            project_id?: string | null;
         };
         /** DriverGlobalStatus */
         DriverGlobalStatus: {
@@ -1049,26 +1155,6 @@ export interface components {
             /** Open Notes */
             open_notes: number;
         };
-        /** AttachmentOut */
-        AttachmentOut: {
-            /** Id */
-            id: string;
-            /** Project Id */
-            project_id?: string | null;
-            /** Job Id */
-            job_id?: string | null;
-            /** Filename */
-            filename: string;
-            /** Mime Type */
-            mime_type: string;
-            /** Url */
-            url: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-        };
         /** FollowupCreate */
         FollowupCreate: {
             /**
@@ -1076,11 +1162,8 @@ export interface components {
              * @default
              */
             prompt: string;
-            /**
-             * Attachment Ids
-             * @default []
-             */
-            attachment_ids: string[];
+            /** Attachment Ids */
+            attachment_ids?: string[];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1129,11 +1212,10 @@ export interface components {
             project_id?: string | null;
             /** Title */
             title?: string | null;
-            /**
-             * Attachment Ids
-             * @default []
-             */
-            attachment_ids: string[];
+            /** Agent Provider */
+            agent_provider?: ("claude" | "codex" | "auto") | null;
+            /** Attachment Ids */
+            attachment_ids?: string[];
         };
         /** JobOut */
         JobOut: {
@@ -1156,6 +1238,11 @@ export interface components {
              * @default ad_hoc
              */
             kind: string;
+            /**
+             * Agent Provider
+             * @default claude
+             */
+            agent_provider: string;
             /**
              * Cwd
              * @default
@@ -1332,11 +1419,8 @@ export interface components {
         PlanCreate: {
             /** Ask */
             ask: string;
-            /**
-             * Attachment Ids
-             * @default []
-             */
-            attachment_ids: string[];
+            /** Attachment Ids */
+            attachment_ids?: string[];
         };
         /** PlanOut */
         PlanOut: {
@@ -1364,6 +1448,12 @@ export interface components {
              * @enum {string}
              */
             permission_mode: "acceptEdits" | "plan" | "default";
+            /**
+             * Agent Provider
+             * @default claude
+             * @enum {string}
+             */
+            agent_provider: "claude" | "codex" | "auto";
             /**
              * Dangerously Skip
              * @default false
@@ -1395,6 +1485,11 @@ export interface components {
             path: string;
             /** Permission Mode */
             permission_mode: string;
+            /**
+             * Agent Provider
+             * @default claude
+             */
+            agent_provider: string;
             /** Dangerously Skip */
             dangerously_skip: boolean;
             /** Extra Claude Args */
@@ -1428,6 +1523,8 @@ export interface components {
             path?: string | null;
             /** Permission Mode */
             permission_mode?: ("acceptEdits" | "plan" | "default") | null;
+            /** Agent Provider */
+            agent_provider?: ("claude" | "codex" | "auto") | null;
             /** Dangerously Skip */
             dangerously_skip?: boolean | null;
             /** Extra Claude Args */
@@ -1556,6 +1653,8 @@ export interface components {
             mode?: ("plan_then_execute" | "one_shot" | "execute_only" | "research" | "plan" | "loop") | null;
             /** Idle Timeout Seconds */
             idle_timeout_seconds?: number | null;
+            /** Agent Provider */
+            agent_provider?: ("claude" | "codex" | "auto") | null;
         };
         /** TaskOut */
         TaskOut: {
@@ -1593,6 +1692,8 @@ export interface components {
             synthetic: boolean;
             /** Idle Timeout Seconds */
             idle_timeout_seconds?: number | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
             /** Parent Task Id */
             parent_task_id?: string | null;
             /** Loop Spec */
@@ -1632,6 +1733,8 @@ export interface components {
             mode?: ("plan_then_execute" | "one_shot" | "execute_only" | "research" | "plan" | "loop") | null;
             /** Idle Timeout Seconds */
             idle_timeout_seconds?: number | null;
+            /** Agent Provider */
+            agent_provider?: ("claude" | "codex" | "auto") | null;
         };
         /** ToolResultEvent */
         ToolResultEvent: {
@@ -1736,11 +1839,8 @@ export interface components {
             started_at?: string | null;
             /** Ended At */
             ended_at?: string | null;
-            /**
-             * Attachment Ids
-             * @default []
-             */
-            attachment_ids: string[];
+            /** Attachment Ids */
+            attachment_ids?: string[];
         };
         /** ValidationError */
         ValidationError: {
@@ -2331,6 +2431,107 @@ export interface operations {
             };
         };
     };
+    upload_attachment_api_attachments_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_attachment_api_attachments_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_attachment_api_attachments__attachment_id__delete: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    serve_attachment_api_attachments__attachment_id__file_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_schedules_api_schedules_get: {
         parameters: {
             query?: {
@@ -2889,6 +3090,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_plan_api_tasks__task_id__confirm_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"][];
                 };
             };
             /** @description Validation Error */
