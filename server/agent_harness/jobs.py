@@ -22,15 +22,35 @@ from sqlalchemy import select
 
 from .broadcaster import BroadcasterRegistry, make_status_event
 from .claude import AttachedFile, ClaudeRunner
+from .codex import CodexRunner
 from .db import session_scope
 from . import models  # noqa: E402 — models must register before select()
 from .schemas import StreamEvent, ToolResultEvent, ToolUseEvent, TurnDoneEvent
 
 log = logging.getLogger(__name__)
 
+# A runner is either backend; both expose the same surface JobManager drives.
+Runner = ClaudeRunner | CodexRunner
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def resolve_provider(setting: str | None, kind: str) -> str:
+    """Resolve a provider setting (claude|codex|auto) + job kind to a concrete
+    backend (claude|codex).
+
+    ``auto`` runs Claude for the read-only planning phase and Codex for the
+    write phases (execute/integrate) and ad-hoc jobs. Unknown settings fall
+    back to Claude (the backward-compatible default).
+    """
+    s = (setting or "claude").lower()
+    if s == "codex":
+        return "codex"
+    if s == "auto":
+        return "claude" if kind == "plan" else "codex"
+    return "claude"
 
 
 _PLANNING_PREFIX = (
@@ -153,14 +173,18 @@ class JobManager:
         claude_path: str | None = None,
         default_extra_args: list[str] | None = None,
         default_idle_timeout_seconds: int = 600,
+        codex_path: str | None = None,
+        default_codex_args: list[str] | None = None,
     ) -> None:
         self.broadcasters = broadcasters
         self.sem = asyncio.Semaphore(max_concurrent)
         self.claude_path = claude_path
         self.default_extra_args = list(default_extra_args or [])
         self.default_idle_timeout_seconds = default_idle_timeout_seconds
+        self.codex_path = codex_path
+        self.default_codex_args = list(default_codex_args or [])
         self._locks: dict[str, asyncio.Lock] = {}
-        self._runners: dict[str, ClaudeRunner] = {}
+        self._runners: dict[str, Runner] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
     # ---------------------------- public api ------------------------------- #
@@ -175,6 +199,7 @@ class JobManager:
         kind: str | None = None,
         cwd: str | None = None,
         attachment_ids: list[str] | None = None,
+        agent_provider: str | None = None,
     ) -> str:
         """Create Job + first Turn rows. Return job_id. Does not start running.
 
@@ -184,23 +209,34 @@ class JobManager:
         spawning a follow-on phase (e.g. ``execute`` after ack) pass ``kind``
         explicitly. ``cwd`` defaults to the project path; the execute phase
         passes the worktree path.
+
+        The provider is resolved here and frozen on the Job: precedence is
+        ``agent_provider`` arg → task override → project default → ``claude``,
+        then mapped through :func:`resolve_provider` against the resolved kind
+        (so ``auto`` picks Claude for plan and Codex for the rest).
         """
         with session_scope() as s:
             proj = s.get(models.Project, project_id)
             if proj is None:
                 raise ValueError(f"unknown project {project_id}")
+            task = s.get(models.Task, task_id) if task_id else None
             resolved_kind = kind
             if resolved_kind is None:
                 if task_id is None:
                     resolved_kind = "ad_hoc"
                 else:
-                    task = s.get(models.Task, task_id)
                     if task is None or task.synthetic:
                         resolved_kind = "integrate"
                     elif task.mode == "plan_then_execute":
                         resolved_kind = "plan"
                     else:
                         resolved_kind = "execute"
+            provider_setting = (
+                agent_provider
+                or (task.agent_provider if task is not None else None)
+                or proj.agent_provider
+            )
+            resolved_provider = resolve_provider(provider_setting, resolved_kind)
             resolved_cwd = cwd if cwd is not None else proj.path
             job = models.Job(
                 project_id=project_id,
@@ -209,6 +245,7 @@ class JobManager:
                 schedule_id=schedule_id,
                 task_id=task_id,
                 kind=resolved_kind,
+                agent_provider=resolved_provider,
                 cwd=resolved_cwd,
             )
             s.add(job)
@@ -234,7 +271,9 @@ class JobManager:
         self._tasks[job_id] = task
         return task
 
-    async def followup(self, job_id: str, prompt: str, attachment_ids: list[str] | None = None) -> int:
+    async def followup(
+        self, job_id: str, prompt: str, attachment_ids: list[str] | None = None
+    ) -> int:
         """Create a new Turn, kick off run. Returns the new turn's idx."""
         with session_scope() as s:
             job = s.get(models.Job, job_id)
@@ -268,7 +307,7 @@ class JobManager:
         await runner.stop()
         return True
 
-    def runner_for(self, job_id: str) -> ClaudeRunner | None:
+    def runner_for(self, job_id: str) -> Runner | None:
         return self._runners.get(job_id)
 
     async def wait(self, job_id: str) -> None:
@@ -310,6 +349,7 @@ class JobManager:
             resume_session_id = job.session_id  # set after first turn
             project_id = project.id
             kind = job.kind
+            provider = job.agent_provider or "claude"
             project_extra = list(project.extra_claude_args or [])
             # Idle-timeout resolution: task override → project override →
             # global default. A task can set 0 to disable the watchdog
@@ -342,23 +382,44 @@ class JobManager:
         broadcaster.start_turn(turn_idx)
         await broadcaster.publish(make_status_event(job_id, turn_idx, "running"))
 
-        runner = ClaudeRunner(
-            job_id=job_id,
-            turn=turn_idx,
-            prompt=prompt,
-            cwd=cwd,
-            resume_session_id=resume_session_id,
-            permission_mode=permission_mode if not dangerously_skip else None,
-            allowed_tools=allowed if not dangerously_skip else [],
-            dangerously_skip=dangerously_skip,
-            extra_args=(
-                self.default_extra_args
-                + project_extra
-                + (["--model", model_override] if model_override else [])
-            ),
-            claude_path=self.claude_path,
-            attachments=attachments,
-        )
+        runner: Runner
+        if provider == "codex":
+            # Codex gates via sandbox mode, not the per-tool allowlist: plan is
+            # read-only, the write phases get workspace-write. Claude-specific
+            # args (permission_mode / allowed_tools / extra_claude_args) are
+            # intentionally NOT forwarded — only the Codex arg list is used.
+            sandbox = "read-only" if kind == "plan" else "workspace-write"
+            runner = CodexRunner(
+                job_id=job_id,
+                turn=turn_idx,
+                prompt=prompt,
+                cwd=cwd,
+                resume_session_id=resume_session_id,
+                sandbox=sandbox,
+                dangerously_skip=dangerously_skip,
+                extra_args=list(self.default_codex_args),
+                model=model_override,
+                codex_path=self.codex_path,
+                attachments=attachments,
+            )
+        else:
+            runner = ClaudeRunner(
+                job_id=job_id,
+                turn=turn_idx,
+                prompt=prompt,
+                cwd=cwd,
+                resume_session_id=resume_session_id,
+                permission_mode=permission_mode if not dangerously_skip else None,
+                allowed_tools=allowed if not dangerously_skip else [],
+                dangerously_skip=dangerously_skip,
+                extra_args=(
+                    self.default_extra_args
+                    + project_extra
+                    + (["--model", model_override] if model_override else [])
+                ),
+                claude_path=self.claude_path,
+                attachments=attachments,
+            )
         self._runners[job_id] = runner
         start_ts = utcnow()
         self._mark_turn_running(job_id, turn_idx, pid=None, started_at=start_ts)
@@ -444,7 +505,7 @@ class JobManager:
         self,
         job_id: str,
         turn_idx: int,
-        runner: ClaudeRunner,
+        runner: Runner,
         last_event: StreamEvent | None,
         timed_out: bool = False,
     ) -> None:

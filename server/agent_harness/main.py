@@ -74,6 +74,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         claude_path=settings.claude_path,
         default_extra_args=settings.default_claude_args,
         default_idle_timeout_seconds=settings.idle_timeout_seconds,
+        codex_path=settings.codex_path,
+        default_codex_args=settings.default_codex_args,
     )
     app.state.broadcasters = registry
     app.state.job_manager = manager
