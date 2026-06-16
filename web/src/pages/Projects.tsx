@@ -263,7 +263,8 @@ function ProjectCard({
             h="40"
             objectFit="cover"
             display="block"
-            filter="saturate(0.7)"
+            opacity={0.5}
+            filter="saturate(0.1)"
             transition="filter 0.2s"
             _groupHover={{ filter: "saturate(1)" }}
           />

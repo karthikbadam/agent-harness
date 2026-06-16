@@ -50,10 +50,8 @@ export function NewProjectComposer() {
     <Box>
       <Flex
         align="center"
-        gap={{ base: 4, md: 8 }}
-        rowGap={2}
-        px={4}
-        py={2.5}
+        gap={{ base: 0, md: 2 }}
+        rowGap={0}
         borderBottomWidth="1px"
         borderColor="border.subtle"
         wrap="wrap"

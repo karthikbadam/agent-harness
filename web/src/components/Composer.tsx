@@ -59,9 +59,7 @@ export function Composer({
     const hasContent = text || staged.some((s) => s.attachment);
     if (!hasContent || busy || disabled || uploadsInFlight) return;
     setBusy(true);
-    const ids = staged
-      .filter((s) => s.attachment)
-      .map((s) => s.attachment!.id);
+    const ids = staged.filter((s) => s.attachment).map((s) => s.attachment!.id);
     try {
       await onSend(text, ids);
       setValue("");
@@ -105,9 +103,7 @@ export function Composer({
           ),
         );
       } catch {
-        setStaged((prev) =>
-          prev.filter((s) => s.localId !== sf.localId),
-        );
+        setStaged((prev) => prev.filter((s) => s.localId !== sf.localId));
         URL.revokeObjectURL(sf.objectUrl);
       }
     }
@@ -131,8 +127,8 @@ export function Composer({
 
   return (
     <Box
-      px={3}
-      pt={3}
+      px={2}
+      pt={2}
       pb="max(env(safe-area-inset-bottom), 10px)"
       bg="bg.subtle"
     >
