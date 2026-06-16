@@ -13,12 +13,7 @@ import {
   Stack,
   Text,
 } from "@chakra-ui/react";
-import {
-  LuPin,
-  LuClock,
-  LuSearch,
-  LuX,
-} from "react-icons/lu";
+import { LuPin, LuClock, LuSearch, LuX } from "react-icons/lu";
 
 import { Shell } from "../components/Shell";
 import { StickyComposer } from "../components/StickyComposer";
@@ -179,6 +174,7 @@ function ProjectCard({
 
   return (
     <Flex
+      role="group"
       direction="column"
       bg="bg"
       rounded="2xl"
@@ -255,15 +251,32 @@ function ProjectCard({
         )}
       </Box>
 
-      {/* Cover image */}
+      {/* Cover image — full-bleed, no divider line. It recedes via a gentle
+          desaturate + an adaptive dim (the `bg` token, so it darkens in dark
+          mode and lightens in light mode); that tonal gap from the crisp text
+          is the separation. The image lifts to full color on hover. */}
       {hasCover && (
-        <Image
-          src={project.cover_url!}
-          w="full"
-          h="40"
-          objectFit="cover"
-          flexShrink={0}
-        />
+        <Box position="relative" flexShrink={0} overflow="hidden">
+          <Image
+            src={project.cover_url!}
+            w="full"
+            h="40"
+            objectFit="cover"
+            display="block"
+            filter="saturate(0.7)"
+            transition="filter 0.2s"
+            _groupHover={{ filter: "saturate(1)" }}
+          />
+          <Box
+            position="absolute"
+            inset={0}
+            bg="bg"
+            opacity={0.3}
+            pointerEvents="none"
+            transition="opacity 0.2s"
+            _groupHover={{ opacity: 0.05 }}
+          />
+        </Box>
       )}
     </Flex>
   );
