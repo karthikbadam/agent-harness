@@ -17,6 +17,7 @@ def _mkproject(tmp_path: Path, **kw: object) -> models.Project:
             instructions=kw.get("instructions"),
             skills=list(kw.get("skills") or []),
             context_paths=list(kw.get("context_paths") or []),
+            agent_provider=str(kw.get("agent_provider", "claude")),
         )
         s.add(p)
         s.flush()
@@ -87,6 +88,46 @@ def test_sync_skips_missing_path(initdb: Path, tmp_path: Path) -> None:
         s.refresh(p)
         s.expunge(p)
     assert claude_md.sync_project(p) is None
+
+
+def test_codex_project_also_writes_agents_md(initdb: Path, tmp_path: Path) -> None:
+    p = _mkproject(tmp_path, name="cdx", instructions="Verify cheaply.", agent_provider="codex")
+    target = claude_md.sync_project(p)
+    assert target is not None
+    pdir = Path(p.path)
+    agents = pdir / "AGENTS.md"
+    assert agents.exists(), "codex project should get an AGENTS.md"
+    text = agents.read_text(encoding="utf-8")
+    assert claude_md.BEGIN_MARKER in text
+    assert "Verify cheaply." in text
+
+
+def test_auto_project_writes_agents_md(initdb: Path, tmp_path: Path) -> None:
+    p = _mkproject(tmp_path, name="au", instructions="x", agent_provider="auto")
+    claude_md.sync_project(p)
+    assert (Path(p.path) / "AGENTS.md").exists()
+
+
+def test_claude_project_also_mirrors_agents_md(initdb: Path, tmp_path: Path) -> None:
+    # AGENTS.md is mirrored for every project (symmetric with CLAUDE.md) so a
+    # per-task codex override on a Claude-default project still gets guidance.
+    p = _mkproject(tmp_path, name="cl", instructions="x", agent_provider="claude")
+    claude_md.sync_project(p)
+    assert (Path(p.path) / "AGENTS.md").exists()
+    assert (Path(p.path) / "CLAUDE.md").exists()
+
+
+def test_existing_agents_md_stays_synced_for_claude_project(initdb: Path, tmp_path: Path) -> None:
+    # A claude project that already has an AGENTS.md (e.g. after switching back
+    # from codex) keeps it in sync rather than going stale.
+    p = _mkproject(tmp_path, name="cl2", instructions="v1", agent_provider="claude")
+    agents = Path(p.path) / "AGENTS.md"
+    agents.write_text("## hand\n\nnotes\n", encoding="utf-8")
+    claude_md.sync_project(p)
+    text = agents.read_text(encoding="utf-8")
+    assert claude_md.BEGIN_MARKER in text
+    assert "v1" in text
+    assert "## hand" in text  # user content preserved
 
 
 def test_sync_prepends_when_markers_missing(initdb: Path, tmp_path: Path) -> None:
