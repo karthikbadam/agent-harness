@@ -48,28 +48,30 @@ export function NewProjectComposer() {
 
   return (
     <Box>
-      <PathPicker
-        selected={selected}
-        onSelect={(s) => {
-          setSelected(s);
-          setNewFolder(null);
-        }}
-        options={eligible}
-        loading={loadingSuggestions}
-        newFolder={newFolder}
-        onNewFolder={(v) => {
-          setNewFolder(v);
-          setSelected(null);
-        }}
-      />
       <Flex
         align="center"
+        gap={{ base: 4, md: 8 }}
+        rowGap={2}
         px={4}
-        pt={2.5}
-        pb={1}
+        py={2.5}
         borderBottomWidth="1px"
         borderColor="border.subtle"
+        wrap="wrap"
       >
+        <PathPicker
+          selected={selected}
+          onSelect={(s) => {
+            setSelected(s);
+            setNewFolder(null);
+          }}
+          options={eligible}
+          loading={loadingSuggestions}
+          newFolder={newFolder}
+          onNewFolder={(v) => {
+            setNewFolder(v);
+            setSelected(null);
+          }}
+        />
         <ProviderPicker value={provider} onChange={setProvider} />
       </Flex>
       <Composer
