@@ -118,8 +118,9 @@ Beyond one-shot jobs, projects can carry shared context and be driven as
 multi-step plans:
 
 - **Project context** (`instructions`, `skills`, `context_paths`) is synced
-  into a managed block in `<path>/CLAUDE.md`, so every job inherits it
-  natively. Skills are also merged into the allowlist as `Skill(<name>)`.
+  into a managed block in `<path>/CLAUDE.md` **and `<path>/AGENTS.md`** (Codex
+  reads the latter), so every job inherits it natively whichever provider runs.
+  Skills are also merged into the allowlist as `Skill(<name>)`.
 - **Tasks** decompose a complex ask into smaller units with DAG dependencies.
   Status flow: `pending → ready → running → done | failed | canceled`.
   Tasks do **not** auto-run when their dependencies satisfy — you kick each
@@ -266,7 +267,8 @@ Per-project overrides (set via the API or Settings UI):
 - `permission_mode`: `acceptEdits` (default), `plan`, `default` (Claude-only).
 - `dangerously_skip`: bool.
 - `idle_timeout_seconds`: int | null (null = use global).
-- `instructions`: free-text rules synced into `<path>/CLAUDE.md`.
+- `instructions`: free-text rules synced into `<path>/CLAUDE.md` and
+  `<path>/AGENTS.md` (so they reach Claude and Codex respectively).
 - `skills`: list of skill names auto-allowed (`Skill(<name>)`).
 - `context_paths`: extra reference paths surfaced in the CLAUDE.md block.
 

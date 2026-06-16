@@ -61,8 +61,9 @@ All endpoints below are JSON in / JSON out unless noted. Base path `/api`.
 [Agent provider](#agent-provider).
 
 **Shared context fields** (additive; jobs in the project inherit them):
-- `instructions`: free-text rules synced into a managed block of
-  `<path>/CLAUDE.md` — Claude Code reads it natively.
+- `instructions`: free-text rules synced into a managed block of both
+  `<path>/CLAUDE.md` (Claude reads it) and `<path>/AGENTS.md` (Codex reads it),
+  so guidance reaches whichever provider runs.
 - `skills`: list of skill names auto-allowed for this project (each becomes
   `Skill(<name>)` in the allowlist, no permission prompt).
 - `context_paths`: extra reference paths listed in the managed CLAUDE.md
@@ -241,8 +242,9 @@ curl -sS -X PATCH "$AH_BASE/api/projects/$PID" \
       }'
 ```
 
-The server writes a managed block into `<project.path>/CLAUDE.md` so Claude
-Code reads it natively; existing user content in CLAUDE.md outside the
+The server writes a managed block into `<project.path>/CLAUDE.md` (and mirrors
+it to `AGENTS.md` for Codex) so the agent reads it natively; existing user
+content in CLAUDE.md outside the
 fence is preserved.
 
 ### Decompose an ask into draft tasks
