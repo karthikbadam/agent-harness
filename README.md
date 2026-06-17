@@ -118,8 +118,9 @@ Beyond one-shot jobs, projects can carry shared context and be driven as
 multi-step plans:
 
 - **Project context** (`instructions`, `skills`, `context_paths`) is synced
-  into a managed block in `<path>/CLAUDE.md`, so every job inherits it
-  natively. Skills are also merged into the allowlist as `Skill(<name>)`.
+  into a managed block in `<path>/CLAUDE.md` **and `<path>/AGENTS.md`** (Codex
+  reads the latter), so every job inherits it natively whichever provider runs.
+  Skills are also merged into the allowlist as `Skill(<name>)`.
 - **Tasks** decompose a complex ask into smaller units with DAG dependencies.
   Status flow: `pending → ready → running → done | failed | canceled`.
   Tasks do **not** auto-run when their dependencies satisfy — you kick each
@@ -176,6 +177,36 @@ Every action lands as a `DriverNote` for audit + escalation. Details in
 
 ## How it works
 
+### Agent providers (Claude + Codex)
+Each project, ad-hoc job, and task chooses which agent runs it:
+
+- `claude` — Claude Code for every phase (the default; existing installs are
+  unchanged).
+- `codex` — the Codex CLI (`codex exec`) for every phase.
+- `auto` — Claude for the read-only **plan** phase, Codex for the write phases
+  (execute / integrate) and ad-hoc jobs.
+
+The provider is resolved **once per job** from the project default (or a
+job/task override) and the job's `kind`, then frozen on the job as
+`agent_provider` (`claude` | `codex`). Because each phase is its own job, the
+resolved value is well-defined per job. Precedence: job override → task
+override → project default → `claude`. Set it in the UI's Auto/Claude/Codex
+picker (new-project composer, project prompt composer, ad-hoc job composer, and
+the project-settings popover), or via the API field `agent_provider` on
+projects, jobs, tasks, and `POST /plan`.
+
+Codex differs from Claude in a few load-bearing ways the runner handles:
+- **Sandbox, not allowlist.** Codex gates via `--sandbox` mode
+  (`read-only` for plan, `workspace-write` otherwise; `dangerously_skip` maps to
+  `--dangerously-bypass-approvals-and-sandbox`). The per-tool allowlist and the
+  `tool_blocked` "allow and retry" flow are **Claude-only** and inert for Codex.
+- **Resume is a subcommand:** followups spawn `codex exec resume <thread_id>`,
+  not a `--resume` flag. The `thread.started.thread_id` is captured as the
+  session id.
+- Codex reports **no per-turn cost** (`cost_usd` is null), and an `error` /
+  `turn.failed` event (e.g. a usage-limit) is mapped to a non-zero `turn_done`
+  so the task fails cleanly even though the CLI itself exits 0.
+
 ### Stream-json parser
 Each `claude -p --output-format stream-json` line is parsed into a typed
 event (`tool_use`, `tool_result`, `assistant_text`, `turn_done`, `job_status`,
@@ -216,25 +247,34 @@ replay shows the terminal state.
 auth_token = "..."                # set by `agent-harness gen-token`
 
 claude_path = "/usr/local/bin/claude"   # optional; default is `which claude`
-default_claude_args = ["--model", "claude-opus-4-7"]  # appended to every job
+default_claude_args = ["--model", "claude-opus-4-7"]  # appended to every claude job
+codex_path = "/usr/local/bin/codex"     # optional; default is `which codex`
+default_codex_args = []                  # appended to every codex job (codex CLI syntax)
 max_concurrent_jobs = 2
 idle_timeout_seconds = 600        # 10 min default
 log_retention_days = 30
 ```
 
+`codex_path` / `default_codex_args` are only needed if any project uses the
+`codex` or `auto` provider. Note that launchd's PATH is minimal, so set
+`codex_path` to an absolute path (`which codex`) rather than relying on PATH.
+
 Per-project overrides (set via the API or Settings UI):
+- `agent_provider`: `claude` (default), `codex`, `auto` — see
+  [Agent providers](#agent-providers-claude--codex).
 - `extra_claude_args`: list of args appended **after** the global default
-  (last-wins for claude CLI).
-- `permission_mode`: `acceptEdits` (default), `plan`, `default`.
+  (last-wins for claude CLI). Claude-only — never forwarded to Codex.
+- `permission_mode`: `acceptEdits` (default), `plan`, `default` (Claude-only).
 - `dangerously_skip`: bool.
 - `idle_timeout_seconds`: int | null (null = use global).
-- `instructions`: free-text rules synced into `<path>/CLAUDE.md`.
+- `instructions`: free-text rules synced into `<path>/CLAUDE.md` and
+  `<path>/AGENTS.md` (so they reach Claude and Codex respectively).
 - `skills`: list of skill names auto-allowed (`Skill(<name>)`).
 - `context_paths`: extra reference paths surfaced in the CLAUDE.md block.
 
 Environment overrides (`AH_*` prefix): `AH_HOME`, `AH_AUTH_TOKEN`,
-`AH_CLAUDE_PATH`, `AH_IDLE_TIMEOUT_SECONDS`, `AH_PORT`, `AH_HOST`,
-`AH_MAX_CONCURRENT_JOBS`, `AH_LOG_RETENTION_DAYS`.
+`AH_CLAUDE_PATH`, `AH_CODEX_PATH`, `AH_IDLE_TIMEOUT_SECONDS`, `AH_PORT`,
+`AH_HOST`, `AH_MAX_CONCURRENT_JOBS`, `AH_LOG_RETENTION_DAYS`.
 
 ## Service commands
 

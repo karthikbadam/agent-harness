@@ -80,6 +80,67 @@ async def test_projects_crud(app_client) -> None:
     assert r.status_code == 404
 
 
+async def test_delete_job_with_outcome_succeeds(app_client) -> None:
+    # Regression: a job that produced an Outcome (every planner/execute job
+    # does) used to 500 on delete with a FOREIGN KEY constraint error.
+    from agent_harness import models
+    from agent_harness.db import session_scope
+
+    client, _ = app_client
+    auth = {"Authorization": "Bearer test-token"}
+    r = await client.post("/api/projects", json={"name": "d", "path": "/tmp/d"}, headers=auth)
+    pid = r.json()["id"]
+    with session_scope() as s:
+        task = models.Task(project_id=pid, title="t", prompt="p")
+        s.add(task)
+        s.flush()
+        job = models.Job(project_id=pid, title="j", status="done", task_id=task.id, kind="execute")
+        s.add(job)
+        s.flush()
+        s.add(
+            models.Outcome(
+                task_id=task.id, job_id=job.id, status="success", kind="execute", summary="ok"
+            )
+        )
+        s.flush()
+        jid = job.id
+
+    r = await client.delete(f"/api/jobs/{jid}", headers=auth)
+    assert r.status_code == 204
+    r = await client.get(f"/api/jobs/{jid}", headers=auth)
+    assert r.status_code == 404
+
+
+async def test_project_agent_provider_round_trip(app_client) -> None:
+    client, _ = app_client
+    auth = {"Authorization": "Bearer test-token"}
+    # Default is claude when omitted.
+    r = await client.post("/api/projects", json={"name": "a", "path": "/tmp/a"}, headers=auth)
+    assert r.status_code == 201
+    assert r.json()["agent_provider"] == "claude"
+
+    # Explicit on create.
+    r = await client.post(
+        "/api/projects",
+        json={"name": "b", "path": "/tmp/b", "agent_provider": "auto"},
+        headers=auth,
+    )
+    assert r.status_code == 201
+    pid = r.json()["id"]
+    assert r.json()["agent_provider"] == "auto"
+
+    # Editable via PATCH.
+    r = await client.patch(f"/api/projects/{pid}", json={"agent_provider": "codex"}, headers=auth)
+    assert r.status_code == 200
+    assert r.json()["agent_provider"] == "codex"
+
+    # Invalid value rejected by the Literal.
+    r = await client.post(
+        "/api/projects", json={"name": "c", "path": "/tmp/c", "agent_provider": "gpt"}, headers=auth
+    )
+    assert r.status_code == 422
+
+
 async def test_project_context_fields(app_client) -> None:
     client, _ = app_client
     auth = {"Authorization": "Bearer test-token"}

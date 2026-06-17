@@ -80,6 +80,7 @@ class ProjectCreate(BaseModel):
     # lets the UI start a project in a brand-new folder.
     create_dir: bool = False
     permission_mode: Literal["acceptEdits", "plan", "default"] = "acceptEdits"
+    agent_provider: Literal["claude", "codex", "auto"] = "claude"
     dangerously_skip: bool = False
     extra_claude_args: list[str] = Field(default_factory=list)
     idle_timeout_seconds: int | None = None
@@ -93,6 +94,7 @@ class ProjectUpdate(BaseModel):
     name: str | None = None
     path: str | None = None
     permission_mode: Literal["acceptEdits", "plan", "default"] | None = None
+    agent_provider: Literal["claude", "codex", "auto"] | None = None
     dangerously_skip: bool | None = None
     extra_claude_args: list[str] | None = None
     idle_timeout_seconds: int | None = None
@@ -107,6 +109,7 @@ class ProjectOut(BaseModel):
     name: str
     path: str
     permission_mode: str
+    agent_provider: str = "claude"
     dangerously_skip: bool
     extra_claude_args: list[str] = Field(default_factory=list)
     idle_timeout_seconds: int | None = None
@@ -114,6 +117,17 @@ class ProjectOut(BaseModel):
     instructions: str | None = None
     skills: list[str] = Field(default_factory=list)
     context_paths: list[str] = Field(default_factory=list)
+    cover_url: str | None = None
+    created_at: datetime
+
+
+class AttachmentOut(BaseModel):
+    id: str
+    project_id: str | None = None
+    job_id: str | None = None
+    filename: str
+    mime_type: str
+    url: str  # /api/attachments/{id}/file
     created_at: datetime
 
 
@@ -126,6 +140,7 @@ class TurnOut(BaseModel):
     cost_usd: float | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class JobOut(BaseModel):
@@ -137,6 +152,7 @@ class JobOut(BaseModel):
     schedule_id: str | None = None
     task_id: str | None = None
     kind: str = "ad_hoc"  # ad_hoc|plan|execute|integrate
+    agent_provider: str = "claude"  # resolved provider: claude|codex
     cwd: str = ""
     created_at: datetime
     ended_at: datetime | None = None
@@ -147,11 +163,15 @@ class JobCreate(BaseModel):
     prompt: str
     project_id: str | None = None
     title: str | None = None
+    # Per-job provider override (claude|codex|auto). Null = inherit project.
+    agent_provider: Literal["claude", "codex", "auto"] | None = None
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class FollowupCreate(BaseModel):
     # Optional so an ack on an awaiting_ack job can omit it.
     prompt: str = ""
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class ScheduleCreate(BaseModel):
@@ -213,6 +233,8 @@ class TaskCreate(BaseModel):
     # Per-task idle-timeout override (seconds). null = inherit project/global.
     # 0 disables the watchdog for this task (long unattended training turns).
     idle_timeout_seconds: int | None = None
+    # Per-task provider override (claude|codex|auto). null = inherit project.
+    agent_provider: Literal["claude", "codex", "auto"] | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -224,6 +246,7 @@ class TaskUpdate(BaseModel):
         Literal["plan_then_execute", "one_shot", "execute_only", "research", "plan", "loop"] | None
     ) = None
     idle_timeout_seconds: int | None = None
+    agent_provider: Literal["claude", "codex", "auto"] | None = None
 
 
 class TaskOut(BaseModel):
@@ -241,6 +264,7 @@ class TaskOut(BaseModel):
     integration_status: str | None = None
     synthetic: bool = False
     idle_timeout_seconds: int | None = None
+    agent_provider: str | None = None
     # Loop fields: parent_task_id set on iteration children; loop_spec/loop_state
     # set on the mode='loop' parent (null elsewhere).
     parent_task_id: str | None = None
@@ -410,6 +434,10 @@ class SuggestedAction(BaseModel):
 
 class PlanCreate(BaseModel):
     ask: str
+    # Provider for this plan and the tasks it produces (claude|codex|auto).
+    # null = inherit the project default.
+    agent_provider: Literal["claude", "codex", "auto"] | None = None
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class PlanOut(BaseModel):

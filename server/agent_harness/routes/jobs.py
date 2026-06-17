@@ -14,6 +14,7 @@ from ..config import get_settings
 from ..db import get_session
 from ..jobs import JobManager
 from ..schemas import FollowupCreate, JobCreate, JobOut, TurnOut
+from ..routes.attachments import stamp_job_on_attachments
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_auth)])
 
@@ -28,6 +29,7 @@ def _to_out(j: models.Job) -> JobOut:
         schedule_id=j.schedule_id,
         task_id=j.task_id,
         kind=j.kind,
+        agent_provider=j.agent_provider,
         cwd=j.cwd,
         created_at=j.created_at,
         ended_at=j.ended_at,
@@ -41,6 +43,7 @@ def _to_out(j: models.Job) -> JobOut:
                 cost_usd=t.cost_usd,
                 started_at=t.started_at,
                 ended_at=t.ended_at,
+                attachment_ids=list(t.attachment_ids or []),
             )
             for t in j.turns
         ],
@@ -75,9 +78,17 @@ async def create_job(
     mgr = _manager(request)
     project_id = body.project_id or _resolve_default_project_id(s)
     try:
-        jid = mgr.create_job(project_id, body.prompt, body.title or "")
+        jid = mgr.create_job(
+            project_id,
+            body.prompt,
+            body.title or "",
+            attachment_ids=body.attachment_ids,
+            agent_provider=body.agent_provider,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    stamp_job_on_attachments(body.attachment_ids, jid, project_id, s)
+    s.commit()
     await mgr.start(jid)
     s.expire_all()
     j = s.get(models.Job, jid)
@@ -146,12 +157,14 @@ async def followup_job(
             assert new_job is not None
             return _to_out(new_job)
     try:
-        await mgr.followup(job_id, body.prompt)
+        await mgr.followup(job_id, body.prompt, attachment_ids=body.attachment_ids)
     except ValueError as e:
         raise HTTPException(400, str(e))
     s.expire_all()
     j = s.get(models.Job, job_id)
     assert j is not None
+    stamp_job_on_attachments(body.attachment_ids, job_id, j.project_id, s)
+    s.commit()
     return _to_out(j)
 
 
@@ -175,6 +188,21 @@ def delete_job(job_id: str, s: Session = Depends(get_session)) -> None:
         raise HTTPException(404, "not found")
     if j.status in {"running", "queued"}:
         raise HTTPException(409, "stop the job first")
+    # Outcomes/artifacts/driver_notes FK to this job but aren't covered by the
+    # Job.turns SQLA cascade, so a bare delete trips a FOREIGN KEY constraint
+    # for any job that produced a checkpoint (every planner/execute job does).
+    # Drain the outcome rows and detach the nullable references first.
+    s.execute(models.Outcome.__table__.delete().where(models.Outcome.job_id == job_id))
+    s.execute(
+        models.Artifact.__table__.update()
+        .where(models.Artifact.job_id == job_id)
+        .values(job_id=None)
+    )
+    s.execute(
+        models.DriverNote.__table__.update()
+        .where(models.DriverNote.job_id == job_id)
+        .values(job_id=None)
+    )
     s.delete(j)
     s.commit()
     settings = get_settings()

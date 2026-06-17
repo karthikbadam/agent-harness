@@ -75,6 +75,7 @@ def _to_out(s: Session, t: models.Task) -> TaskOut:
         integration_status=t.integration_status,
         synthetic=t.synthetic,
         idle_timeout_seconds=t.idle_timeout_seconds,
+        agent_provider=t.agent_provider,
         parent_task_id=t.parent_task_id,
         loop_spec=t.loop_spec,
         loop_state=t.loop_state,
@@ -181,6 +182,8 @@ async def create_task(
         task_kwargs["mode"] = body.mode
     if body.idle_timeout_seconds is not None:
         task_kwargs["idle_timeout_seconds"] = body.idle_timeout_seconds
+    if body.agent_provider is not None:
+        task_kwargs["agent_provider"] = body.agent_provider
     t = models.Task(**task_kwargs)
     s.add(t)
     s.flush()
@@ -360,6 +363,8 @@ def update_task(task_id: str, body: TaskUpdate, s: Session = Depends(get_session
     # Use fields_set so an explicit null clears the override back to inherit.
     if "idle_timeout_seconds" in body.model_fields_set:
         t.idle_timeout_seconds = body.idle_timeout_seconds
+    if "agent_provider" in body.model_fields_set:
+        t.agent_provider = body.agent_provider
     if body.depends_on is not None:
         _validate_deps(s, t.project_id, body.depends_on)
         _detect_cycle(s, t.id, body.depends_on)

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
@@ -13,6 +13,10 @@ import {
 import { Shell } from "../components/Shell";
 import { Composer } from "../components/Composer";
 import { JobCard } from "../components/JobCard";
+import {
+  ProviderPicker,
+  type ProviderValue,
+} from "../components/ProviderPicker";
 import { StickyComposer } from "../components/StickyComposer";
 import { parseServerDate } from "../api/dates";
 import { useCreateJob, useJobs } from "../hooks/useJobs";
@@ -27,6 +31,7 @@ export function JobsPage() {
   const { data: allJobs, isLoading, error } = useJobs();
   const { data: projects } = useProjects();
   const createJob = useCreateJob();
+  const [provider, setProvider] = useState<ProviderValue>("claude");
 
   const jobs = useMemo(() => {
     if (!allJobs) return undefined;
@@ -122,12 +127,18 @@ export function JobsPage() {
         ))}
       </Stack>
       <StickyComposer>
+        <Flex px={4} pt={2} justify="flex-end">
+          <ProviderPicker value={provider} onChange={setProvider} />
+        </Flex>
         <Composer
           placeholder="Start an ad-hoc job…"
-          onSend={async (prompt) => {
+          projectId={projectFilter || undefined}
+          onSend={async (prompt, attachmentIds) => {
             const job = await createJob.mutateAsync({
               prompt,
               project_id: projectFilter || undefined,
+              attachment_ids: attachmentIds,
+              agent_provider: provider,
             });
             navigate(`/jobs/${job.id}`);
           }}

@@ -13,6 +13,7 @@ import { LuTrash2, LuListTodo } from "react-icons/lu";
 import type { JobOut } from "../types";
 import { parseServerDate, relativeTime } from "../api/dates";
 import { useDeleteJob, useStopJob } from "../hooks/useJobs";
+import { ProviderBadge } from "./ProviderPicker";
 import { StatusPill } from "./StatusPill";
 
 export function JobCard({ job }: { job: JobOut }) {
@@ -52,6 +53,9 @@ export function JobCard({ job }: { job: JobOut }) {
               <Text textTransform="uppercase" letterSpacing="wider">
                 · {job.kind}
               </Text>
+            )}
+            {job.agent_provider && job.agent_provider !== "claude" && (
+              <ProviderBadge provider={job.agent_provider} />
             )}
             {job.task_id && (
               <HStack gap={1}>

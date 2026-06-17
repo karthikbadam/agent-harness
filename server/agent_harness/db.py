@@ -94,6 +94,15 @@ def _apply_column_migrations(engine: Engine) -> None:
         # Tier 3: loop stuck-detection runs a "rethink" iteration, optionally
         # on a stronger model, via a per-task model override.
         ("tasks", "model_override", "VARCHAR(64)"),
+        # attachments: user-uploaded files; cover image for project cards.
+        ("projects", "cover_image_id", "VARCHAR(12)"),
+        ("turns", "attachment_ids", "JSON"),
+        # codex provider: project default (claude|codex|auto), job resolved
+        # provider (claude|codex), per-task override (null = inherit). Column
+        # defaults backfill existing rows to 'claude' — no behavior change.
+        ("projects", "agent_provider", "VARCHAR(8) NOT NULL DEFAULT 'claude'"),
+        ("jobs", "agent_provider", "VARCHAR(8) NOT NULL DEFAULT 'claude'"),
+        ("tasks", "agent_provider", "VARCHAR(8)"),
     ]
 
     with engine.begin() as conn:

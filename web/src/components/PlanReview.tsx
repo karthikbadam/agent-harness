@@ -128,8 +128,9 @@ export function PlanReview({ task }: { task: TaskOut }) {
                   : "Nudge it — 'make it one loop', 'add a test task'…"
               }
               disabled={replanning || !planJob}
-              onSend={async (prompt) => {
-                await followup.mutateAsync({ prompt });
+              projectId={task.project_id}
+              onSend={async (prompt, attachmentIds) => {
+                await followup.mutateAsync({ prompt, attachment_ids: attachmentIds });
               }}
             />
           </Box>

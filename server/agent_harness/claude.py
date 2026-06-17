@@ -60,6 +60,7 @@ import shutil
 import signal
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import AsyncIterator, Iterable
 
 from .schemas import (
@@ -226,6 +227,15 @@ def resolve_claude_path(override: str | None = None) -> str:
 
 
 @dataclass
+class AttachedFile:
+    """A user-uploaded file to be referenced in the prompt."""
+
+    path: str
+    filename: str
+    mime_type: str
+
+
+@dataclass
 class ClaudeRunner:
     """Async wrapper around `claude -p ... --output-format stream-json`.
 
@@ -233,6 +243,9 @@ class ClaudeRunner:
     `--model`, `--add-dir`, `--mcp-config`, `--system-prompt`, etc. Don't
     override the fixed flags (`-p`, `--output-format`, `--verbose`, `--resume`)
     or you'll break the parser.
+
+    `attachments` are user-uploaded files. They are appended to the prompt text
+    so the agent can read/view them using its file tools.
     """
 
     job_id: str
@@ -246,6 +259,7 @@ class ClaudeRunner:
     extra_args: list[str] = field(default_factory=list)
     claude_path: str | None = None
     env: dict[str, str] | None = None
+    attachments: list[AttachedFile] = field(default_factory=list)
 
     _proc: asyncio.subprocess.Process | None = None
     _parser: StreamJsonParser | None = None
@@ -267,11 +281,20 @@ class ClaudeRunner:
     def pid(self) -> int | None:
         return self._proc.pid if self._proc else None
 
+    def _effective_prompt(self) -> str:
+        """Return the prompt with any attached file paths appended."""
+        if not self.attachments:
+            return self.prompt
+        lines = [self.prompt, "", "[Attached files — view/read them as needed:]"]
+        for att in self.attachments:
+            lines.append(f"- {att.path}  ({att.filename})")
+        return "\n".join(lines)
+
     def build_argv(self) -> list[str]:
         argv: list[str] = [
             resolve_claude_path(self.claude_path),
             "-p",
-            self.prompt,
+            self._effective_prompt(),
             "--output-format",
             "stream-json",
             "--verbose",
@@ -408,6 +431,7 @@ class ClaudeRunner:
 
 __all__ = [
     "AssistantTextEvent",
+    "AttachedFile",
     "ClaudeRunner",
     "JobStatusEvent",
     "StreamEvent",

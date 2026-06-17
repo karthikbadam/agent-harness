@@ -31,11 +31,13 @@ def _expand_path(p: str) -> str:
 
 
 def _to_out(p: models.Project) -> ProjectOut:
+    cover_url = f"/api/attachments/{p.cover_image_id}/file" if p.cover_image_id else None
     return ProjectOut(
         id=p.id,
         name=p.name,
         path=p.path,
         permission_mode=p.permission_mode,
+        agent_provider=p.agent_provider,
         dangerously_skip=p.dangerously_skip,
         extra_claude_args=list(p.extra_claude_args or []),
         idle_timeout_seconds=p.idle_timeout_seconds,
@@ -43,6 +45,7 @@ def _to_out(p: models.Project) -> ProjectOut:
         instructions=p.instructions,
         skills=list(p.skills or []),
         context_paths=list(p.context_paths or []),
+        cover_url=cover_url,
         created_at=p.created_at,
     )
 
@@ -182,6 +185,7 @@ def create_project(body: ProjectCreate, s: Session = Depends(get_session)) -> Pr
         name=body.name,
         path=path,
         permission_mode=body.permission_mode,
+        agent_provider=body.agent_provider,
         dangerously_skip=body.dangerously_skip,
         extra_claude_args=list(body.extra_claude_args),
         idle_timeout_seconds=body.idle_timeout_seconds,
@@ -227,6 +231,7 @@ def update_project(
         "name",
         "path",
         "permission_mode",
+        "agent_provider",
         "dangerously_skip",
         "extra_claude_args",
         "idle_timeout_seconds",

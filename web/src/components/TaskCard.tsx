@@ -105,6 +105,8 @@ export function TaskCard({ task }: Props) {
     <Box
       bg="bg"
       rounded="lg"
+      borderWidth="1px"
+      borderColor="border"
       px={4}
       py={3.5}
       cursor="pointer"
@@ -120,7 +122,13 @@ export function TaskCard({ task }: Props) {
     >
       <Flex justify="space-between" align="flex-start" gap={3}>
         <Stack gap={1.5} flex="1" minW={0}>
-          <Text fontWeight="medium" lineHeight="short" truncate>
+          <Text
+            fontWeight="medium"
+            lineHeight="short"
+            overflow="hidden"
+            textOverflow="ellipsis"
+            whiteSpace="nowrap"
+          >
             {task.title}
           </Text>
           <HStack gap={2} align="center" fontSize="xs" wrap="wrap">

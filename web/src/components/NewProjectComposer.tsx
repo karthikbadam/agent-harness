@@ -20,6 +20,7 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { Composer } from "./Composer";
+import { ProviderPicker, type ProviderValue } from "./ProviderPicker";
 import { tasksApi } from "../api/tasks";
 import { useCreateProject, usePathSuggestions } from "../hooks/useProjects";
 import type { PathSuggestion } from "../types";
@@ -31,6 +32,7 @@ export function NewProjectComposer() {
   const create = useCreateProject();
   const [selected, setSelected] = useState<PathSuggestion | null>(null);
   const [newFolder, setNewFolder] = useState<string | null>(null); // null = existing-path mode
+  const [provider, setProvider] = useState<ProviderValue>("claude");
   const { data: suggestions, isLoading: loadingSuggestions } =
     usePathSuggestions(true);
 
@@ -46,32 +48,46 @@ export function NewProjectComposer() {
 
   return (
     <Box>
-      <PathPicker
-        selected={selected}
-        onSelect={(s) => {
-          setSelected(s);
-          setNewFolder(null);
-        }}
-        options={eligible}
-        loading={loadingSuggestions}
-        newFolder={newFolder}
-        onNewFolder={(v) => {
-          setNewFolder(v);
-          setSelected(null);
-        }}
-      />
+      <Flex
+        align="center"
+        gap={3}
+        px={3}
+        py={2}
+        borderBottomWidth="1px"
+        borderColor="border.subtle"
+      >
+        <PathPicker
+          selected={selected}
+          onSelect={(s) => {
+            setSelected(s);
+            setNewFolder(null);
+          }}
+          options={eligible}
+          loading={loadingSuggestions}
+          newFolder={newFolder}
+          onNewFolder={(v) => {
+            setNewFolder(v);
+            setSelected(null);
+          }}
+        />
+        <Box flexShrink={0}>
+          <ProviderPicker value={provider} onChange={setProvider} />
+        </Box>
+      </Flex>
       <Composer
         placeholder={placeholder}
         disabled={!ready || create.isPending}
-        onSend={async (ask) => {
+        onSend={async (ask, attachmentIds) => {
           if (!ready) return;
+          const agentProvider = provider as "claude" | "codex" | "auto";
           const body = isNew
             ? {
                 name: newName.split("/").pop() || newName,
                 path: `${NEW_FOLDER_BASE}${newName}`,
                 create_dir: true,
                 permission_mode: "acceptEdits" as const,
-                dangerously_skip: true, // fresh folder for an agent to drive
+                agent_provider: agentProvider,
+                dangerously_skip: true,
                 is_default: false,
               }
             : {
@@ -79,15 +95,18 @@ export function NewProjectComposer() {
                 path: selected!.path,
                 create_dir: false,
                 permission_mode: "acceptEdits" as const,
+                agent_provider: agentProvider,
                 dangerously_skip: false,
                 is_default: false,
               };
           const p = await create.mutateAsync(body);
           navigate(`/projects/${p.id}`);
-          if (ask.trim()) {
-            tasksApi.plan(p.id, ask.trim()).catch((err) => {
-              console.error("planner failed for new project:", err);
-            });
+          if (ask.trim() || attachmentIds.length > 0) {
+            tasksApi
+              .plan(p.id, ask.trim() || "Explore the project", attachmentIds)
+              .catch((err) => {
+                console.error("planner failed for new project:", err);
+              });
           }
           setSelected(null);
           setNewFolder(null);
@@ -117,16 +136,8 @@ function PathPicker({
   const isNew = newFolder !== null;
 
   return (
-    <Flex
-      align="center"
-      gap={2}
-      px={4}
-      pt={3}
-      pb={2}
-      borderBottomWidth="1px"
-      borderColor="border.subtle"
-    >
-      <Text fontSize="2xs" color="fg.muted" letterSpacing="wide">
+    <Flex align="center" gap={2} flex="1" minW={0}>
+      <Text fontSize="2xs" color="fg.muted" letterSpacing="wide" flexShrink={0}>
         PATH
       </Text>
 
@@ -169,7 +180,9 @@ function PathPicker({
                 fontWeight="normal"
                 justifyContent="space-between"
                 gap={2}
-                maxW={{ base: "55%", md: "lg" }}
+                flex="1"
+                minW={0}
+                maxW={{ md: "lg" }}
               >
                 <HStack gap={1.5} minW={0}>
                   <Box lineHeight="0">

@@ -3,24 +3,21 @@ import { Box, Flex, IconButton, Text } from "@chakra-ui/react";
 import { LuTrash2 } from "react-icons/lu";
 
 /**
- * Row wrapper with delete affordance.
+ * Row/card wrapper with delete affordance.
  *
- *   Mobile (touch):  swipe the row left → red "Delete" pane reveals → tap.
- *   Desktop (mouse): always-visible muted trash button to the right of the
- *                    row. Click → confirm → delete.
+ *   Mobile (touch):  swipe left → red "Delete" pane reveals → tap to confirm.
+ *   Desktop (mouse): a trash button appears in the top-right corner on hover.
+ *                    Click once → button turns red asking for confirmation,
+ *                    click again → delete fires. Moving the mouse out cancels.
  *
- * The two paths are structurally separate (mobile is the swipe stack, the
- * desktop button is a sibling flex item). Nothing overlays the row's own
- * content, so the inner row's click handlers (e.g. "navigate to detail")
- * stay clean.
+ * The desktop button is positioned absolutely over the card so the outer
+ * layout (e.g. masonry column) is never broken by a sibling flex column.
  */
 interface Props {
   children: ReactNode;
-  /** Caller does the actual mutation. */
   onDelete: () => void | Promise<void>;
-  /** Optional confirmation message via window.confirm. */
   confirmMessage?: string;
-  /** Hide the delete affordance for non-deletable rows. */
+  /** Hide the delete affordance entirely (e.g. the __default project). */
   disabled?: boolean;
 }
 
@@ -35,31 +32,76 @@ export function SwipeableRow({
   confirmMessage,
   disabled = false,
 }: Props) {
-  // Always render the flex layout so the affordance is visible. On mobile,
-  // disabled rows skip the swipe handlers. On desktop, the trash button
-  // renders disabled (greyed out) so the user can SEE that delete exists
-  // but isn't available — e.g. the __default project.
   return (
-    <Flex align="stretch" gap={1.5}>
-      <Box flex="1" minW={0}>
-        {disabled ? (
-          children
-        ) : (
-          <MobileSwipeable onDelete={onDelete} confirmMessage={confirmMessage}>
-            {children}
-          </MobileSwipeable>
-        )}
-      </Box>
-      <DesktopDeleteButton
-        onDelete={onDelete}
-        confirmMessage={confirmMessage}
-        disabled={disabled}
-      />
-    </Flex>
+    <Box
+      position="relative"
+      css={{
+        "& [data-delete-btn]": { opacity: 0, transition: "opacity 0.15s" },
+        "&:hover [data-delete-btn]": { opacity: 1 },
+      }}
+    >
+      {disabled ? (
+        children
+      ) : (
+        <MobileSwipeable onDelete={onDelete} confirmMessage={confirmMessage}>
+          {children}
+        </MobileSwipeable>
+      )}
+      {!disabled && (
+        <HoverDeleteButton onDelete={onDelete} confirmMessage={confirmMessage} />
+      )}
+    </Box>
   );
 }
 
-// --------------------------------- mobile -------------------------------- //
+// ─── desktop hover button ────────────────────────────────────────────────────
+
+function HoverDeleteButton({
+  onDelete,
+  confirmMessage,
+}: {
+  onDelete: Props["onDelete"];
+  confirmMessage?: string;
+}) {
+  const [confirming, setConfirming] = useState(false);
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    setConfirming(false);
+    if (!confirmMessage || window.confirm(confirmMessage)) {
+      await onDelete();
+    }
+  };
+
+  return (
+    <IconButton
+      hideBelow="md"
+      aria-label="Delete"
+      data-delete-btn=""
+      size="xs"
+      variant="ghost"
+      position="absolute"
+      top={2}
+      right={2}
+      opacity={confirming ? 1 : undefined}
+      transition="opacity 0.15s, background 0.15s, color 0.15s"
+      color={confirming ? "red.fg" : "fg.subtle"}
+      bg={confirming ? "red.subtle" : undefined}
+      _hover={{ color: "red.fg", bg: "red.subtle", opacity: 1 }}
+      onMouseLeave={() => setConfirming(false)}
+      onClick={handleClick}
+      title={confirming ? "Click again to confirm delete" : "Delete"}
+    >
+      <LuTrash2 />
+    </IconButton>
+  );
+}
+
+// ─── mobile swipe-to-delete ──────────────────────────────────────────────────
 
 function MobileSwipeable({
   children,
@@ -86,7 +128,6 @@ function MobileSwipeable({
     startY.current = null;
   }, []);
 
-  // Close when tapping outside.
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent | TouchEvent) => {
@@ -112,7 +153,6 @@ function MobileSwipeable({
   }, [confirmMessage, onDelete, reset]);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    // Only touch on mobile path.
     if (e.pointerType !== "touch") return;
     startX.current = e.clientX;
     startY.current = e.clientY;
@@ -156,8 +196,6 @@ function MobileSwipeable({
   };
 
   const onClickCapture = (e: React.MouseEvent) => {
-    // After swiping open and tapping the row to close: eat the click so the
-    // inner onClick (e.g. navigate) doesn't fire.
     if (openAtPointerDown.current) {
       e.stopPropagation();
       e.preventDefault();
@@ -167,8 +205,8 @@ function MobileSwipeable({
 
   return (
     <Box ref={wrapRef} position="relative">
-      {/* Delete pane behind row, exposed when row translates left. */}
       <Flex
+        display={open || dx !== 0 ? "flex" : "none"}
         position="absolute"
         top={0}
         bottom={0}
@@ -206,42 +244,5 @@ function MobileSwipeable({
         {children}
       </Box>
     </Box>
-  );
-}
-
-// --------------------------------- desktop ------------------------------- //
-
-function DesktopDeleteButton({
-  onDelete,
-  confirmMessage,
-  disabled = false,
-}: {
-  onDelete: Props["onDelete"];
-  confirmMessage?: string;
-  disabled?: boolean;
-}) {
-  const handleDelete = async () => {
-    if (confirmMessage && !window.confirm(confirmMessage)) return;
-    await onDelete();
-  };
-  return (
-    <IconButton
-      hideBelow="md"
-      aria-label={disabled ? "Delete (not available)" : "Delete"}
-      title={disabled ? "This row can't be deleted" : "Delete"}
-      size="sm"
-      variant="ghost"
-      color="fg.subtle"
-      alignSelf="center"
-      disabled={disabled}
-      _hover={disabled ? undefined : { color: "red.fg", bg: "red.subtle" }}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (disabled) return;
-        void handleDelete();
-      }}
-    >
-      <LuTrash2 />
-    </IconButton>
   );
 }

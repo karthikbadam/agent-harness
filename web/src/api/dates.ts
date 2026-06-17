@@ -8,6 +8,28 @@ export function parseServerDate(iso: string): Date {
   return new Date(iso + "Z");
 }
 
+/**
+ * Format a date for a project card header in Apple Notes style:
+ * same day → "9:41 AM", yesterday → "Yesterday", within 7 days → "Monday",
+ * older → "Jun 3".
+ */
+export function relativeCardDate(iso: string, now: Date = new Date()): string {
+  const d = parseServerDate(iso);
+  const todayMidnight = localMidnight(now);
+  const dMidnight = localMidnight(d);
+  const diffDays = Math.round(
+    (todayMidnight.getTime() - dMidnight.getTime()) / 86_400_000,
+  );
+  if (diffDays === 0) {
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) {
+    return d.toLocaleDateString(undefined, { weekday: "long" });
+  }
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 /** Return a local-timezone "midnight" for the given Date. */
 function localMidnight(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());

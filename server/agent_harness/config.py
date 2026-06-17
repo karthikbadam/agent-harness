@@ -39,6 +39,8 @@ class Settings:
     auth_token: str | None = None
     claude_path: str | None = None
     default_claude_args: list[str] = field(default_factory=list)
+    codex_path: str | None = None
+    default_codex_args: list[str] = field(default_factory=list)
     max_concurrent_jobs: int = 2
     idle_timeout_seconds: int = 600
     log_retention_days: int = 30
@@ -100,6 +102,8 @@ def get_settings() -> Settings:
         auth_token=_env("auth_token") or toml.get("auth_token"),
         claude_path=_env("claude_path") or toml.get("claude_path"),
         default_claude_args=list(toml.get("default_claude_args") or []),
+        codex_path=_env("codex_path") or toml.get("codex_path"),
+        default_codex_args=list(toml.get("default_codex_args") or []),
         max_concurrent_jobs=_int_env("max_concurrent_jobs")
         or int(toml.get("max_concurrent_jobs", 2)),
         idle_timeout_seconds=_int_env("idle_timeout_seconds")

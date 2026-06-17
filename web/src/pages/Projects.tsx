@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -6,17 +6,20 @@ import {
   Flex,
   Heading,
   HStack,
+  IconButton,
+  Image,
+  Input,
   Spinner,
   Stack,
   Text,
 } from "@chakra-ui/react";
-import { LuChevronRight, LuFolderGit2 } from "react-icons/lu";
+import { LuPin, LuClock, LuSearch, LuX } from "react-icons/lu";
 
 import { Shell } from "../components/Shell";
-import { NewProjectComposer } from "../components/NewProjectComposer";
 import { StickyComposer } from "../components/StickyComposer";
+import { NewProjectComposer } from "../components/NewProjectComposer";
 import { SwipeableRow } from "../components/SwipeableRow";
-import { parseServerDate } from "../api/dates";
+import { relativeCardDate, parseServerDate } from "../api/dates";
 import { projectsApi } from "../api/projects";
 import { useQueryClient } from "@tanstack/react-query";
 import { projectsKey, useProjects } from "../hooks/useProjects";
@@ -36,6 +39,20 @@ export function ProjectsPage() {
     [jobs, tasks],
   );
 
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const displayed = useMemo(() => {
+    if (!searchQuery.trim()) return sorted;
+    const q = searchQuery.toLowerCase();
+    return sorted.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.path.toLowerCase().includes(q) ||
+        (p.instructions ?? "").toLowerCase().includes(q),
+    );
+  }, [sorted, searchQuery]);
+
   const handleDelete = async (p: ProjectOut) => {
     try {
       await projectsApi.remove(p.id);
@@ -49,37 +66,85 @@ export function ProjectsPage() {
   };
 
   return (
-    <Shell title="Projects" composerHeight={110}>
+    <Shell
+      title="Projects"
+      composerHeight={110}
+      right={
+        <IconButton
+          aria-label="Search"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setSearchOpen((v) => !v);
+            setSearchQuery("");
+          }}
+        >
+          {searchOpen ? <LuX /> : <LuSearch />}
+        </IconButton>
+      }
+    >
+      {/* Search bar */}
+      {searchOpen && (
+        <Box mb={4}>
+          <Input
+            autoFocus
+            placeholder="Search projects…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            size="sm"
+            rounded="lg"
+          />
+        </Box>
+      )}
+
       {isLoading && (
         <Center py={10}>
           <Spinner />
         </Center>
       )}
+
       {projects && projects.length === 0 && <EmptyProjectsHint />}
-      {sorted.length > 0 && (
-        <Stack gap={2} maxW="container.md">
-          {sorted.map((p) => (
-            <SwipeableRow
+
+      {/* Masonry 2-column grid using CSS columns */}
+      {displayed.length > 0 && (
+        <Box
+          css={{
+            columnCount: { base: 1, sm: 2, xl: 3 },
+            columnGap: "12px",
+          }}
+        >
+          {displayed.map((p) => (
+            <Box
               key={p.id}
-              disabled={p.is_default}
-              confirmMessage={`Delete project "${p.name}"? Tasks and jobs are removed too.`}
-              onDelete={() => handleDelete(p)}
+              css={{ breakInside: "avoid" }}
+              mb={3}
+              display="inline-block"
+              w="100%"
             >
-              <ProjectRow
-                project={p}
-                stats={stats[p.id] ?? emptyStats()}
-                onClick={() => navigate(`/projects/${p.id}`)}
-              />
-            </SwipeableRow>
+              <SwipeableRow
+                disabled={p.is_default}
+                confirmMessage={`Delete project "${p.name}"? Tasks and jobs are removed too.`}
+                onDelete={() => handleDelete(p)}
+              >
+                <ProjectCard
+                  project={p}
+                  stats={stats[p.id] ?? emptyStats()}
+                  onClick={() => navigate(`/projects/${p.id}`)}
+                />
+              </SwipeableRow>
+            </Box>
           ))}
-        </Stack>
+        </Box>
       )}
+
       <StickyComposer>
         <NewProjectComposer />
       </StickyComposer>
     </Shell>
   );
 }
+
+// ─── ProjectCard ─────────────────────────────────────────────────────────────
 
 interface ProjectStats {
   jobs: number;
@@ -94,6 +159,131 @@ const emptyStats = (): ProjectStats => ({
   tasksDone: 0,
   tasksTotal: 0,
 });
+
+function ProjectCard({
+  project,
+  stats,
+  onClick,
+}: {
+  project: ProjectOut;
+  stats: ProjectStats;
+  onClick: () => void;
+}) {
+  const hasCover = Boolean(project.cover_url);
+  const description = project.instructions?.trim() || project.path;
+
+  return (
+    <Flex
+      role="group"
+      direction="column"
+      bg="bg"
+      rounded="2xl"
+      overflow="hidden"
+      borderWidth="1px"
+      borderColor="border"
+      cursor="pointer"
+      onClick={onClick}
+      _hover={{ shadow: "md", transform: "translateY(-1px)" }}
+      transition="box-shadow 0.15s, transform 0.15s"
+    >
+      {/* Text block */}
+      <Box px={4} pt={3} pb={hasCover ? 2 : 3}>
+        {/* Timestamp row */}
+        <HStack gap={1.5} mb={1.5} color="fg.muted">
+          {project.is_default ? (
+            <Box lineHeight="0" fontSize="xs">
+              <LuPin />
+            </Box>
+          ) : (
+            <Box lineHeight="0" fontSize="xs">
+              <LuClock />
+            </Box>
+          )}
+          <Text fontSize="xs" color="fg.muted">
+            {project.is_default
+              ? "default"
+              : relativeCardDate(project.created_at)}
+          </Text>
+        </HStack>
+
+        {/* Title */}
+        <Text fontWeight="bold" fontSize="md" lineHeight="short" mb={1}>
+          {project.name}
+        </Text>
+
+        {/* Description — only when no cover; keep card compact with cover */}
+        {!hasCover && description && (
+          <Text
+            fontSize="sm"
+            color="fg.muted"
+            lineHeight="short"
+            css={{
+              display: "-webkit-box",
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {description}
+          </Text>
+        )}
+
+        {/* Stats row */}
+        {(stats.jobsRunning > 0 || stats.tasksTotal > 0 || stats.jobs > 0) && (
+          <HStack gap={3} mt={2} fontSize="xs" color="fg.subtle">
+            {stats.jobsRunning > 0 && (
+              <HStack gap={1}>
+                <Box boxSize="1.5" rounded="full" bg="blue.solid" />
+                <Text>{stats.jobsRunning} running</Text>
+              </HStack>
+            )}
+            {stats.tasksTotal > 0 && (
+              <Text>
+                {stats.tasksDone === stats.tasksTotal
+                  ? `${stats.tasksTotal} tasks`
+                  : `${stats.tasksDone}/${stats.tasksTotal} tasks`}
+              </Text>
+            )}
+            {stats.jobs > 0 && stats.jobsRunning === 0 && (
+              <Text>{stats.jobs} jobs</Text>
+            )}
+          </HStack>
+        )}
+      </Box>
+
+      {/* Cover image — full-bleed, no divider line. It recedes via a gentle
+          desaturate + an adaptive dim (the `bg` token, so it darkens in dark
+          mode and lightens in light mode); that tonal gap from the crisp text
+          is the separation. The image lifts to full color on hover. */}
+      {hasCover && (
+        <Box position="relative" flexShrink={0} overflow="hidden">
+          <Image
+            src={project.cover_url!}
+            w="full"
+            h="40"
+            objectFit="cover"
+            display="block"
+            opacity={0.5}
+            filter="saturate(0.1)"
+            transition="filter 0.2s"
+            _groupHover={{ filter: "saturate(1)" }}
+          />
+          <Box
+            position="absolute"
+            inset={0}
+            bg="bg"
+            opacity={0.3}
+            pointerEvents="none"
+            transition="opacity 0.2s"
+            _groupHover={{ opacity: 0.05 }}
+          />
+        </Box>
+      )}
+    </Flex>
+  );
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function indexStats(
   jobs: JobOut[],
@@ -116,9 +306,6 @@ function indexStats(
 }
 
 function sortProjects(projects: ProjectOut[]): ProjectOut[] {
-  // Default project pinned to the bottom; everything else newest-first by
-  // creation timestamp — matches the reverse-chronological feed convention
-  // used on Jobs (recent activity surfaces at the top).
   const user = projects
     .filter((p) => !p.is_default)
     .sort(
@@ -130,88 +317,6 @@ function sortProjects(projects: ProjectOut[]): ProjectOut[] {
   return [...user, ...system];
 }
 
-function ProjectRow({
-  project,
-  stats,
-  onClick,
-}: {
-  project: ProjectOut;
-  stats: ProjectStats;
-  onClick: () => void;
-}) {
-  return (
-    <Flex
-      bg="bg"
-      rounded="lg"
-      px={4}
-      py={3.5}
-      cursor="pointer"
-      align="center"
-      gap={3}
-      onClick={onClick}
-      _hover={{ bg: "bg.muted" }}
-      transition="background-color 0.15s"
-    >
-      <Box
-        boxSize="9"
-        rounded="md"
-        bg="bg.subtle"
-        borderWidth="1px"
-        borderColor="border.subtle"
-        display="flex"
-        alignItems="center"
-        justifyContent="center"
-        fontSize="md"
-        color="fg.muted"
-        flexShrink={0}
-      >
-        <LuFolderGit2 />
-      </Box>
-      <Stack gap={0.5} flex="1" minW={0}>
-        <Flex align="center" gap={2}>
-          <Text fontWeight="medium" lineHeight="short" truncate>
-            {project.name}
-          </Text>
-          {project.is_default && (
-            <Text
-              fontSize="2xs"
-              color="fg.muted"
-              textTransform="uppercase"
-              letterSpacing="wider"
-            >
-              default
-            </Text>
-          )}
-        </Flex>
-        <Text fontSize="xs" color="fg.subtle" fontFamily="mono" truncate>
-          {project.path}
-        </Text>
-      </Stack>
-      <HStack gap={3} fontSize="xs" color="fg.muted" flexShrink={0}>
-        {stats.jobsRunning > 0 && (
-          <HStack gap={1.5}>
-            <Box boxSize="2" rounded="full" bg="blue.solid" />
-            <Text>{stats.jobsRunning} running</Text>
-          </HStack>
-        )}
-        {stats.tasksTotal > 0 && (
-          <Text>
-            {stats.tasksDone === stats.tasksTotal
-              ? `${stats.tasksTotal} tasks`
-              : `${stats.tasksDone}/${stats.tasksTotal} tasks`}
-          </Text>
-        )}
-        {stats.jobs > 0 && stats.jobsRunning === 0 && (
-          <Text>{stats.jobs} jobs</Text>
-        )}
-        <Box color="fg.subtle" lineHeight="0">
-          <LuChevronRight />
-        </Box>
-      </HStack>
-    </Flex>
-  );
-}
-
 function EmptyProjectsHint() {
   return (
     <Center py={12}>
@@ -220,7 +325,7 @@ function EmptyProjectsHint() {
           No projects
         </Heading>
         <Text fontSize="sm" color="fg.subtle">
-          Pick a path from the composer below and add a project.
+          Tap the pencil button below to add your first project.
         </Text>
       </Stack>
     </Center>

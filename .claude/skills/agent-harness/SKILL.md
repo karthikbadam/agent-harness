@@ -51,27 +51,58 @@ All endpoints below are JSON in / JSON out unless noted. Base path `/api`.
 | Verb | Path | Body / Notes |
 | --- | --- | --- |
 | GET    | `/projects`              | list |
-| POST   | `/projects`              | `{name, path, permission_mode?, dangerously_skip?, extra_claude_args?, idle_timeout_seconds?, instructions?, skills?, context_paths?}` |
+| POST   | `/projects`              | `{name, path, permission_mode?, agent_provider?, dangerously_skip?, extra_claude_args?, idle_timeout_seconds?, instructions?, skills?, context_paths?}` |
 | GET    | `/projects/{id}`         | |
 | PATCH  | `/projects/{id}`         | any subset of the create fields |
 | DELETE | `/projects/{id}`         | cascades to jobs/rules |
 
 `permission_mode` ∈ `acceptEdits` (default) | `plan` | `default`.
+`agent_provider` ∈ `claude` (default) | `codex` | `auto` — see
+[Agent provider](#agent-provider).
 
 **Shared context fields** (additive; jobs in the project inherit them):
-- `instructions`: free-text rules synced into a managed block of
-  `<path>/CLAUDE.md` — Claude Code reads it natively.
+- `instructions`: free-text rules synced into a managed block of both
+  `<path>/CLAUDE.md` (Claude reads it) and `<path>/AGENTS.md` (Codex reads it),
+  so guidance reaches whichever provider runs.
 - `skills`: list of skill names auto-allowed for this project (each becomes
   `Skill(<name>)` in the allowlist, no permission prompt).
 - `context_paths`: extra reference paths listed in the managed CLAUDE.md
   block.
+
+### Agent provider
+
+`agent_provider` selects which agent runs the work: `claude` (default; Claude
+Code for every phase), `codex` (Codex CLI for every phase), or `auto` (Claude
+for the read-only **plan** phase, Codex for execute/integrate/ad-hoc). It's
+accepted on `POST/PATCH /projects`, `POST /jobs`, `POST/PATCH /tasks`, and
+`POST /projects/{pid}/plan`.
+
+Resolution is **per job**, frozen on the Job as `agent_provider` (`claude` |
+`codex`) at create time. Precedence: job override → task override → project
+default → `claude`. `GET /jobs/{id}` returns the resolved value, so to confirm
+what actually ran, read `job.agent_provider` (not the project setting). On
+`POST /plan`, the chosen provider is stamped on the plan task and propagated to
+every child task the planner drafts.
+
+Codex specifics worth knowing when driving it:
+- Requires the `codex` CLI; set `codex_path` in config.toml (launchd's PATH is
+  minimal — use an absolute path). A missing binary fails the job at spawn.
+- Codex gates via `--sandbox` (read-only for plan, workspace-write otherwise),
+  **not** the allowlist — `/allowlist` rules and `tool_blocked` retries are
+  Claude-only and have no effect on Codex jobs.
+- A Codex usage-limit / API error surfaces as a **failed** job (the CLI exits 0
+  but emits an `error`/`turn.failed` event, mapped to a non-zero turn). If a
+  `codex`/`auto` job fails fast with no real work, check the turn transcript for
+  a usage-limit message before assuming a harness bug; retrying on `claude`
+  (PATCH the task's `agent_provider`, then `POST /tasks/{id}/retry`) is the
+  usual workaround.
 
 ### Jobs
 
 | Verb | Path | Body / Notes |
 | --- | --- | --- |
 | GET    | `/jobs`                  | list, newest first |
-| POST   | `/jobs`                  | `{project_id, prompt, title?}` — turn 0 spawns immediately |
+| POST   | `/jobs`                  | `{project_id, prompt, title?, agent_provider?}` — turn 0 spawns immediately |
 | GET    | `/jobs/{id}`             | includes `turns[]` |
 | POST   | `/jobs/{id}/followup`    | `{prompt}` — re-attaches to the same Claude session |
 | POST   | `/jobs/{id}/stop`        | SIGTERM → SIGKILL after 5s |
@@ -116,7 +147,7 @@ Tasks **do not auto-run** when deps satisfy — you kick them with `POST /run`.
 
 | Verb | Path | Body / Notes |
 | --- | --- | --- |
-| POST   | `/projects/{pid}/tasks`     | `{title, prompt, depends_on?: [task_id], order_idx?}` |
+| POST   | `/projects/{pid}/tasks`     | `{title, prompt, depends_on?: [task_id], order_idx?, mode?, agent_provider?}` |
 | GET    | `/projects/{pid}/tasks`     | list with `status`, `depends_on`, `latest_outcome_id` |
 | GET    | `/tasks/{tid}`              | one task |
 | PATCH  | `/tasks/{tid}`              | edit `title`/`prompt`/`depends_on`/`order_idx`; confirms a planner draft (`pending` → `ready` if deps allow) |
@@ -130,7 +161,7 @@ Task `source` is `manual` (created via POST) or `planner` (drafted by `/plan`).
 
 | Verb | Path | Body / Notes |
 | --- | --- | --- |
-| POST   | `/projects/{pid}/plan`     | `{ask}` — runs a one-off claude job that emits a JSON task array; inserts drafts with `status=pending`, `source=planner`. Returns `{task_ids[], raw?, error?}`. |
+| POST   | `/projects/{pid}/plan`     | `{ask, agent_provider?}` — runs a one-off planner job that emits a JSON task array; inserts drafts with `status=pending`, `source=planner`. `agent_provider` is stamped on the plan task and propagated to the drafts. Returns `{task_ids[], raw?, error?}`. |
 
 The planning conversation is itself a regular job (visible under `/api/jobs`,
 streamed via SSE) — the endpoint returns once the job finishes.
@@ -211,8 +242,9 @@ curl -sS -X PATCH "$AH_BASE/api/projects/$PID" \
       }'
 ```
 
-The server writes a managed block into `<project.path>/CLAUDE.md` so Claude
-Code reads it natively; existing user content in CLAUDE.md outside the
+The server writes a managed block into `<project.path>/CLAUDE.md` (and mirrors
+it to `AGENTS.md` for Codex) so the agent reads it natively; existing user
+content in CLAUDE.md outside the
 fence is preserved.
 
 ### Decompose an ask into draft tasks
@@ -428,6 +460,12 @@ agent-harness serve                # start uvicorn in foreground (don't run if l
 default port. Don't run `serve` if `launchctl list | grep agent-harness`
 shows a running entry — you'll get `Address already in use`.
 
+There's no CLI to set arbitrary config keys; edit `~/.agent-harness/config.toml`
+directly (it's `0600`, flat top-level keys). Relevant agent-binary keys:
+`claude_path` / `default_claude_args` and `codex_path` / `default_codex_args`
+(only needed for `codex`/`auto` projects — set `codex_path` to an absolute path
+since launchd's PATH is minimal). Restart with `launchctl kickstart` to apply.
+
 ### Service lifecycle (macOS launchd)
 
 ```bash
@@ -445,7 +483,9 @@ When the user asks "why is X broken":
 
 1. `curl -sS $AH_BASE/healthz` — is the server up at all?
 2. `tail -n 200 ~/.agent-harness/logs/server.err.log` — most failure modes
-   surface here (claude not found, port collision, DB lock, runner crash).
+   surface here (claude/codex not found, port collision, DB lock, runner
+   crash). A `codex`/`auto` job that fails fast is often a Codex usage-limit —
+   check the turn transcript for an `error`/`turn.failed` message.
 3. `sqlite3 ~/.agent-harness/harness.db 'SELECT id,status,title,created_at FROM jobs ORDER BY created_at DESC LIMIT 10;'`
 4. `ls ~/.agent-harness/logs/jobs/<jid>/` — turn jsonl files; one per `claude -p` invocation.
 5. For a hung job, look up the PID from the DB:
