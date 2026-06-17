@@ -8,11 +8,19 @@ Single user, runs as a launchd service. Wraps
 `claude -p --output-format stream-json` and exposes a mobile-friendly web UI.
 
 Because the harness runs `claude` with shell access on your Mac under your
-Claude account, it is treated as a high-value target and **never listens on the
-LAN or the public internet**. It binds to `127.0.0.1` only; remote access goes
-through [Tailscale](https://tailscale.com) (a private WireGuard network), with
-HTTPS terminated by Tailscale Serve. Two independent factors guard it: an
-enrolled device on your tailnet, **and** the bearer token.
+Claude account, it is treated as a high-value target and **never touches the
+public internet** (Tailscale Serve, never Funnel). It binds to `127.0.0.1` by
+default; remote access goes through [Tailscale](https://tailscale.com) (a private
+WireGuard network), with HTTPS terminated by Tailscale Serve. Two independent
+factors guard it there: an enrolled device on your tailnet, **and** the bearer
+token.
+
+You can **also** serve it on your **LAN** by setting `host = "0.0.0.0"` (config
+or `AH_HOST`) — handy on a trusted home network and reachable at
+`http://<mac-lan-ip>:8765`. This drops the tailnet factor and runs over plaintext
+http, so the bearer token (carried by the same `/auth#token=…` flow, which still
+mints a session cookie over http) is the only thing guarding it. Only enable it
+on a network you trust; never port-forward it to the public internet.
 
 ```
 iPhone (Tailscale, anywhere)
@@ -264,9 +272,10 @@ replay shows the terminal state.
 auth_token = "..."                # set by `agent-harness gen-token`
 
 host = "127.0.0.1"                # default; loopback only. Tailscale Serve
-                                  # proxies the tailnet to this. Do NOT widen to
-                                  # 0.0.0.0 — that exposes an RCE-capable service
-                                  # to the LAN.
+                                  # proxies the tailnet to this. Set "0.0.0.0"
+                                  # to ALSO serve the LAN (trusted networks only;
+                                  # plaintext http — see Auth & transport). Never
+                                  # expose it to the public internet.
 claude_path = "/usr/local/bin/claude"   # optional; default is `which claude`
 default_claude_args = ["--model", "claude-opus-4-7"]  # appended to every claude job
 codex_path = "/usr/local/bin/codex"     # optional; default is `which codex`
@@ -284,9 +293,10 @@ log_retention_days = 30
 
 - **Bearer token** — scripts/curl/MCP send `Authorization: Bearer <token>`.
 - **Session cookie** — the browser exchanges the token once (`POST /api/session`)
-  for an `HttpOnly`, `Secure`, `SameSite=Strict` cookie. SSE/EventSource (which
-  can't set headers) authenticates with this cookie, so the token never appears
-  in a URL.
+  for an `HttpOnly`, `SameSite=Strict` cookie (`Secure` is set when the request
+  arrives over HTTPS, e.g. via Tailscale Serve; omitted on a plain-http LAN hop
+  so the same flow works there too). SSE/EventSource (which can't set headers)
+  authenticates with this cookie, so the token never appears in a URL.
 - **TLS** is terminated by Tailscale Serve at the tailnet edge; the loopback hop
   to uvicorn is plain HTTP on `127.0.0.1` (safe — it never leaves the machine).
   For end-to-end TLS instead, drop a cert at `~/.agent-harness/server.pem` +
