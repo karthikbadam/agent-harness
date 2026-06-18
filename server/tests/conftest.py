@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_harness import config, db
+from agent_harness import auth, config, db
 
 
 # Disable the MCP streamable-http mount in tests. Its anyio task-group
@@ -25,6 +25,7 @@ def ah_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("AH_HOME", str(home))
     config.reset_settings_cache()
     db.reset_engine()
+    auth.reset_throttle()
     yield home
     config.reset_settings_cache()
     db.reset_engine()

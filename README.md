@@ -1,20 +1,34 @@
 # agent-harness
 
 A self-hosted mobile harness for [Claude Code](https://docs.claude.com/) on
-macOS. Submit / monitor / manage jobs from your iPhone over your home WiFi,
-with live event streaming.
+macOS. Submit / monitor / manage jobs from your iPhone — from anywhere, not just
+home WiFi — with live event streaming.
 
-Single user, LAN-only, runs as a launchd service. Wraps
-`claude -p --output-format stream-json` and exposes a mobile-friendly web UI
-over plain HTTP.
+Single user, runs as a launchd service. Wraps
+`claude -p --output-format stream-json` and exposes a mobile-friendly web UI.
+
+Because the harness runs `claude` with shell access on your Mac under your
+Claude account, it is treated as a high-value target and **never touches the
+public internet** (Tailscale Serve, never Funnel). It binds to `127.0.0.1` by
+default; remote access goes through [Tailscale](https://tailscale.com) (a private
+WireGuard network), with HTTPS terminated by Tailscale Serve. Two independent
+factors guard it there: an enrolled device on your tailnet, **and** the bearer
+token.
+
+You can **also** serve it on your **LAN** by setting `host = "0.0.0.0"` (config
+or `AH_HOST`) — handy on a trusted home network and reachable at
+`http://<mac-lan-ip>:8765`. This drops the tailnet factor and runs over plaintext
+http, so the bearer token (carried by the same `/auth#token=…` flow, which still
+mints a session cookie over http) is the only thing guarding it. Only enable it
+on a network you trust; never port-forward it to the public internet.
 
 ```
-iPhone (Safari)
-       │  HTTP over LAN
+iPhone (Tailscale, anywhere)
+       │  HTTPS over WireGuard (tailnet only — no public exposure)
        ▼
-Mac:  ~/Library/LaunchAgents/com.you.agent-harness.plist
-       │
-       └── uvicorn + FastAPI + APScheduler
+Mac:  tailscale serve  ──►  127.0.0.1:8765
+       │                      (uvicorn + FastAPI + APScheduler)
+       └── ~/Library/LaunchAgents/com.you.agent-harness.plist
               │
               └── claude -p --output-format stream-json ...
                      │
@@ -47,14 +61,28 @@ If `claude` isn't on PATH after install, set `claude_path` in
 ## Quick start
 
 ```bash
+# One-time prerequisites:
+brew install uv                       # install script will check
+brew install tailscale                # or the Tailscale.app
+tailscale up                          # log in; do the same on your iPhone
+# In the Tailscale admin console, enable MagicDNS and HTTPS Certificates.
+
 git clone <repo> agent-harness
 cd agent-harness
-brew install uv              # one-time; install script will check
 ./scripts/install.sh
 ```
 
-The installer is idempotent — re-running it preserves your token. It prints a
-URL of the form `http://<lan-ip>:8765/auth?token=<x>` — open that on any device (same WiFi) and you're in.
+The installer is idempotent — re-running it preserves your token. It binds the
+service to `127.0.0.1`, runs `tailscale serve` to front it with tailnet-only
+HTTPS, and prints a URL of the form
+`https://<mac>.<tailnet>.ts.net/auth#token=<x>` — open that on any device on
+your tailnet (works beyond your WiFi) and you're in. The token rides in the URL
+*fragment* (`#`), so it never reaches the server or its logs; the page swaps it
+for an `HttpOnly` cookie and clears the URL.
+
+For the LAN route, the Mac App Store Tailscale CLI, enabling Serve, and the
+`tailscale serve --http=80` (no-certificate) option, see
+[docs/remote-access.md](docs/remote-access.md).
 
 ## Development
 
@@ -99,7 +127,8 @@ cd web && npm run gen:types:offline
 ## Walkthrough
 
 1. Run `./scripts/install.sh` once.
-2. Open the printed URL on your iPhone (same WiFi).
+2. Open the printed `https://<mac>.<tailnet>.ts.net/auth#token=…` URL on your
+   iPhone (with Tailscale connected — works on cellular or any network).
 3. Create a project pointing at your repo (Jobs page → "+" → New project).
 4. Submit a job: "build chapter 0 of the QFT book".
 5. Watch live `tool_use` / `tool_result` / `assistant_text` events stream into
@@ -246,6 +275,11 @@ replay shows the terminal state.
 ```toml
 auth_token = "..."                # set by `agent-harness gen-token`
 
+host = "127.0.0.1"                # default; loopback only. Tailscale Serve
+                                  # proxies the tailnet to this. Set "0.0.0.0"
+                                  # to ALSO serve the LAN (trusted networks only;
+                                  # plaintext http — see Auth & transport). Never
+                                  # expose it to the public internet.
 claude_path = "/usr/local/bin/claude"   # optional; default is `which claude`
 default_claude_args = ["--model", "claude-opus-4-7"]  # appended to every claude job
 codex_path = "/usr/local/bin/codex"     # optional; default is `which codex`
@@ -258,6 +292,19 @@ log_retention_days = 30
 `codex_path` / `default_codex_args` are only needed if any project uses the
 `codex` or `auto` provider. Note that launchd's PATH is minimal, so set
 `codex_path` to an absolute path (`which codex`) rather than relying on PATH.
+
+### Auth & transport
+
+- **Bearer token** — scripts/curl/MCP send `Authorization: Bearer <token>`.
+- **Session cookie** — the browser exchanges the token once (`POST /api/session`)
+  for an `HttpOnly`, `SameSite=Strict` cookie (`Secure` is set when the request
+  arrives over HTTPS, e.g. via Tailscale Serve; omitted on a plain-http LAN hop
+  so the same flow works there too). SSE/EventSource (which can't set headers)
+  authenticates with this cookie, so the token never appears in a URL.
+- **TLS** is terminated by Tailscale Serve at the tailnet edge; the loopback hop
+  to uvicorn is plain HTTP on `127.0.0.1` (safe — it never leaves the machine).
+  For end-to-end TLS instead, drop a cert at `~/.agent-harness/server.pem` +
+  `server-key.pem` and `agent-harness serve` will pick them up automatically.
 
 Per-project overrides (set via the API or Settings UI):
 - `agent_provider`: `claude` (default), `codex`, `auto` — see

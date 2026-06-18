@@ -52,7 +52,9 @@ async def test_stream_replays_persisted_events(app_client) -> None:
     jid = r.json()["id"]
     await app.state.job_manager.wait(jid)
 
-    async with client.stream("GET", f"/api/jobs/{jid}/stream?token=T") as resp:
+    async with client.stream(
+        "GET", f"/api/jobs/{jid}/stream", headers={"Authorization": "Bearer T"}
+    ) as resp:
         assert resp.status_code == 200
         buf = ""
         events: list[dict] = []
@@ -82,7 +84,11 @@ async def test_stream_honors_last_event_id_query(app_client) -> None:
     jid = r.json()["id"]
     await app.state.job_manager.wait(jid)
 
-    async with client.stream("GET", f"/api/jobs/{jid}/stream?token=T&last_event_id=4") as resp:
+    async with client.stream(
+        "GET",
+        f"/api/jobs/{jid}/stream?last_event_id=4",
+        headers={"Authorization": "Bearer T"},
+    ) as resp:
         buf = ""
         events: list[dict] = []
         async for chunk in resp.aiter_text():
@@ -96,7 +102,7 @@ async def test_stream_honors_last_event_id_query(app_client) -> None:
 
 async def test_stream_404_for_unknown_job(app_client) -> None:
     client, _ = app_client
-    r = await client.get("/api/jobs/nope/stream?token=T")
+    r = await client.get("/api/jobs/nope/stream", headers={"Authorization": "Bearer T"})
     assert r.status_code == 404
 
 
