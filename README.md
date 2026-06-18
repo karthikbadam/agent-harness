@@ -80,6 +80,10 @@ your tailnet (works beyond your WiFi) and you're in. The token rides in the URL
 *fragment* (`#`), so it never reaches the server or its logs; the page swaps it
 for an `HttpOnly` cookie and clears the URL.
 
+For the LAN route, the Mac App Store Tailscale CLI, enabling Serve, and the
+`tailscale serve --http=80` (no-certificate) option, see
+[docs/remote-access.md](docs/remote-access.md).
+
 ## Development
 
 ```bash
